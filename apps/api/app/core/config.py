@@ -51,6 +51,13 @@ class Settings(BaseSettings):
     momo_return_url: str = "http://localhost:3000/checkout/result"
     momo_ipn_url: str = "http://localhost:8000/api/v1/payments/momo/webhook"
 
+    # Cấu hình Thanh toán Chuyển khoản VietQR (Napas 247)
+    vietqr_bank_id: str = "MB"
+    vietqr_account_number: str = "0901234567"
+    vietqr_account_holder: str = "NHA THUOC PHARMATRUST"
+    vietqr_webhook_secret: str = "h4care_vietqr_secret_2026"
+    payment_expiry_minutes: int = 30
+
     # Cấu hình Dịch vụ Gửi Email thật qua Gmail SMTP
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587

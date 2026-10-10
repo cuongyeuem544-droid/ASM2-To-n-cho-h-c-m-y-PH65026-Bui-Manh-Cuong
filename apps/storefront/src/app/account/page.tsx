@@ -30,10 +30,13 @@ import {
   PhoneCall,
   RotateCcw,
   RefreshCw,
+  Banknote,
+  QrCode,
 } from "lucide-react";
 import { CustomerAddressBook } from "@/components/account/CustomerAddressBook";
 import { CustomerReturnsSection } from "@/components/returns/CustomerReturnsSection";
 import { ReturnWizardModal } from "@/components/returns/ReturnWizardModal";
+import VietQrPaymentModal from "@/components/checkout/VietQrPaymentModal";
 
 interface CustomerOrder {
   id: number;
@@ -63,6 +66,24 @@ export default function AccountPage() {
 
   // Modal states
   const [selectedOrder, setSelectedOrder] = useState<CustomerOrder | null>(null);
+  const [orderPaymentData, setOrderPaymentData] = useState<any | null>(null);
+  const [loadingPaymentData, setLoadingPaymentData] = useState<boolean>(false);
+  const [vietQrModal, setVietQrModal] = useState<{
+    isOpen: boolean;
+    orderCode: string;
+    amount: number;
+    customerName: string;
+  } | null>(null);
+  const [momoModal, setMomoModal] = useState<{
+    isOpen: boolean;
+    orderCode: string;
+    amount: number;
+    payUrl?: string;
+    qrCodeUrl?: string;
+    status: string;
+  } | null>(null);
+  const [isSwitchingCod, setIsSwitchingCod] = useState<boolean>(false);
+  const [isCancellingOrder, setIsCancellingOrder] = useState<boolean>(false);
   const [returnWizardOrderCode, setReturnWizardOrderCode] = useState<string | null>(null);
   const [isEditingProfile, setIsEditingProfile] = useState<boolean>(false);
   const [editName, setEditName] = useState<string>("");
@@ -84,7 +105,7 @@ export default function AccountPage() {
   }, [user]);
 
   // Load customer-specific orders isolated by phone number
-  useEffect(() => {
+  const reloadOrders = () => {
     if (user?.phone) {
       setLoadingOrders(true);
       fetch(`http://localhost:8000/api/v1/store/orders/customer/${encodeURIComponent(user.phone)}`)
@@ -95,7 +116,125 @@ export default function AccountPage() {
         .catch(() => setOrders([]))
         .finally(() => setLoadingOrders(false));
     }
+  };
+
+  useEffect(() => {
+    reloadOrders();
   }, [user?.phone]);
+
+  // Load live payment data when selectedOrder is opened
+  useEffect(() => {
+    if (selectedOrder?.order_code) {
+      setLoadingPaymentData(true);
+      fetch(`/api/v1/payments/orders/${selectedOrder.order_code}/status`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => setOrderPaymentData(data))
+        .catch(() => setOrderPaymentData(null))
+        .finally(() => setLoadingPaymentData(false));
+    } else {
+      setOrderPaymentData(null);
+    }
+  }, [selectedOrder?.order_code]);
+
+  const handleSwitchToCod = async (orderCode: string) => {
+    setIsSwitchingCod(true);
+    try {
+      const res = await fetch("/api/v1/payments/retry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          order_code: orderCode,
+          new_payment_method: "COD",
+        }),
+      });
+      if (res.ok) {
+        reloadOrders();
+        const pRes = await fetch(`/api/v1/payments/orders/${orderCode}/status`);
+        if (pRes.ok) {
+          const freshPayment = await pRes.json();
+          setOrderPaymentData(freshPayment);
+          if (selectedOrder) {
+            setSelectedOrder({
+              ...selectedOrder,
+              payment_method: "COD",
+              payment_status: freshPayment.payment_status,
+            });
+          }
+        }
+      } else {
+        const err = await res.json();
+        alert(err.detail || "Không thể chuyển phương thức thanh toán.");
+      }
+    } catch (e: any) {
+      alert("Lỗi khi kết nối: " + (e.message || "Unknown"));
+    } finally {
+      setIsSwitchingCod(false);
+    }
+  };
+
+  const handleCancelOrder = async (orderCode: string) => {
+    if (!confirm("Bạn có chắc chắn muốn hủy đơn hàng này không? Tồn kho thuốc sẽ được giải phóng ngay lập tức.")) return;
+    setIsCancellingOrder(true);
+    try {
+      const res = await fetch(`/api/v1/payments/orders/${orderCode}/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "Khách hàng yêu cầu hủy đơn qua trang Tài khoản" }),
+      });
+      if (res.ok) {
+        reloadOrders();
+        if (selectedOrder) {
+          setSelectedOrder({ ...selectedOrder, order_status: "CANCELLED" });
+        }
+      } else {
+        const err = await res.json();
+        alert(err.detail || "Không thể hủy đơn hàng.");
+      }
+    } catch (e: any) {
+      alert("Lỗi khi kết nối: " + (e.message || "Unknown"));
+    } finally {
+      setIsCancellingOrder(false);
+    }
+  };
+
+  const handleOpenVietQr = (orderCode: string, amount: number) => {
+    setVietQrModal({
+      isOpen: true,
+      orderCode,
+      amount,
+      customerName: user?.fullName || "",
+    });
+  };
+
+  const handleOpenMomo = async (orderCode: string, amount: number) => {
+    try {
+      const returnUrl = typeof window !== "undefined" ? `${window.location.origin}/checkout/result` : "";
+      const res = await fetch("/api/v1/payments/momo/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          order_code: orderCode,
+          return_url: returnUrl,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setMomoModal({
+          isOpen: true,
+          orderCode,
+          amount,
+          payUrl: data.pay_url,
+          qrCodeUrl: data.qr_code_url,
+          status: "PENDING",
+        });
+      } else {
+        const err = await res.json();
+        alert(err.detail || "Không thể khởi tạo thanh toán MoMo");
+      }
+    } catch (e: any) {
+      alert("Lỗi kết nối MoMo: " + (e.message || "Unknown"));
+    }
+  };
 
   if (isLoading) {
     return (
@@ -540,7 +679,7 @@ export default function AccountPage() {
             </div>
 
             {/* Shipping address & buyer */}
-            <div className="p-3.5 bg-slate-50 border border-slate-200/70 rounded-xl mb-4 text-xs space-y-1">
+            <div className="p-3.5 bg-slate-50 border border-slate-200/70 rounded-xl mb-4 text-xs space-y-1.5">
               <p className="text-slate-700">
                 <strong>Người nhận:</strong> {selectedOrder.customer_name} ({selectedOrder.customer_phone})
               </p>
@@ -548,9 +687,117 @@ export default function AccountPage() {
                 <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
                 <span><strong>Địa chỉ giao:</strong> {selectedOrder.shipping_address}</span>
               </p>
-              <p className="text-slate-500">
-                <strong>Thanh toán:</strong> {selectedOrder.payment_method === "COD" ? "Thanh toán khi nhận hàng (COD)" : selectedOrder.payment_method}
-              </p>
+              <div className="flex items-center justify-between pt-1 border-t border-slate-200/60">
+                <span className="text-slate-500">
+                  <strong>Thanh toán:</strong> {selectedOrder.payment_method === "COD" ? "Thanh toán khi nhận hàng (COD)" : selectedOrder.payment_method}
+                </span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                  selectedOrder.payment_status === "PAID"
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    : selectedOrder.payment_status === "FAILED"
+                    ? "bg-rose-50 text-rose-700 border-rose-200"
+                    : selectedOrder.payment_status === "REFUNDED"
+                    ? "bg-purple-50 text-purple-700 border-purple-200"
+                    : "bg-amber-50 text-amber-700 border-amber-200"
+                }`}>
+                  {selectedOrder.payment_status === "PAID"
+                    ? "ĐÃ THANH TOÁN (PAID)"
+                    : selectedOrder.payment_status === "FAILED"
+                    ? "THANH TOÁN THẤT BẠI"
+                    : selectedOrder.payment_status === "REFUNDED"
+                    ? "ĐÃ HOÀN TIỀN"
+                    : "CHỜ THANH TOÁN (PENDING)"}
+                </span>
+              </div>
+            </div>
+
+            {/* Payment Transactions & Retry Box */}
+            <div className="p-3.5 bg-blue-50/50 border border-blue-200/70 rounded-xl mb-4 text-xs space-y-2">
+              <div className="flex items-center justify-between text-blue-900 font-bold">
+                <span className="flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-brand-blue-600" />
+                  <span>Lịch sử giao dịch & Cổng thanh toán</span>
+                </span>
+                {loadingPaymentData && <RefreshCw className="w-3.5 h-3.5 animate-spin text-slate-400" />}
+              </div>
+
+              {orderPaymentData?.transactions && orderPaymentData.transactions.length > 0 ? (
+                <div className="space-y-1.5 divide-y divide-blue-100 max-h-32 overflow-y-auto pr-1">
+                  {orderPaymentData.transactions.map((t: any) => (
+                    <div key={t.id} className="pt-1.5 flex items-center justify-between text-[11px]">
+                      <div>
+                        <span className="font-mono font-bold text-slate-800">{t.transaction_code}</span>
+                        <span className="text-slate-400 block text-[10px]">
+                          Cổng: {t.provider} • {t.created_at ? new Date(t.created_at).toLocaleString("vi-VN") : ""}
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <span className="font-bold text-slate-900">{Number(t.amount).toLocaleString("vi-VN")} đ</span>
+                        <span className={`block text-[10px] font-bold ${
+                          t.status === "SUCCESS"
+                            ? "text-emerald-600"
+                            : t.status === "FAILED"
+                            ? "text-rose-600"
+                            : t.status === "CANCELLED"
+                            ? "text-slate-400"
+                            : "text-amber-600"
+                        }`}>
+                          {t.status}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[11px] text-slate-500">Chưa ghi nhận lịch sử giao dịch trực tuyến.</p>
+              )}
+
+              {/* Retry & Payment Options if Order is still PENDING */}
+              {selectedOrder.payment_status !== "PAID" && selectedOrder.order_status !== "CANCELLED" && (
+                <div className="pt-2 border-t border-blue-200/60 space-y-2">
+                  <span className="text-[11px] font-bold text-slate-700 block">Thanh toán hoặc đổi phương thức:</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenVietQr(selectedOrder.order_code, selectedOrder.total_amount)}
+                      className="py-2 px-2.5 rounded-lg bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 font-bold text-[11px] flex items-center justify-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+                    >
+                      <QrCode className="w-3.5 h-3.5 text-brand-blue-600" />
+                      <span>Quét VietQR</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleOpenMomo(selectedOrder.order_code, selectedOrder.total_amount)}
+                      className="py-2 px-2.5 rounded-lg bg-pink-50 hover:bg-pink-100 border border-pink-200 text-pink-800 font-bold text-[11px] flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <span className="w-3.5 h-3.5 rounded-full bg-[#a50064] text-white flex items-center justify-center text-[8px] font-bold">M</span>
+                      <span>Ví MoMo</span>
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      disabled={isSwitchingCod}
+                      onClick={() => handleSwitchToCod(selectedOrder.order_code)}
+                      className="flex-1 py-1.5 px-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10.5px] font-bold flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                    >
+                      <Banknote className="w-3 h-3 text-emerald-600" />
+                      <span>{isSwitchingCod ? "Đang đổi..." : "Chuyển sang trả khi nhận (COD)"}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isCancellingOrder}
+                      onClick={() => handleCancelOrder(selectedOrder.order_code)}
+                      className="py-1.5 px-2 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[10.5px] font-bold transition-colors cursor-pointer"
+                    >
+                      {isCancellingOrder ? "Đang hủy..." : "Hủy đơn & trả kho"}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Items Breakdown */}
@@ -705,6 +952,133 @@ export default function AccountPage() {
             window.location.hash = "returns";
           }}
         />
+      )}
+
+      {/* VietQR Payment Modal */}
+      {vietQrModal && (
+        <VietQrPaymentModal
+          isOpen={vietQrModal.isOpen}
+          orderCode={vietQrModal.orderCode}
+          amount={vietQrModal.amount}
+          customerName={vietQrModal.customerName}
+          onClose={() => {
+            setVietQrModal(null);
+            reloadOrders();
+          }}
+          onConfirmPaid={() => {
+            setVietQrModal(null);
+            reloadOrders();
+            if (selectedOrder) {
+              setSelectedOrder({ ...selectedOrder, payment_status: "PAID" });
+            }
+          }}
+        />
+      )}
+
+      {/* MoMo Sandbox Modal */}
+      {momoModal?.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-md w-full overflow-hidden shadow-2xl border border-slate-200">
+            <div className="bg-gradient-to-r from-[#a50064] to-[#d82d8b] text-white p-5 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-full bg-white text-[#a50064] flex items-center justify-center font-black text-sm">
+                  M
+                </div>
+                <div>
+                  <h3 className="font-bold text-base leading-tight">Cổng thanh toán MoMo Sandbox</h3>
+                  <p className="text-[11px] text-pink-100 font-mono">Đơn hàng: {momoModal.orderCode}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMomoModal(null)}
+                className="text-white/80 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 text-center space-y-4">
+              <div className="space-y-1">
+                <span className="text-xs text-slate-500">Số tiền cần thanh toán</span>
+                <p className="text-2xl font-black text-slate-900 font-mono">
+                  {momoModal.amount.toLocaleString("vi-VN")} đ
+                </p>
+              </div>
+
+              {momoModal.status === "PAID" ? (
+                <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-200 text-emerald-800 space-y-2">
+                  <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
+                    <CheckCircle2 className="w-7 h-7" />
+                  </div>
+                  <p className="font-bold text-sm">Thanh toán MoMo thành công!</p>
+                  <p className="text-xs text-emerald-600">Đơn hàng đã được chuyển sang trạng thái ĐÃ THANH TOÁN.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="w-48 h-48 mx-auto p-2 bg-white rounded-2xl border-2 border-dashed border-pink-300 flex items-center justify-center shadow-xs">
+                    {momoModal.qrCodeUrl ? (
+                      <img src={momoModal.qrCodeUrl} alt="MoMo QR" className="w-full h-full object-contain" />
+                    ) : (
+                      <div className="text-center p-3 text-slate-400 text-xs">Đang nạp mã MoMo...</div>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-500">Mở ứng dụng MoMo và quét mã để thanh toán thử nghiệm</p>
+                </div>
+              )}
+
+              <div className="pt-2 flex flex-col gap-2">
+                {momoModal.payUrl && momoModal.status === "PENDING" && (
+                  <a
+                    href={momoModal.payUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-2.5 px-4 rounded-xl bg-[#a50064] hover:bg-[#850050] text-white font-bold text-xs shadow-xs transition-colors flex items-center justify-center gap-1.5"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    <span>Mở cổng MoMo Sandbox Web</span>
+                  </a>
+                )}
+
+                {momoModal.status === "PENDING" && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const sRes = await fetch("/api/v1/payments/momo/simulate", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ order_code: momoModal.orderCode, success: true }),
+                        });
+                        if (sRes.ok) {
+                          setMomoModal((prev) => prev ? { ...prev, status: "PAID" } : null);
+                          reloadOrders();
+                          if (selectedOrder) {
+                            setSelectedOrder({ ...selectedOrder, payment_status: "PAID" });
+                          }
+                        }
+                      } catch (e) {
+                        console.error(e);
+                      }
+                    }}
+                    className="w-full py-2.5 px-4 rounded-xl border-2 border-emerald-500 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    <span>[TEST] Giả lập quét MoMo thành công</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setMomoModal(null)}
+                  className="w-full py-2.5 px-4 rounded-xl border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50 transition-colors cursor-pointer"
+                >
+                  Đóng
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       <Footer />

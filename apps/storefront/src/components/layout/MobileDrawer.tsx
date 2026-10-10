@@ -17,6 +17,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { PHARMACY_CONTACT } from "@/lib/constants";
 
 interface MobileDrawerProps {
   isOpen: boolean;
@@ -74,13 +75,13 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ isOpen, onClose }) =
                   <Stethoscope className="w-5 h-5" />
                 </div>
                 <div>
-                  <p className="text-xs font-bold text-brand-blue-950">Tư vấn Dược sĩ 24/7</p>
+                  <p className="text-xs font-bold text-brand-blue-950">Tư vấn Dược sĩ chuyên môn</p>
                   <a
-                    href="tel:18006868"
+                    href={`tel:${PHARMACY_CONTACT.consultationPhone}`}
                     className="text-sm font-extrabold text-brand-blue-600 flex items-center gap-1 hover:underline"
                   >
                     <PhoneCall className="w-3.5 h-3.5" />
-                    <span>1800 6868 (Miễn phí)</span>
+                    <span>{PHARMACY_CONTACT.consultationPhoneDisplay}</span>
                   </a>
                 </div>
               </div>

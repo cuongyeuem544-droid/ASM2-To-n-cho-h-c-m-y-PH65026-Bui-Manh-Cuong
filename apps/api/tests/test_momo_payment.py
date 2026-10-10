@@ -1,6 +1,10 @@
+import os
 import random
+import sys
 import time
 import unittest
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from decimal import Decimal
 from fastapi.testclient import TestClient
 
@@ -27,11 +31,18 @@ from app.services.momo_service import MomoPaymentService
 class TestMomoPaymentSuite(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        Base.metadata.create_all(bind=engine)
+        from tests.test_db_config import setup_isolated_test_db, TestSessionLocal
+        setup_isolated_test_db()
+        cls.SessionClass = TestSessionLocal
+
+    @classmethod
+    def tearDownClass(cls):
+        from tests.test_db_config import teardown_isolated_test_db
+        teardown_isolated_test_db()
 
     def setUp(self):
         self.client = TestClient(app)
-        self.db = SessionLocal()
+        self.db = self.SessionClass()
 
         # Tạo kho hàng nếu chưa có
         self.wh = self.db.query(Warehouse).filter_by(code="KHO-HCM-01").first()
@@ -135,10 +146,23 @@ class TestMomoPaymentSuite(unittest.TestCase):
 
     def tearDown(self):
         try:
-            self.db.rollback()
+            if hasattr(self, "order") and self.order:
+                self.db.query(OrderItem).filter_by(order_id=self.order.id).delete()
+                self.db.query(PaymentTransaction).filter_by(order_id=self.order.id).delete()
+                self.db.delete(self.order)
+            if hasattr(self, "stock") and self.stock:
+                self.db.delete(self.stock)
+            if hasattr(self, "batch") and self.batch:
+                self.db.delete(self.batch)
+            if hasattr(self, "sku") and self.sku:
+                self.db.delete(self.sku)
+            if hasattr(self, "prod") and self.prod:
+                self.db.delete(self.prod)
+            self.db.commit()
         except Exception:
-            pass
-        self.db.close()
+            self.db.rollback()
+        finally:
+            self.db.close()
 
     def test_01_signature_generation(self):
         """Kiểm tra độ chính xác của thuật toán chữ ký số HMAC-SHA256."""

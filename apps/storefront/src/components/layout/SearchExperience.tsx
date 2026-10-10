@@ -2,8 +2,20 @@
 
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { Search, X, Clock, TrendingUp, Sparkles, ArrowRight, ShieldCheck, AlertCircle } from "lucide-react";
-import { RECENT_SEARCHES, TRENDING_KEYWORDS } from "@/data/mockData";
+import {
+  Search,
+  X,
+  Clock,
+  TrendingUp,
+  Sparkles,
+  ArrowRight,
+  ShieldCheck,
+  AlertCircle,
+  Loader2,
+  CheckCircle2,
+  Pill,
+} from "lucide-react";
+import { TRENDING_KEYWORDS } from "@/data/mockData";
 import { PRODUCTS_DATA } from "@/data/products";
 import { Product } from "@/types";
 import { formatVND } from "@/lib/utils";
@@ -16,6 +28,8 @@ interface SearchExperienceProps {
   onCloseMobileModal?: () => void;
 }
 
+const RECENT_KEY = "h4care_recent_searches";
+
 export const SearchExperience: React.FC<SearchExperienceProps> = ({
   onSearchSubmit,
   className = "",
@@ -25,32 +39,101 @@ export const SearchExperience: React.FC<SearchExperienceProps> = ({
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [isOpen, setIsOpen] = useState(false);
-  const [recentSearches, setRecentSearches] = useState<string[]>(RECENT_SEARCHES);
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  const [liveResults, setLiveResults] = useState<Product[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [totalFound, setTotalFound] = useState(0);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Load recent searches from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(RECENT_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setRecentSearches(parsed.slice(0, 6));
+          return;
+        }
+      }
+    } catch {}
+    setRecentSearches(["Panadol Extra", "Efferalgan 500mg", "Berocca", "Vitamin C DHG"]);
+  }, []);
+
+  const saveRecentSearch = (kw: string) => {
+    const trimmed = kw.trim();
+    if (!trimmed) return;
+    setRecentSearches((prev) => {
+      const updated = [trimmed, ...prev.filter((item) => item.toLowerCase() !== trimmed.toLowerCase())].slice(0, 6);
+      try {
+        localStorage.setItem(RECENT_KEY, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  };
 
   // Debounced search query
   const [debouncedQuery, setDebouncedQuery] = useState("");
   useEffect(() => {
     const timer = setTimeout(() => {
-      setDebouncedQuery(query.trim().toLowerCase());
-    }, 250);
+      setDebouncedQuery(query.trim());
+    }, 220);
     return () => clearTimeout(timer);
   }, [query]);
 
-  // Live filter products based on query
-  const liveResults: Product[] = useMemo(() => {
-    if (!debouncedQuery) return [];
-    return PRODUCTS_DATA.filter((p) => {
-      const q = debouncedQuery;
-      return (
-        p.name.toLowerCase().includes(q) ||
-        p.brand.toLowerCase().includes(q) ||
-        p.activeIngredient.toLowerCase().includes(q) ||
-        p.categoryName.toLowerCase().includes(q) ||
-        p.usage.toLowerCase().includes(q)
-      );
-    }).slice(0, 4);
+  // Live fetch from FastAPI /api/v1/store/products with fallback to local catalog
+  useEffect(() => {
+    if (!debouncedQuery || debouncedQuery.length < 2) {
+      setLiveResults([]);
+      setTotalFound(0);
+      setIsLoading(false);
+      return;
+    }
+
+    let isMounted = true;
+    setIsLoading(true);
+
+    fetch(`/api/v1/store/products?search=${encodeURIComponent(debouncedQuery)}&limit=6&prescriptionType=all`)
+      .then((res) => {
+        if (!res.ok) throw new Error("Search API error");
+        return res.json();
+      })
+      .then((data) => {
+        if (!isMounted) return;
+        if (data && Array.isArray(data.items)) {
+          setLiveResults(data.items);
+          setTotalFound(data.total || data.items.length);
+        } else {
+          setLiveResults([]);
+          setTotalFound(0);
+        }
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        // Offline / fallback to built-in PRODUCTS_DATA
+        const q = debouncedQuery.toLowerCase();
+        const matches = PRODUCTS_DATA.filter((p) => {
+          return (
+            p.name.toLowerCase().includes(q) ||
+            p.brand.toLowerCase().includes(q) ||
+            p.activeIngredient.toLowerCase().includes(q) ||
+            p.categoryName.toLowerCase().includes(q) ||
+            p.usage.toLowerCase().includes(q) ||
+            p.indications.toLowerCase().includes(q)
+          );
+        });
+        setLiveResults(matches.slice(0, 6));
+        setTotalFound(matches.length);
+      })
+      .finally(() => {
+        if (isMounted) setIsLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
   }, [debouncedQuery]);
 
   // Close when clicking outside or pressing Escape
@@ -81,23 +164,23 @@ export const SearchExperience: React.FC<SearchExperienceProps> = ({
   }, [isMobileModal, onCloseMobileModal]);
 
   const handleSelectKeyword = (kw: string) => {
+    saveRecentSearch(kw);
     setQuery(kw);
-    if (!recentSearches.includes(kw)) {
-      setRecentSearches((prev) => [kw, ...prev.slice(0, 4)]);
-    }
     if (onSearchSubmit) onSearchSubmit(kw);
     setIsOpen(false);
     if (onCloseMobileModal) onCloseMobileModal();
-    router.push(`/products?search=${encodeURIComponent(kw)}`);
+    router.push(`/products?search=${encodeURIComponent(kw.trim())}`);
   };
 
   const handleKeyDownInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && query.trim()) {
+      e.preventDefault();
       handleSelectKeyword(query.trim());
     }
   };
 
   const handleSelectProduct = (product: Product) => {
+    saveRecentSearch(product.name);
     setIsOpen(false);
     if (onCloseMobileModal) onCloseMobileModal();
     router.push(`/product/${product.slug}`);
@@ -105,12 +188,21 @@ export const SearchExperience: React.FC<SearchExperienceProps> = ({
 
   const removeRecent = (e: React.MouseEvent, index: number) => {
     e.stopPropagation();
-    setRecentSearches((prev) => prev.filter((_, i) => i !== index));
+    setRecentSearches((prev) => {
+      const updated = prev.filter((_, i) => i !== index);
+      try {
+        localStorage.setItem(RECENT_KEY, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
   };
 
   const clearAllRecent = (e: React.MouseEvent) => {
     e.stopPropagation();
     setRecentSearches([]);
+    try {
+      localStorage.removeItem(RECENT_KEY);
+    } catch {}
   };
 
   return (
@@ -124,11 +216,15 @@ export const SearchExperience: React.FC<SearchExperienceProps> = ({
         }`}
       >
         <div className="pl-4 pr-2 text-slate-400">
-          <Search
-            className={`w-4 h-4 transition-colors duration-150 ${
-              isOpen ? "text-brand-blue-600" : ""
-            }`}
-          />
+          {isLoading ? (
+            <Loader2 className="w-4 h-4 text-brand-blue-600 animate-spin" />
+          ) : (
+            <Search
+              className={`w-4 h-4 transition-colors duration-150 ${
+                isOpen ? "text-brand-blue-600" : ""
+              }`}
+            />
+          )}
         </div>
 
         <input
@@ -146,16 +242,26 @@ export const SearchExperience: React.FC<SearchExperienceProps> = ({
         />
 
         {query ? (
-          <button
-            type="button"
-            onClick={() => {
-              setQuery("");
-              inputRef.current?.focus();
-            }}
-            className="p-1 mr-2 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-200/60 transition-colors"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
+          <div className="flex items-center gap-1 mr-2">
+            <button
+              type="button"
+              onClick={() => {
+                setQuery("");
+                inputRef.current?.focus();
+              }}
+              className="p-1 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-200/60 transition-colors"
+              title="Xóa từ khóa"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSelectKeyword(query.trim())}
+              className="px-2.5 py-1 bg-brand-blue-600 hover:bg-brand-blue-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1 active:scale-95"
+            >
+              <span>Tìm</span>
+            </button>
+          </div>
         ) : (
           <div className="hidden sm:flex items-center gap-1 mr-3 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-200/70 text-slate-500 border border-slate-300/50">
             <span>Enter</span>
@@ -178,40 +284,48 @@ export const SearchExperience: React.FC<SearchExperienceProps> = ({
           >
             <div className="p-4 divide-y divide-slate-100 bg-white">
               {/* 1. Live Search Results if typing */}
-              {debouncedQuery ? (
+              {debouncedQuery.length >= 2 ? (
                 <div className="pb-3 bg-white">
                   <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-600 uppercase tracking-wider">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 uppercase tracking-wider">
                       <Search className="w-3.5 h-3.5 text-brand-blue-600" />
-                      <span>Kết quả tìm kiếm cho &ldquo;{query}&rdquo;</span>
+                      <span>Kết quả tìm kiếm cho &ldquo;{debouncedQuery}&rdquo;</span>
                     </div>
-                    <span className="text-[11px] font-bold text-brand-blue-600 bg-brand-blue-50 px-2 py-0.5 rounded-full border border-brand-blue-100">
-                      {liveResults.length} sản phẩm
-                    </span>
+                    {isLoading ? (
+                      <span className="text-[11px] font-semibold text-slate-400 flex items-center gap-1">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        Đang tra cứu...
+                      </span>
+                    ) : (
+                      <span className="text-[11px] font-bold text-brand-blue-700 bg-brand-blue-50 px-2 py-0.5 rounded-full border border-brand-blue-100">
+                        {totalFound} sản phẩm
+                      </span>
+                    )}
                   </div>
 
                   {liveResults.length > 0 ? (
                     <div className="space-y-2">
                       {liveResults.map((prod) => {
-                        const safeBrand = !prod.brand || prod.brand.includes("{") || prod.brand.includes('"') || prod.brand.length > 40
-                          ? "Dược Phẩm Chính Hãng"
-                          : prod.brand;
+                        const safeBrand =
+                          !prod.brand || prod.brand.includes("{") || prod.brand.includes('"') || prod.brand.length > 40
+                            ? "Dược Phẩm Chính Hãng"
+                            : prod.brand;
                         return (
                           <div
                             key={prod.id}
                             onClick={() => handleSelectProduct(prod)}
-                            className="flex items-center gap-3 p-3 rounded-xl border border-slate-200/90 bg-white hover:border-brand-blue-400 hover:bg-brand-blue-50/50 cursor-pointer transition-all duration-150 group shadow-xs"
+                            className="flex items-center gap-3 p-3 rounded-xl border border-slate-200/90 bg-white hover:border-brand-blue-400 hover:bg-brand-blue-50/40 cursor-pointer transition-all duration-150 group shadow-xs"
                           >
                             <div className="w-12 h-12 rounded-lg bg-slate-50 border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center p-1">
                               <img
-                                src={prod.images[0]}
+                                src={prod.images?.[0] || prod.thumbnail || "/images/medicines/panadol.jpg"}
                                 alt={prod.name}
-                                className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-200"
+                                className="w-full h-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-200"
                               />
                             </div>
                             <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-1.5 mb-1">
-                                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider truncate max-w-[160px] inline-block">
+                              <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider truncate max-w-[140px] inline-block">
                                   {safeBrand}
                                 </span>
                                 {prod.isPrescription ? (
@@ -220,13 +334,18 @@ export const SearchExperience: React.FC<SearchExperienceProps> = ({
                                   </span>
                                 ) : (
                                   <span className="text-[9px] font-semibold text-brand-blue-700 bg-brand-blue-50 px-1.5 py-0.5 rounded border border-brand-blue-100">
-                                    {prod.categoryName}
+                                    {prod.categoryName || "Không kê đơn"}
                                   </span>
                                 )}
                               </div>
                               <h4 className="text-xs font-bold text-slate-900 line-clamp-1 group-hover:text-brand-blue-600 transition-colors">
                                 {prod.name}
                               </h4>
+                              {prod.activeIngredient && (
+                                <p className="text-[11px] text-slate-500 truncate mt-0.5">
+                                  <span className="text-slate-400 font-medium">Hoạt chất:</span> {prod.activeIngredient}
+                                </p>
+                              )}
                               <div className="flex items-baseline gap-2 mt-1">
                                 <span className="text-xs font-black text-brand-blue-700">
                                   {formatVND(prod.salePrice || prod.price)}
@@ -242,18 +361,28 @@ export const SearchExperience: React.FC<SearchExperienceProps> = ({
                           </div>
                         );
                       })}
+
+                      {/* View all search results button */}
+                      <button
+                        type="button"
+                        onClick={() => handleSelectKeyword(debouncedQuery)}
+                        className="w-full mt-2 py-2.5 px-3 bg-slate-50 hover:bg-brand-blue-50 border border-slate-200 hover:border-brand-blue-200 rounded-xl text-xs font-bold text-brand-blue-700 flex items-center justify-center gap-1.5 transition-colors"
+                      >
+                        <span>Xem tất cả {totalFound} sản phẩm cho &ldquo;{debouncedQuery}&rdquo;</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
                     </div>
-                  ) : (
+                  ) : !isLoading ? (
                     <div className="py-6 text-center text-slate-500 space-y-2">
                       <AlertCircle className="w-6 h-6 mx-auto text-slate-400" />
-                      <p className="text-xs font-medium">
-                        Không tìm thấy sản phẩm khớp với &ldquo;{query}&rdquo;
+                      <p className="text-xs font-bold text-slate-700">
+                        Không tìm thấy thuốc khớp với &ldquo;{debouncedQuery}&rdquo;
                       </p>
-                      <p className="text-[11px] text-slate-400">
-                        Thử tìm với tên thông thường như: Panadol, Vitamin C, Berocca...
+                      <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+                        Thử tìm theo hoạt chất (ví dụ: <span className="font-semibold text-brand-blue-600">Paracetamol, Amoxicillin</span>) hoặc triệu chứng (<span className="font-semibold text-brand-blue-600">Hạ sốt, Đau đầu, Dạ dày</span>).
                       </p>
                     </div>
-                  )}
+                  ) : null}
                 </div>
               ) : (
                 <>
@@ -261,13 +390,13 @@ export const SearchExperience: React.FC<SearchExperienceProps> = ({
                   {recentSearches.length > 0 && (
                     <div className="pb-3">
                       <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-slate-600 uppercase tracking-wider">
                           <Clock className="w-3.5 h-3.5 text-brand-blue-500" />
                           <span>Tìm kiếm gần đây</span>
                         </div>
                         <button
                           onClick={clearAllRecent}
-                          className="text-[11px] text-slate-400 hover:text-rose-500 transition-colors"
+                          className="text-[11px] text-slate-400 hover:text-rose-500 font-medium transition-colors"
                         >
                           Xóa tất cả
                         </button>
@@ -277,7 +406,7 @@ export const SearchExperience: React.FC<SearchExperienceProps> = ({
                           <span
                             key={idx}
                             onClick={() => handleSelectKeyword(item)}
-                            className="group inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs bg-slate-100/90 hover:bg-brand-blue-50 text-slate-700 hover:text-brand-blue-700 border border-slate-200/60 hover:border-brand-blue-200 cursor-pointer transition-all duration-150"
+                            className="group inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs bg-slate-100 hover:bg-brand-blue-50 text-slate-700 hover:text-brand-blue-700 border border-slate-200/60 hover:border-brand-blue-200 cursor-pointer transition-all duration-150"
                           >
                             <span>{item}</span>
                             <X
@@ -292,7 +421,7 @@ export const SearchExperience: React.FC<SearchExperienceProps> = ({
 
                   {/* 3. Từ khóa thịnh hành */}
                   <div className="py-3">
-                    <div className="flex items-center gap-1.5 mb-2 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                    <div className="flex items-center gap-1.5 mb-2 text-xs font-bold text-slate-600 uppercase tracking-wider">
                       <TrendingUp className="w-3.5 h-3.5 text-brand-cyan-500" />
                       <span>Xu hướng tìm kiếm hôm nay</span>
                     </div>
@@ -301,7 +430,7 @@ export const SearchExperience: React.FC<SearchExperienceProps> = ({
                         <button
                           key={idx}
                           onClick={() => handleSelectKeyword(keyword)}
-                          className="inline-flex items-center gap-1 px-3 py-1 rounded-xl text-xs font-medium bg-slate-50 hover:bg-cyan-50 text-slate-700 hover:text-cyan-700 border border-slate-200/70 hover:border-cyan-200 transition-all duration-150 active:scale-95"
+                          className="inline-flex items-center gap-1 px-3 py-1 rounded-xl text-xs font-medium bg-slate-50 hover:bg-cyan-50 text-slate-700 hover:text-cyan-800 border border-slate-200/70 hover:border-cyan-200 transition-all duration-150 active:scale-95"
                         >
                           <Sparkles className="w-3 h-3 text-cyan-500" />
                           <span>{keyword}</span>
@@ -312,10 +441,10 @@ export const SearchExperience: React.FC<SearchExperienceProps> = ({
 
                   {/* 4. Dược phẩm tiêu biểu */}
                   <div className="pt-3">
-                    <div className="flex items-center justify-between mb-2.5 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                    <div className="flex items-center justify-between mb-2.5 text-xs font-bold text-slate-600 uppercase tracking-wider">
                       <div className="flex items-center gap-1.5">
                         <ShieldCheck className="w-3.5 h-3.5 text-brand-emerald-500" />
-                        <span>Sản phẩm dược phẩm nổi bật</span>
+                        <span>Dược phẩm thiết yếu chuẩn GPP</span>
                       </div>
                       <span
                         onClick={() => {
@@ -337,7 +466,7 @@ export const SearchExperience: React.FC<SearchExperienceProps> = ({
                         >
                           <div className="w-10 h-10 rounded-lg bg-slate-50 border border-slate-200/70 overflow-hidden shrink-0 flex items-center justify-center p-0.5">
                             <img
-                              src={prod.images[0]}
+                              src={prod.images?.[0] || "/images/medicines/panadol.jpg"}
                               alt={prod.name}
                               className="w-full h-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform"
                             />

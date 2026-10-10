@@ -3,6 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { ArrowLeft, PhoneCall, ShieldCheck } from "lucide-react";
+import { PHARMACY_CONTACT } from "@/lib/constants";
 
 interface CheckoutHeaderProps {
   currentStep?: 1 | 2 | 3;
@@ -110,12 +111,12 @@ export default function CheckoutHeader({
           {/* Right: Hotline Support */}
           <div className="hidden lg:flex items-center gap-2 text-xs text-slate-600">
             <PhoneCall className="w-3.5 h-3.5 text-brand-blue-600" />
-            <span>Tư vấn miễn phí:</span>
+            <span>Tư vấn Dược sĩ:</span>
             <a
-              href="tel:18006821"
+              href={`tel:${PHARMACY_CONTACT.consultationPhone}`}
               className="font-bold text-brand-blue-700 hover:underline"
             >
-              1800 6821
+              {PHARMACY_CONTACT.consultationPhoneDisplay}
             </a>
           </div>
         </div>

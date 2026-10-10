@@ -1,14 +1,18 @@
 from typing import Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models import Order, PaymentTransaction
+from app.services.fulfillment_service import FulfillmentRoutingService
 from app.services.momo_service import MomoPaymentService
+from app.services.payment_intent_service import PaymentIntentService
+from app.services.reconciliation_service import PaymentReconciliationService
+from app.services.vietqr_service import VietQrService
 
-payments_router = APIRouter(prefix="/payments", tags=["Cổng thanh toán Trực tuyến"])
+payments_router = APIRouter(prefix="/payments", tags=["Cổng thanh toán & Đối soát H4CARE"])
 
 
 # ==============================================================================
@@ -25,8 +29,47 @@ class SimulatePaymentRequest(BaseModel):
     success: bool = True
 
 
+class CreateVietQrPaymentRequest(BaseModel):
+    order_code: str = Field(..., min_length=5, max_length=50)
+    return_url: Optional[str] = None
+
+
+class SimulateVietQrRequest(BaseModel):
+    code: str = Field(..., min_length=5, max_length=50)
+    success: bool = True
+    amount: Optional[int] = None
+
+
+class CreatePaymentIntentRequest(BaseModel):
+    order_code: str = Field(..., min_length=5, max_length=50)
+    payment_method: str = Field(default="COD")
+    return_url: Optional[str] = None
+
+
+class RetryPaymentRequest(BaseModel):
+    order_code: str = Field(..., min_length=5, max_length=50)
+    new_payment_method: str = Field(..., min_length=2, max_length=30)
+    return_url: Optional[str] = None
+
+
+class CreateExchangeIntentRequest(BaseModel):
+    exchange_code: str = Field(..., min_length=5, max_length=50)
+    payment_method: str = Field(default="VIETQR")
+    return_url: Optional[str] = None
+
+
+class SimulateExchangePaymentRequest(BaseModel):
+    exchange_code: str = Field(..., min_length=5, max_length=50)
+    success: bool = True
+    amount: Optional[int] = None
+
+
+class CancelOrderRequest(BaseModel):
+    reason: Optional[str] = "Khách hàng yêu cầu hủy đơn hàng"
+
+
 # ==============================================================================
-# ENDPOINTS
+# 1. MOMO SANDBOX GATEWAY ENDPOINTS (Backward Compatible)
 # ==============================================================================
 
 @payments_router.post("/momo/create")
@@ -87,42 +130,301 @@ def simulate_momo_payment(
     )
 
 
+# ==============================================================================
+# 2. VIETQR (NAPAS 247) GATEWAY ENDPOINTS
+# ==============================================================================
+
+@payments_router.post("/vietqr/create")
+def create_vietqr_payment(
+    payload: CreateVietQrPaymentRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Khởi tạo mã VietQR Napas 247 cho đơn hàng mua thuốc.
+    Mã QR được mã hóa sẵn ngân hàng thụ hưởng, số tài khoản, số tiền và mã đơn.
+    """
+    order = db.scalar(select(Order).where(Order.order_code == payload.order_code.strip()))
+    if not order:
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy đơn hàng '{payload.order_code}'")
+
+    return VietQrService.create_payment_request(
+        db=db,
+        order=order,
+        return_url=payload.return_url,
+    )
+
+
+@payments_router.post("/vietqr/webhook")
+async def vietqr_bank_webhook(
+    request: Request,
+    authorization: Optional[str] = Header(None),
+    x_api_key: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """
+    Endpoint tiếp nhận Webhook biến động số dư chuyển khoản ngân hàng tự động (SePay / Cashtrack / Napas).
+    Xác thực token bảo mật, tự động khớp nội dung UNC với mã đơn hàng hoặc đơn đổi hàng.
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Dữ liệu Webhook không đúng định dạng JSON.")
+
+    auth_token = None
+    if authorization and authorization.startswith("Bearer "):
+        auth_token = authorization.split("Bearer ")[1].strip()
+    elif x_api_key:
+        auth_token = x_api_key.strip()
+    elif payload.get("token"):
+        auth_token = str(payload.get("token")).strip()
+
+    return VietQrService.process_webhook(db=db, payload=payload, auth_token=auth_token)
+
+
+@payments_router.post("/vietqr/simulate")
+def simulate_vietqr_payment(
+    payload: SimulateVietQrRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    [MÔI TRƯỜNG DEV/DEMO] Giả lập nhận tiền chuyển khoản VietQR thành công trên local.
+    """
+    return VietQrService.simulate_payment(
+        db=db,
+        code=payload.code.strip(),
+        success=payload.success,
+        amount=payload.amount,
+    )
+
+
+# ==============================================================================
+# 3. UNIFIED PAYMENT INTENT & RETRY
+# ==============================================================================
+
+@payments_router.post("/intent")
+def create_payment_intent(
+    payload: CreatePaymentIntentRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Khởi tạo Payment Intent hợp nhất:
+    Hỗ trợ COD, VietQR Napas 247, và MoMo Sandbox. Trả về thông tin đầy đủ để giao diện hiển thị.
+    """
+    return PaymentIntentService.create_intent(
+        db=db,
+        order_code=payload.order_code.strip(),
+        payment_method=payload.payment_method,
+        return_url=payload.return_url,
+    )
+
+
+@payments_router.post("/retry")
+def retry_payment(
+    payload: RetryPaymentRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Cơ chế Thử lại Thanh toán (Payment Retry) & Chuyển đổi Phương thức thanh toán:
+    Hủy an toàn các giao dịch đang treo và tạo Intent mới với phương thức mong muốn.
+    """
+    return PaymentIntentService.retry_payment(
+        db=db,
+        order_code=payload.order_code.strip(),
+        new_payment_method=payload.new_payment_method,
+        return_url=payload.return_url,
+    )
+
+
+# ==============================================================================
+# 4. EXCHANGE ORDER ADDITIONAL PAYMENT (Phụ phí đổi hàng)
+# ==============================================================================
+
+@payments_router.post("/exchange/intent")
+def create_exchange_payment_intent(
+    payload: CreateExchangeIntentRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Khởi tạo Payment Intent thu phụ phí chênh lệch cho Đơn đổi hàng (ExchangeOrder).
+    """
+    return PaymentIntentService.create_exchange_intent(
+        db=db,
+        exchange_code=payload.exchange_code.strip(),
+        payment_method=payload.payment_method,
+        return_url=payload.return_url,
+    )
+
+
+@payments_router.post("/exchange/simulate")
+def simulate_exchange_payment(
+    payload: SimulateExchangePaymentRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    [MÔI TRƯỜNG DEV/DEMO] Mô phỏng khách hàng đã thanh toán phụ phí đổi hàng thành công.
+    """
+    return VietQrService.simulate_payment(
+        db=db,
+        code=payload.exchange_code.strip(),
+        success=payload.success,
+        amount=payload.amount,
+    )
+
+
+# ==============================================================================
+# 5. ORDER PAYMENT STATUS & TRANSACTION DETAIL
+# ==============================================================================
+
 @payments_router.get("/orders/{order_code}/status")
 def get_order_payment_status(
     order_code: str,
     db: Session = Depends(get_db),
 ):
     """
-    Kiểm tra trạng thái thanh toán hiện tại của đơn hàng.
+    Kiểm tra trạng thái thanh toán hiện tại của đơn hàng, kèm toàn bộ lịch sử giao dịch.
     """
-    order = db.scalar(select(Order).where(Order.order_code == order_code.strip()))
-    if not order:
-        raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng")
+    return PaymentIntentService.get_order_payment_summary(
+        db=db,
+        order_code=order_code.strip(),
+    )
 
-    transactions = db.scalars(
-        select(PaymentTransaction)
-        .where(PaymentTransaction.order_id == order.id)
-        .order_by(desc(PaymentTransaction.id))
-    ).all()
+
+@payments_router.get("/transactions/{transaction_code}/status")
+def get_transaction_status(
+    transaction_code: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Tra cứu chi tiết một giao dịch thanh toán theo mã giao dịch duy nhất.
+    """
+    trans = db.scalar(
+        select(PaymentTransaction).where(
+            PaymentTransaction.transaction_code == transaction_code.strip()
+        )
+    )
+    if not trans:
+        raise HTTPException(status_code=404, detail="Không tìm thấy giao dịch thanh toán.")
 
     return {
-        "order_code": order.order_code,
-        "payment_status": order.payment_status,
-        "payment_method": order.payment_method,
-        "total_amount": float(order.total_amount),
-        "order_status": order.order_status,
-        "transactions": [
-            {
-                "id": t.id,
-                "transaction_code": t.transaction_code,
-                "provider": t.provider,
-                "amount": float(t.amount),
-                "status": t.status,
-                "provider_trans_id": t.provider_trans_id,
-                "provider_pay_url": t.provider_pay_url,
-                "created_at": t.created_at.isoformat() if t.created_at else None,
-                "updated_at": t.updated_at.isoformat() if t.updated_at else None,
-            }
-            for t in transactions
-        ],
+        "id": trans.id,
+        "transaction_code": trans.transaction_code,
+        "order_id": trans.order_id,
+        "provider": trans.provider,
+        "amount": float(trans.amount),
+        "currency": trans.currency,
+        "status": trans.status,
+        "provider_trans_id": trans.provider_trans_id,
+        "provider_pay_url": trans.provider_pay_url,
+        "created_at": trans.created_at.isoformat() if trans.created_at else None,
+        "updated_at": trans.updated_at.isoformat() if trans.updated_at else None,
+    }
+
+
+# ==============================================================================
+# 6. PAYMENT RECONCILIATION CORE
+# ==============================================================================
+
+@payments_router.get("/reconciliation/order/{order_code}")
+def reconcile_single_order(
+    order_code: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Đối soát tài chính giữa số tiền đơn hàng và các giao dịch thanh toán thực nhận.
+    Phát hiện MATCHED, OVERPAID, UNDERPAID, DUPLICATE_PAYMENT, INCONSISTENT_STATUS.
+    """
+    return PaymentReconciliationService.reconcile_order(
+        db=db,
+        order_code=order_code.strip(),
+    )
+
+
+@payments_router.post("/reconciliation/heal/{order_code}")
+def auto_heal_order_status(
+    order_code: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Tự động khắc phục sai lệch trạng thái nếu tiền đã vào cổng thành công 100% nhưng đơn hàng chưa chuyển PAID.
+    """
+    return PaymentReconciliationService.auto_heal_order(
+        db=db,
+        order_code=order_code.strip(),
+    )
+
+
+@payments_router.get("/reconciliation/audit")
+def audit_payment_reconciliation(
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    """
+    Báo cáo kiểm toán đối soát tổng thể toàn hệ thống cho các đơn hàng gần đây.
+    """
+    return PaymentReconciliationService.audit_system(
+        db=db,
+        limit=min(limit, 200),
+    )
+
+
+# ==============================================================================
+# 7. INVENTORY RESERVATION LIFECYCLE & ORDER CANCELLATION
+# ==============================================================================
+
+@payments_router.post("/orders/{order_code}/cancel")
+def cancel_order_and_release_stock(
+    order_code: str,
+    payload: CancelOrderRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Khách hàng hủy đơn hàng khi chưa xuất kho (SHIPPED).
+    Tự động giải phóng tồn kho thuốc đã giữ chỗ (StockReservation) và hoàn lại quantity_available theo FEFO.
+    """
+    clean_code = order_code.strip()
+    order = db.scalar(select(Order).where(Order.order_code == clean_code))
+    if not order:
+        raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng.")
+
+    if order.order_status in ["SHIPPING", "COMPLETED"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Đơn hàng đang ở trạng thái '{order.order_status}', không thể tự hủy. Vui lòng liên hệ Dược sĩ trực tuyến.",
+        )
+
+    if order.order_status == "CANCELLED":
+        return {"status": "SUCCESS", "message": "Đơn hàng này đã được hủy trước đó.", "order_code": clean_code}
+
+    released_qty = FulfillmentRoutingService.release_order_reservations(
+        db=db,
+        order_id=order.id,
+        reason=payload.reason or "Khách hàng yêu cầu hủy đơn",
+    )
+
+    return {
+        "status": "SUCCESS",
+        "message": f"Đã hủy đơn hàng {clean_code} thành công và giải phóng {released_qty} đơn vị thuốc tồn kho.",
+        "order_code": clean_code,
+        "released_quantity": released_qty,
+        "order_status": "CANCELLED",
+    }
+
+
+@payments_router.post("/reservations/expire-stale")
+def trigger_stale_reservations_expiration(
+    max_age_minutes: int = 30,
+    db: Session = Depends(get_db),
+):
+    """
+    [JOB BẢO TRÌ ĐỊNH KỲ] Tự động quét và giải phóng thuốc giữ chỗ cho các đơn hàng trực tuyến
+    (MoMo/VietQR) đã quá thời hạn cho phép thanh toán mà khách chưa hoàn tất.
+    """
+    cancelled = FulfillmentRoutingService.expire_stale_reservations(
+        db=db,
+        max_age_minutes=max_age_minutes,
+    )
+    return {
+        "status": "SUCCESS",
+        "message": f"Đã quét và hủy {len(cancelled)} đơn hàng quá hạn thanh toán.",
+        "cancelled_orders": cancelled,
     }

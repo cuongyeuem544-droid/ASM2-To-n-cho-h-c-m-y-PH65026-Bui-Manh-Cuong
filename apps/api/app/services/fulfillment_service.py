@@ -516,3 +516,82 @@ class FulfillmentRoutingService:
 
         db.commit()
         return ff
+
+    @classmethod
+    def release_order_reservations(
+        cls,
+        db: Session,
+        order_id: int,
+        reason: str = "ORDER_CANCELLED",
+    ) -> int:
+        """
+        Giải phóng toàn bộ tồn kho thuốc đã giữ chỗ (StockReservation) của đơn hàng,
+        hoàn trả lại quantity_available cho kho và hủy các kiện hàng PENDING.
+        """
+        reservations = db.scalars(
+            select(StockReservation).where(
+                StockReservation.order_id == order_id,
+                StockReservation.status == "RESERVED",
+            )
+        ).all()
+
+        released_count = 0
+        for res in reservations:
+            stock = db.scalar(
+                select(WarehouseBatchStock).where(
+                    WarehouseBatchStock.warehouse_id == res.warehouse_id,
+                    WarehouseBatchStock.batch_id == res.batch_id,
+                )
+            )
+            if stock:
+                stock.quantity_reserved = max(0, stock.quantity_reserved - res.quantity)
+                stock.quantity_available += res.quantity
+            res.status = "RELEASED"
+            released_count += res.quantity
+
+        # Hủy các kiện hàng liên quan
+        ffs = db.scalars(
+            select(OrderFulfillment).where(
+                OrderFulfillment.order_id == order_id,
+                OrderFulfillment.status.in_(["PENDING", "PICKED", "PACKED"]),
+            )
+        ).all()
+        for f in ffs:
+            f.status = "CANCELLED"
+
+        order = db.get(Order, order_id)
+        if order and order.order_status not in ["COMPLETED", "SHIPPING"]:
+            order.order_status = "CANCELLED"
+
+        db.commit()
+        logger.info(f"[INVENTORY RESERVATION] Đã giải phóng {released_count} đơn vị thuốc cho đơn #{order_id} (Lý do: {reason})")
+        return released_count
+
+    @classmethod
+    def expire_stale_reservations(
+        cls,
+        db: Session,
+        max_age_minutes: int = 30,
+    ) -> list[str]:
+        """
+        Quét và tự động giải phóng tồn kho cho các đơn hàng trực tuyến (MoMo / VietQR)
+        đã quá hạn thời gian thanh toán mà chưa nhận được tiền.
+        """
+        threshold = datetime.now(UTC) - timedelta(minutes=max_age_minutes)
+        stale_orders = db.scalars(
+            select(Order).where(
+                Order.payment_status == "PENDING",
+                Order.order_status == "PENDING",
+                Order.payment_method.in_(["MOMO", "BANK_TRANSFER", "VIETQR"]),
+                Order.created_at <= threshold,
+            )
+        ).all()
+
+        cancelled_order_codes = []
+        for o in stale_orders:
+            cls.release_order_reservations(db, o.id, reason="PAYMENT_EXPIRED")
+            o.payment_status = "EXPIRED"
+            cancelled_order_codes.append(o.order_code)
+
+        db.commit()
+        return cancelled_order_codes

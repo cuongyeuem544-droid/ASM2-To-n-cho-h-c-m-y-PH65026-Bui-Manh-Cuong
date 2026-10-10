@@ -112,13 +112,13 @@ def search_product_ids_fts(
     Tìm kiếm danh sách ID sản phẩm qua FTS5 theo thứ tự độ liên quan (BM25 ranking).
     Hỗ trợ tiếng Việt có dấu, không dấu, tìm theo hoạt chất, bệnh lý/triệu chứng.
     """
-    clean_q = query.strip()
+    clean_q = query.strip()[:100]
     if not clean_q or len(clean_q) < 2:
         return []
 
     unaccent_q = strip_accents(clean_q).lower()
     
-    # Tách từ khóa và lọc ký tự an toàn
+    # Tách từ khóa và lọc ký tự an toàn (loại bỏ toàn bộ ký tự đặc biệt FTS)
     words = [re.sub(r"[^\w\d]", "", w) for w in unaccent_q.split() if len(w) > 1]
     if not words:
         words = [re.sub(r"[^\w\d]", "", w) for w in clean_q.split() if w]
@@ -127,10 +127,13 @@ def search_product_ids_fts(
         return []
 
     # Xây dựng câu truy vấn FTS5 an toàn:
-    # Ưu tiên khớp cả cụm nguyên bản -> khớp các từ đơn lẻ với tiền tố *
-    prefix_terms = " ".join([f'"{w}"*' for w in words])
-    phrase_term = f'"{unaccent_q}"'
-    match_query = f'{phrase_term} OR ({prefix_terms})'
+    # Ưu tiên khớp cả cụm nguyên bản an toàn -> khớp các từ đơn lẻ với tiền tố *
+    safe_phrase = re.sub(r"[^\w\d\s]", " ", unaccent_q).strip()
+    prefix_terms = " ".join([f'"{w}"*' for w in words[:8]])
+    if safe_phrase:
+        match_query = f'"{safe_phrase}" OR ({prefix_terms})'
+    else:
+        match_query = prefix_terms
 
     try:
         sql = text("""

@@ -66,11 +66,15 @@ def serialize_product(
     rating: float = 0.0,
     review_count: int = 0,
     stock: int = 0,
+    eligibility: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     cat_slug, cat_name, sub_cat = determine_category_and_subcategory(product)
     
-    # Resolve price from actual DB data (no 50,000 VND fallback)
+    # Resolve price from actual DB data or selected SKU
     final_price = price if price is not None else 0
+    if eligibility and eligibility.get("selected_sku") and eligibility["selected_sku"].get("base_price"):
+        final_price = eligibility["selected_sku"]["base_price"]
+    
     sale_price = int(final_price * 0.95) if (final_price and final_price > 80000) else None
 
     # Ingredients string
@@ -103,6 +107,32 @@ def serialize_product(
     is_rx = product.rx_otc_status == RxOtcStatus.PRESCRIPTION
     featured_ids = {16, 56, 57, 58, 59, 60, 61, 62, 63, 65, 66, 67, 68, 70, 71}
     bestseller_ids = {16, 57, 59, 63, 66, 68, 70, 71}
+
+    # Extract eligibility parameters if provided
+    is_sale_eligible = False
+    can_add_to_cart = False
+    cta_type = "CONSULT_PHARMACIST"
+    cta_label = "Tư Vấn Dược Sĩ"
+    eligibility_tier = product.publish_mode or "REFERENCE_ONLY"
+    skus_data: list[dict[str, Any]] = []
+    selected_sku_data: dict[str, Any] | None = None
+    transparency_data: dict[str, Any] | None = None
+    primary_reason = ""
+    reasons_list: list[str] = []
+
+    if eligibility:
+        is_sale_eligible = eligibility.get("is_eligible_for_sale", False)
+        can_add_to_cart = eligibility.get("can_add_to_cart", False)
+        cta_type = eligibility.get("cta_type", "CONSULT_PHARMACIST")
+        cta_label = eligibility.get("cta_label", "Tư Vấn Dược Sĩ")
+        eligibility_tier = eligibility.get("eligibility_tier", product.publish_mode or "REFERENCE_ONLY")
+        skus_data = eligibility.get("skus", [])
+        selected_sku_data = eligibility.get("selected_sku")
+        transparency_data = eligibility.get("transparency_info")
+        primary_reason = eligibility.get("primary_reason", "")
+        reasons_list = eligibility.get("reasons", [])
+        if "available_stock" in eligibility:
+            stock = eligibility["available_stock"]
 
     return {
         "id": f"pt-{product.id}",
@@ -137,6 +167,16 @@ def serialize_product(
         "isPrescription": is_rx,
         "isFeatured": product.id in featured_ids,
         "isBestSeller": product.id in bestseller_ids,
+        "catalogTier": eligibility_tier,
+        "isSaleEligible": is_sale_eligible,
+        "canAddToCart": can_add_to_cart,
+        "ctaType": cta_type,
+        "ctaLabel": cta_label,
+        "primaryReason": primary_reason,
+        "reasons": reasons_list,
+        "transparency": transparency_data,
+        "skus": skus_data,
+        "selectedSku": selected_sku_data,
         "createdAt": product.created_at.strftime("%Y-%m-%d") if product.created_at else "2026-01-01",
     }
 
@@ -145,8 +185,8 @@ def serialize_product(
 def get_store_products(
     category: str | None = None,
     subCategory: str | None = None,
-    prescriptionType: str = Query("otc", regex="^(all|otc|rx)$"),
-    search: str | None = None,
+    prescriptionType: str = Query("all", regex="^(all|otc|rx)$"),
+    search: str | None = Query(None, max_length=100),
     sort: str = "popular",
     limit: int = Query(150, ge=1, le=300),
     offset: int = Query(0, ge=0),
@@ -271,21 +311,17 @@ def get_store_products(
     }
 
 
-@router.get("/products/{slug_or_id}")
-def get_store_product_detail(slug_or_id: str, db: Session = Depends(get_db)):
-    # Try resolving by integer ID if suffix or raw id
+def resolve_canonical_product(slug_or_id: str, db: Session) -> CanonicalProduct | None:
     match_id = None
     if slug_or_id.isdigit():
         match_id = int(slug_or_id)
     elif slug_or_id.startswith("pt-") and slug_or_id[3:].isdigit():
         match_id = int(slug_or_id[3:])
     else:
-        # Check if ends with -{id}
         parts = slug_or_id.rsplit("-", 1)
         if len(parts) == 2 and parts[1].isdigit():
             match_id = int(parts[1])
 
-    product = None
     if match_id:
         product = db.scalar(
             select(CanonicalProduct)
@@ -295,38 +331,56 @@ def get_store_product_detail(slug_or_id: str, db: Session = Depends(get_db)):
             .where(
                 CanonicalProduct.id == match_id,
                 CanonicalProduct.publish_status == PublishStatus.PUBLISHED,
+                CanonicalProduct.publish_mode != "INTERNAL_TEST",
+                CanonicalProduct.is_demo == False,
             )
         )
+        if product:
+            return product
 
-    if not product:
-        # Search all published products and find matching slug
-        all_prods = db.scalars(
-            select(CanonicalProduct)
-            .options(
-                selectinload(CanonicalProduct.ingredients).selectinload(ProductIngredient.ingredient),
-            )
-            .where(
-                CanonicalProduct.publish_status == PublishStatus.PUBLISHED,
-                ~CanonicalProduct.canonical_name.like("Hồ sơ%"),
-            )
-        ).all()
-        for p in all_prods:
-            p_slug = slugify(p.canonical_name)
-            if p_slug == slug_or_id or f"{p_slug}-{p.id}" == slug_or_id:
-                product = p
-                break
+    # Search all published products and find matching slug
+    all_prods = db.scalars(
+        select(CanonicalProduct)
+        .options(
+            selectinload(CanonicalProduct.ingredients).selectinload(ProductIngredient.ingredient),
+        )
+        .where(
+            CanonicalProduct.publish_status == PublishStatus.PUBLISHED,
+            CanonicalProduct.publish_mode != "INTERNAL_TEST",
+            CanonicalProduct.is_demo == False,
+            ~CanonicalProduct.canonical_name.like("Hồ sơ%"),
+        )
+    ).all()
+    for p in all_prods:
+        p_slug = slugify(p.canonical_name)
+        if p_slug == slug_or_id or f"{p_slug}-{p.id}" == slug_or_id:
+            return p
 
+    return None
+
+
+@router.get("/products/{slug_or_id}")
+def get_store_product_detail(
+    slug_or_id: str,
+    skuId: int | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    product = resolve_canonical_product(slug_or_id, db)
     if not product:
         raise HTTPException(status_code=404, detail="Sản phẩm không tồn tại hoặc chưa được mở bán")
 
-    # Fetch price
+    # Evaluate product eligibility via engine
+    from app.services.product_eligibility_service import ProductEligibilityService
+    eligibility_res = ProductEligibilityService.evaluate_product_eligibility(product, db, sku_id=skuId)
+
+    # Fetch price fallback if not from SKU
     price_row = db.query(PriceObservation.observed_price).filter(
         PriceObservation.product_id == product.id
     ).first()
     price_val = int(price_row[0]) if (price_row and price_row[0] is not None) else None
 
     # Fetch real review stats
-    from app.models.inventory import InventoryBatch, ProductReview, ProductSku, WarehouseBatchStock
+    from app.models.inventory import ProductReview
     rev_row = db.query(
         func.avg(ProductReview.rating),
         func.count(ProductReview.id),
@@ -337,18 +391,28 @@ def get_store_product_detail(slug_or_id: str, db: Session = Depends(get_db)):
     p_rating = round(float(rev_row[0]), 1) if (rev_row and rev_row[0] is not None) else 0.0
     p_count = int(rev_row[1]) if (rev_row and rev_row[1] is not None) else 0
 
-    stock_val = db.query(
-        func.coalesce(func.sum(WarehouseBatchStock.quantity_available), 0)
-    ).select_from(ProductSku).join(
-        InventoryBatch, InventoryBatch.sku_id == ProductSku.id
-    ).join(
-        WarehouseBatchStock, WarehouseBatchStock.batch_id == InventoryBatch.id
-    ).filter(
-        ProductSku.canonical_product_id == product.id,
-        InventoryBatch.status == "ACTIVE",
-    ).scalar() or 0
+    return serialize_product(
+        product,
+        price=price_val,
+        rating=p_rating,
+        review_count=p_count,
+        eligibility=eligibility_res.to_dict(),
+    )
 
-    return serialize_product(product, price=price_val, rating=p_rating, review_count=p_count, stock=int(stock_val))
+
+@router.get("/products/{slug_or_id}/eligibility")
+def get_store_product_eligibility(
+    slug_or_id: str,
+    skuId: int | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    product = resolve_canonical_product(slug_or_id, db)
+    if not product:
+        raise HTTPException(status_code=404, detail="Sản phẩm không tồn tại hoặc chưa được mở bán")
+
+    from app.services.product_eligibility_service import ProductEligibilityService
+    eligibility_res = ProductEligibilityService.evaluate_product_eligibility(product, db, sku_id=skuId)
+    return eligibility_res.to_dict()
 
 
 @router.get("/categories")

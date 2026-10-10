@@ -50,6 +50,9 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     e.stopPropagation();
     if (product.isPrescription) {
       if (onOpenRxConsult) onOpenRxConsult(product);
+    } else if (product.catalogTier === "REFERENCE_ONLY" || !product.isSaleEligible || product.stock === 0) {
+      if (onQuickView) onQuickView(product);
+      else window.location.href = `/product/${product.slug}`;
     } else {
       if (onAddToCart) {
         onAddToCart(product);
@@ -227,11 +230,20 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           {product.isPrescription ? (
             <button
               onClick={handleActionClick}
-              className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl text-[11px] sm:text-xs font-bold text-brand-blue-700 bg-brand-blue-50 hover:bg-brand-blue-100 border border-brand-blue-200/90 transition-all duration-150 flex items-center gap-1 shrink-0 active:scale-95 shadow-xs cursor-pointer"
+              className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl text-[11px] sm:text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200/90 transition-all duration-150 flex items-center gap-1 shrink-0 active:scale-95 shadow-xs cursor-pointer"
               title="Sản phẩm cần có chỉ định của Bác sĩ"
             >
-              <Stethoscope className="w-3.5 h-3.5 text-brand-blue-600 shrink-0" />
+              <Stethoscope className="w-3.5 h-3.5 text-rose-600 shrink-0" />
               <span className="whitespace-nowrap">Tư vấn Dược sĩ</span>
+            </button>
+          ) : product.catalogTier === "REFERENCE_ONLY" || !product.isSaleEligible || product.stock === 0 ? (
+            <button
+              onClick={handleActionClick}
+              className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl text-[11px] sm:text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 transition-all duration-150 flex items-center gap-1 shrink-0 active:scale-95 shadow-xs cursor-pointer"
+              title="Sản phẩm thuộc danh mục tra cứu thông tin y tế, chưa mở bán online"
+            >
+              <Eye className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+              <span className="whitespace-nowrap">Tra cứu y tế</span>
             </button>
           ) : (
             <button

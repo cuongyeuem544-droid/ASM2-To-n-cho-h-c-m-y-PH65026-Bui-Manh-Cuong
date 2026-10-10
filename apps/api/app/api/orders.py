@@ -18,6 +18,7 @@ from app.models import (
     OrderFulfillment,
     OrderItem,
     OrderItemBatchAllocation,
+    PaymentTransaction,
     PriceObservation,
     User,
 )
@@ -215,7 +216,9 @@ def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)):
     ).all()
     products_map = {p.id: p for p in products}
 
-    # Kiểm tra tính hợp lệ: Sản phẩm phải tồn tại, đang được đăng bán và KHÔNG PHẢI là thuốc kê đơn Rx
+    # Kiểm tra tính hợp lệ: Sản phẩm phải tồn tại, đang được đăng bán và ĐỦ ĐIỀU KIỆN MỞ BÁN THEO PRODUCT ELIGIBILITY ENGINE
+    from app.services.product_eligibility_service import ProductEligibilityService
+
     for item in payload.items:
         prod = products_map.get(item.product_id)
         if not prod:
@@ -228,10 +231,11 @@ def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)):
                 status_code=400,
                 detail=f"Sản phẩm '{prod.canonical_name}' chưa sẵn sàng để đặt hàng."
             )
-        if prod.rx_otc_status == RxOtcStatus.PRESCRIPTION:
+        eligibility = ProductEligibilityService.evaluate_product_eligibility(prod, db)
+        if not eligibility.can_add_to_cart:
             raise HTTPException(
                 status_code=400,
-                detail=f"Sản phẩm '{prod.canonical_name}' là thuốc kê đơn (Rx). Theo quy định Bộ Y Tế, thuốc kê đơn không được phép bán trực tuyến."
+                detail=f"Sản phẩm '{prod.canonical_name}': {eligibility.primary_reason}"
             )
 
     # Tra cứu giá bán chính thức từ hệ thống (Server-side Pricing, tuyệt đối không tin client)
@@ -323,6 +327,19 @@ def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)):
         shipping_city=payload.shipping_city,
         shipping_address=payload.shipping_address,
     )
+
+    # Ghi nhận giao dịch thanh toán khởi tạo trong PaymentTransaction
+    init_provider = "COD" if order.payment_method == "COD" else ("VIETQR" if order.payment_method in ["BANK_TRANSFER", "VIETQR"] else "MOMO")
+    initial_tx = PaymentTransaction(
+        order_id=order.id,
+        transaction_code=f"TXN-{init_provider}-{order.order_code}-{int(datetime.datetime.now().timestamp()) % 100000}",
+        provider=init_provider,
+        amount=order.total_amount,
+        currency="VND",
+        status="PENDING",
+    )
+    db.add(initial_tx)
+
     db.commit()
     db.refresh(order)
 

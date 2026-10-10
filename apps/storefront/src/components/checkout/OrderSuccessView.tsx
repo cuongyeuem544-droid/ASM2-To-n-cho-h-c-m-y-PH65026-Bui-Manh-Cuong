@@ -13,6 +13,7 @@ import {
   ArrowRight,
   ShieldCheck,
 } from "lucide-react";
+import { PHARMACY_CONTACT } from "@/lib/constants";
 
 export interface OrderSuccessData {
   order_code: string;
@@ -174,11 +175,11 @@ export default function OrderSuccessView({
 
         {/* Pharmacy Support Hotline */}
         <div className="pt-4 text-center text-xs text-slate-500">
-          Cần hỗ trợ gấp về đơn thuốc? Gọi ngay Tổng đài Dược sĩ:{" "}
-          <a href="tel:18006821" className="font-bold text-brand-blue-700 hover:underline">
-            1800 6821
+          Cần hỗ trợ về đơn thuốc? Liên hệ Tổng đài Dược sĩ:{" "}
+          <a href={`tel:${PHARMACY_CONTACT.consultationPhone}`} className="font-bold text-brand-blue-700 hover:underline">
+            {PHARMACY_CONTACT.consultationPhoneDisplay}
           </a>{" "}
-          (Miễn cước, 7h30 - 22h00)
+          ({PHARMACY_CONTACT.operatingHours})
         </div>
       </div>
     </div>

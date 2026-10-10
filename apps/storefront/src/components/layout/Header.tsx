@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/lib/auth/auth-context";
 import { redirectToAdminPortal } from "@/lib/auth/admin-redirect";
+import { PHARMACY_CONTACT } from "@/lib/constants";
 
 interface HeaderProps {
   onReplayIntro?: () => void;
@@ -44,7 +45,7 @@ export const Header: React.FC<HeaderProps> = ({ onReplayIntro }) => {
     if (typeof window !== "undefined" && !/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
       e.preventDefault();
       try {
-        navigator.clipboard.writeText("18006868");
+        navigator.clipboard.writeText(PHARMACY_CONTACT.consultationPhone);
         setCopiedHotline(true);
         setTimeout(() => setCopiedHotline(false), 3000);
       } catch (err) {}
@@ -103,7 +104,7 @@ export const Header: React.FC<HeaderProps> = ({ onReplayIntro }) => {
 
           <div className="flex items-center gap-4">
             <a
-              href="tel:18006868"
+              href={`tel:${PHARMACY_CONTACT.consultationPhone}`}
               onClick={handleHotlineClick}
               className="flex items-center gap-1.5 text-cyan-300 hover:text-white font-semibold transition-colors cursor-pointer"
               title="Nhấn để gọi trên di động hoặc sao chép số trên máy tính"
@@ -111,8 +112,8 @@ export const Header: React.FC<HeaderProps> = ({ onReplayIntro }) => {
               <PhoneCall className="w-3 h-3 text-cyan-400" />
               <span>
                 {copiedHotline
-                  ? "✓ Đã sao chép Hotline 1800 6868"
-                  : "Tư vấn Dược sĩ: 1800 6868 (Miễn cước)"}
+                  ? `✓ Đã sao chép ${PHARMACY_CONTACT.consultationPhoneDisplay}`
+                  : `Tư vấn Dược sĩ: ${PHARMACY_CONTACT.consultationPhoneDisplay}`}
               </span>
             </a>
 
@@ -193,7 +194,7 @@ export const Header: React.FC<HeaderProps> = ({ onReplayIntro }) => {
 
               {/* Consultation Hotline Pill - Minimalist on xl */}
               <a
-                href="tel:18006868"
+                href={`tel:${PHARMACY_CONTACT.consultationPhone}`}
                 onClick={handleHotlineClick}
                 className="hidden xl:flex items-center gap-2 px-3 py-2 rounded-xl border border-cyan-200 bg-cyan-50/50 hover:bg-cyan-100/60 text-slate-800 transition-all duration-150 cursor-pointer"
                 title="Nhấn để gọi trên di động hoặc sao chép số trên máy tính"
@@ -204,7 +205,7 @@ export const Header: React.FC<HeaderProps> = ({ onReplayIntro }) => {
                 <div className="text-left leading-none">
                   <span className="text-[10px] text-slate-500 block font-normal">Tư vấn Dược sĩ</span>
                   <span className="text-xs font-bold text-slate-900">
-                    {copiedHotline ? "✓ Đã copy" : "1800 6868"}
+                    {copiedHotline ? "✓ Đã copy" : PHARMACY_CONTACT.consultationPhoneDisplay}
                   </span>
                 </div>
               </a>

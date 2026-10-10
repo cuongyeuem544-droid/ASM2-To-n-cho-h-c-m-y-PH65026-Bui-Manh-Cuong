@@ -14,6 +14,7 @@ import {
   Clock,
 } from "lucide-react";
 import { Button } from "../ui/Button";
+import { PHARMACY_CONTACT } from "@/lib/constants";
 
 interface RxConsultModalProps {
   product: Product | null;
@@ -201,7 +202,7 @@ export const RxConsultModal: React.FC<RxConsultModalProps> = ({
                   <p className="font-bold text-brand-blue-900">Thông tin yêu cầu:</p>
                   <p className="text-slate-600">• Người bệnh: <span className="font-semibold">{patientName || "Khách hàng"}</span></p>
                   <p className="text-slate-600">• Thuốc quan tâm: <span className="font-semibold">{product.name}</span></p>
-                  <p className="text-slate-600">• Hotline hỗ trợ khẩn cấp: <a href="tel:18006868" className="font-bold text-brand-blue-700 underline">1800 6868</a></p>
+                  <p className="text-slate-600">• Kênh hỗ trợ Dược sĩ: <a href={`tel:${PHARMACY_CONTACT.consultationPhone}`} className="font-bold text-brand-blue-700 underline">{PHARMACY_CONTACT.consultationPhoneDisplay}</a></p>
                 </div>
 
                 <Button variant="outline" size="md" onClick={handleReset} className="w-full">

@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   ArrowRight,
   AlertCircle,
+  Info,
 } from "lucide-react";
 import { formatVND } from "@/lib/utils";
 import { Button } from "../ui/Button";
@@ -145,10 +146,22 @@ export const ProductQuickViewModal: React.FC<ProductQuickViewModalProps> = ({
                     <span className="font-bold text-slate-800">{product.rating}</span>
                     <span className="text-slate-400">({product.reviewCount} đánh giá)</span>
                     <span className="text-slate-300">|</span>
-                    <span className="text-emerald-600 font-semibold flex items-center gap-1">
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      Còn hàng
-                    </span>
+                    {product.isPrescription ? (
+                      <span className="text-rose-600 font-semibold flex items-center gap-1">
+                        <AlertCircle className="w-3.5 h-3.5" />
+                        Cần đơn Bác sĩ
+                      </span>
+                    ) : product.catalogTier === "REFERENCE_ONLY" || product.isSaleEligible === false ? (
+                      <span className="text-amber-700 font-semibold flex items-center gap-1">
+                        <Info className="w-3.5 h-3.5" />
+                        Tra cứu y tế
+                      </span>
+                    ) : (
+                      <span className="text-emerald-600 font-semibold flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        Còn hàng
+                      </span>
+                    )}
                   </div>
 
                   {/* Pricing */}
@@ -207,6 +220,23 @@ export const ProductQuickViewModal: React.FC<ProductQuickViewModalProps> = ({
                       >
                         Tư Vấn Dược Sĩ & Gửi Đơn Thuốc
                       </Button>
+                    </div>
+                  ) : product.catalogTier === "REFERENCE_ONLY" || product.isSaleEligible === false ? (
+                    <div>
+                      <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200/80 mb-2 flex items-center gap-2 text-xs text-amber-800">
+                        <Info className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span>Danh mục tra cứu thông tin y tế (Chưa mở bán online).</span>
+                      </div>
+                      <Link href={`/product/${product.slug}`} onClick={onClose} className="block w-full">
+                        <Button
+                          variant="primary"
+                          size="md"
+                          className="w-full bg-slate-800 hover:bg-slate-900 shadow-xs text-white"
+                          leftIcon={<Info className="w-4 h-4" />}
+                        >
+                          Tra Cứu Thông Tin Dược Lý
+                        </Button>
+                      </Link>
                     </div>
                   ) : (
                     <div className="flex items-center gap-3">

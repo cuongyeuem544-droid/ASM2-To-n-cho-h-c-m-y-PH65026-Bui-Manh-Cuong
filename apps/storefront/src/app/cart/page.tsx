@@ -289,6 +289,14 @@ export default function CartPage() {
       return;
     }
 
+    const hasRxItem = items.some((it) => it.isPrescription);
+    if (hasRxItem) {
+      setErrorMessage(
+        "Giỏ hàng của bạn chứa thuốc kê đơn (Rx). Theo quy định của Bộ Y Tế, thuốc kê đơn không được phép bán trực tuyến. Vui lòng xóa thuốc kê đơn khỏi giỏ hàng hoặc gửi đơn thuốc qua chuyên mục Tư Vấn Dược Sĩ."
+      );
+      return;
+    }
+
     let currentVerified = verifiedAddress;
     let finalCustomerName = customerName.trim();
     let finalCustomerPhone = customerPhone.trim();

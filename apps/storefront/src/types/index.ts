@@ -18,6 +18,40 @@ export interface Category {
   featuredSubtitle?: string;
 }
 
+export interface ProductSkuItem {
+  id: number;
+  sku_code: string;
+  uom: string;
+  conversion_rate: number;
+  base_price: number;
+  is_default: boolean;
+  available_stock: number;
+}
+
+export interface TransparencyInfo {
+  source_name: string;
+  registration_number: string;
+  registration_status: string;
+  completeness_score: number;
+  pending_verifications: string[];
+  last_audited_at: string;
+  disclaimer: string;
+}
+
+export interface ProductEligibility {
+  is_eligible_for_sale: boolean;
+  eligibility_tier: "SALE_ELIGIBLE" | "REFERENCE_ONLY" | "VERIFIED_PRODUCT_DATA" | "PRESCRIPTION_RESTRICTED" | "OUT_OF_STOCK" | "UNVERIFIED_DATA" | "RECALLED" | "INTERNAL_TEST";
+  can_add_to_cart: boolean;
+  cta_type: "BUY_NOW" | "CONSULT_PHARMACIST" | "RX_PRESCRIPTION" | "OUT_OF_STOCK" | "LOCKED";
+  cta_label: string;
+  available_stock: number;
+  primary_reason: string;
+  reasons: string[];
+  transparency_info: TransparencyInfo;
+  skus: ProductSkuItem[];
+  selected_sku?: ProductSkuItem;
+}
+
 export interface Product {
   id: string;
   dbId?: number;
@@ -31,6 +65,7 @@ export interface Product {
   price: number;
   salePrice?: number | null;
   images: string[];
+  thumbnail?: string;
   shortDescription: string;
   description: string;
   activeIngredient: string; // Hoạt chất chính
@@ -48,6 +83,16 @@ export interface Product {
   rating: number;           // Điểm đánh giá (1-5)
   reviewCount: number;      // Số lượt đánh giá
   isPrescription: boolean;  // QUAN TRỌNG: True = Thuốc kê đơn Rx
+  catalogTier?: "REFERENCE_ONLY" | "VERIFIED_PRODUCT_DATA" | "SALE_ELIGIBLE" | "INTERNAL_TEST";
+  isSaleEligible?: boolean; // True chỉ khi hàng đã nhập kho thực tế và được phép bán thương mại
+  canAddToCart?: boolean;
+  ctaType?: string;
+  ctaLabel?: string;
+  primaryReason?: string;
+  reasons?: string[];
+  transparency?: TransparencyInfo;
+  skus?: ProductSkuItem[];
+  selectedSku?: ProductSkuItem;
   isFeatured: boolean;      // Nổi bật
   isBestSeller: boolean;    // Bán chạy
   createdAt: string;
