@@ -29,6 +29,7 @@ import {
   Bell,
   ChevronRight,
   CheckCircle2,
+  FileSpreadsheet,
 } from 'lucide-react'
 import { useState, useEffect, useRef, type ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
@@ -86,12 +87,9 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
-    groupLabel: 'TỰ ĐỘNG HÓA & CÀO',
+    groupLabel: 'NHẬP LIỆU & ĐƠN THUỐC',
     items: [
-      { to: '/pharmacy-crawler', label: 'Studio cào tự động', icon: Globe },
-      { to: '/sources', label: 'Nguồn thu thập', icon: Database },
-      { to: '/imports', label: 'Nhập file Excel / Tệp', icon: FileInput },
-      { to: '/runs', label: 'Lịch sử đợt cào', icon: Activity },
+      { to: '/imports', label: 'Nhập file Excel đơn thuốc', icon: FileSpreadsheet },
     ],
   },
   {

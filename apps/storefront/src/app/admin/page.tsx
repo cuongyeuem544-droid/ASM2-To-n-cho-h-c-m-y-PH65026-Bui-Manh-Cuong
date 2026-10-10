@@ -15,6 +15,7 @@ import {
   Users,
   ShoppingBag,
   RotateCcw,
+  FileSpreadsheet,
   CheckCircle2,
   Lock,
   ChevronRight,
@@ -33,7 +34,7 @@ export default function AdminPortalPage() {
   const router = useRouter();
   const { user, isAuthenticated, isLoading } = useAuth();
   const [viewMode, setViewMode] = useState<"launchpad" | "embedded">("launchpad");
-  const [activeTab, setActiveTab] = useState("/pharmacy-crawler");
+  const [activeTab, setActiveTab] = useState("/imports");
   const [iframeKey, setIframeKey] = useState(0);
   const [activePort, setActivePort] = useState<5173 | 8000>(5173);
 
@@ -67,12 +68,12 @@ export default function AdminPortalPage() {
       tag: "Cần duyệt",
     },
     {
-      id: "/pharmacy-crawler",
-      title: "Studio Cào Dữ Liệu Thuốc",
-      description: "Thu thập dữ liệu thuốc tự động từ Long Châu, Pharmacity, Bộ Y Tế. Cấu hình lịch cào 24/7.",
-      icon: Globe,
+      id: "/imports",
+      title: "Nhập File Excel Đơn Thuốc",
+      description: "Tải lên bảng tính danh sách thuốc, chọn kho tiếp nhận, thiết lập số lô & hạn dùng và tự động quét nhập kho bán hàng.",
+      icon: FileSpreadsheet,
       color: "bg-blue-50 text-brand-blue-600 border-blue-100",
-      tag: "Tự động 24/7",
+      tag: "Excel & Lô thuốc",
     },
     {
       id: "/products",
