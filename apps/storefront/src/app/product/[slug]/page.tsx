@@ -169,11 +169,11 @@ export default function ProductDetailPage() {
       return;
     }
 
-    // B. Kiểm tra danh mục tham khảo / chưa mở bán
-    if (product.catalogTier === "REFERENCE_ONLY" || !product.isSaleEligible) {
+    // B. Kiểm tra danh mục tham khảo
+    if (product.catalogTier === "REFERENCE_ONLY") {
       setWarningToast(
         product.primaryReason ||
-          "Sản phẩm thuộc danh mục tra cứu thông tin y tế, chưa mở bán trực tuyến. Vui lòng liên hệ Dược sĩ để được tư vấn."
+          "Sản phẩm thuộc danh mục tra cứu thông tin y tế. Vui lòng liên hệ Dược sĩ để được tư vấn."
       );
       setTimeout(() => setWarningToast(null), 5000);
       return;
@@ -478,10 +478,10 @@ export default function ProductDetailPage() {
                       <AlertCircle className="w-3.5 h-3.5" />
                       Cần đơn thuốc của Bác sĩ
                     </span>
-                  ) : product.catalogTier === "REFERENCE_ONLY" || !product.isSaleEligible ? (
+                  ) : product.catalogTier === "REFERENCE_ONLY" ? (
                     <span className="text-amber-700 font-semibold flex items-center gap-1">
                       <Info className="w-3.5 h-3.5 text-amber-600" />
-                      Danh mục tra cứu y tế (Chưa mở bán trực tuyến)
+                      Danh mục tra cứu y tế tham khảo
                     </span>
                   ) : availableStock > 0 ? (
                     <span className="text-emerald-600 font-semibold flex items-center gap-1">
@@ -557,9 +557,9 @@ export default function ProductDetailPage() {
                   </div>
 
                   <span className="text-xs text-slate-500 font-medium bg-white px-2.5 py-1 rounded-full border border-slate-200/80">
-                    {product.isSaleEligible
-                      ? "Giá niêm yết (Đã gồm VAT)"
-                      : "Giá tham khảo (Chưa mở bán thương mại)"}
+                    {product.catalogTier === "REFERENCE_ONLY"
+                      ? "Giá tham khảo (Tra cứu y tế)"
+                      : "Giá niêm yết (Đã gồm VAT)"}
                   </span>
                 </div>
 
@@ -611,7 +611,7 @@ export default function ProductDetailPage() {
                       </Button>
                     </div>
                   </div>
-                ) : product.catalogTier === "REFERENCE_ONLY" || !product.isSaleEligible ? (
+                ) : product.catalogTier === "REFERENCE_ONLY" ? (
                   /* 2. SẢN PHẨM DANH MỤC THAM KHẢO / CHƯA MỞ BÁN THẬT */
                   <div className="space-y-4 pt-1">
                     <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-3">

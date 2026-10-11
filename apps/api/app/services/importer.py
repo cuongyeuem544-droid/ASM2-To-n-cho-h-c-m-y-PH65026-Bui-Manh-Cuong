@@ -879,6 +879,7 @@ def import_rows(
 
                 if auto_approve:
                     prod.publish_status = PublishStatus.PUBLISHED
+                    prod.publish_mode = "SALE_ELIGIBLE"
                     prod.confidence_label = ConfidenceLabel.HIGH_OFFICIAL_MATCH
                     prod.overall_score = max(prod.overall_score or 0, 88)
 
@@ -915,6 +916,7 @@ def import_rows(
                 regulatory_status=RegulatoryStatus.ACTIVE,
                 rx_otc_status=rx_status,
                 publish_status=PublishStatus.PUBLISHED,
+                publish_mode="SALE_ELIGIBLE",
                 overall_score=85,
                 confidence_label=ConfidenceLabel.HIGH_OFFICIAL_MATCH,
                 is_demo=is_demo,
@@ -970,6 +972,7 @@ def import_rows(
             total_imported_quantity += alloc_qty
 
             prod.publish_status = PublishStatus.PUBLISHED
+            prod.publish_mode = "SALE_ELIGIBLE"
             prod.confidence_label = ConfidenceLabel.HIGH_OFFICIAL_MATCH
             prod.overall_score = 90
 

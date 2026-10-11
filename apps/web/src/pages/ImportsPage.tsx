@@ -28,6 +28,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { AdminPageHeader } from '../components/AdminPageHeader'
 import { api } from '../services/api'
+import { getTodayDateStringVN } from '../utils/dateUtils'
 
 interface WarehouseItem {
   id: number
@@ -315,14 +316,14 @@ export function ImportsPage() {
   const [warehouses, setWarehouses] = useState<WarehouseItem[]>([])
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>('')
   
-  // Default Lot Number & Expiry Date
-  const today = new Date()
-  const defaultDateStr = today.toISOString().slice(0, 10).replace(/-/g, '')
+  // Default Lot Number & Expiry Date (theo chuẩn giờ Việt Nam GMT+7)
+  const todayVNStr = getTodayDateStringVN()
+  const defaultDateStr = todayVNStr.replace(/-/g, '')
   const [batchNumber, setBatchNumber] = useState<string>(`LOT-${defaultDateStr}-01`)
   
-  const defaultExpDate = new Date(today.getFullYear() + 2, today.getMonth(), today.getDate())
-    .toISOString()
-    .slice(0, 10)
+  const expDateObj = new Date()
+  expDateObj.setFullYear(expDateObj.getFullYear() + 2)
+  const defaultExpDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit' }).format(expDateObj)
   const [expiryDate, setExpiryDate] = useState<string>(defaultExpDate)
   const [initialQuantity, setInitialQuantity] = useState<number>(100)
 

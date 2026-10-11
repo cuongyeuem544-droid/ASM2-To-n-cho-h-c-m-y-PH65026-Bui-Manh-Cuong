@@ -23,6 +23,7 @@ import {
   UserCheck,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth/auth-context";
+import { LiveClock } from "../common/LiveClock";
 import { redirectToAdminPortal } from "@/lib/auth/admin-redirect";
 import { PHARMACY_CONTACT } from "@/lib/constants";
 
@@ -91,6 +92,7 @@ export const Header: React.FC<HeaderProps> = ({ onReplayIntro }) => {
           </div>
 
           <div className="flex items-center gap-4">
+            <LiveClock />
             <Link
               href="/prescription"
               className="flex items-center gap-1.5 text-cyan-300 hover:text-white font-semibold transition-colors cursor-pointer"

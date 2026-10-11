@@ -33,6 +33,7 @@ import {
 } from 'lucide-react'
 import { useState, useEffect, useRef, type ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
+import { LiveClock } from './LiveClock'
 import { useAuth } from '../services/auth'
 import { useServerHealth } from '../services/useServerHealth'
 import { api } from '../services/api'
@@ -308,6 +309,7 @@ export function Layout({ children }: { children: ReactNode }) {
               <span className="hub-sub">H4CARE Operations</span>
             </div>
             {renderHealthIndicator()}
+            <LiveClock />
           </div>
 
           <div className="header-right">

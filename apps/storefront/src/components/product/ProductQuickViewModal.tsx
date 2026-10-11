@@ -240,7 +240,7 @@ export const ProductQuickViewModal: React.FC<ProductQuickViewModalProps> = ({
                         Tư Vấn Dược Sĩ & Gửi Đơn Thuốc
                       </Button>
                     </div>
-                  ) : product.catalogTier === "REFERENCE_ONLY" || product.isSaleEligible === false ? (
+                  ) : product.catalogTier === "REFERENCE_ONLY" ? (
                     <div>
                       <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200/80 mb-2 flex items-center gap-2 text-xs text-amber-800">
                         <Info className="w-4 h-4 text-amber-600 shrink-0" />

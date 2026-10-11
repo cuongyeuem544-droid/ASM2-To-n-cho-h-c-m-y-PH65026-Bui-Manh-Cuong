@@ -134,6 +134,35 @@ def serialize_product(
         reasons_list = eligibility.get("reasons", [])
         if "available_stock" in eligibility:
             stock = eligibility["available_stock"]
+    else:
+        # Default intelligent evaluation for product listing when eligibility is not explicitly passed
+        if product.publish_status == PublishStatus.PUBLISHED and not product.is_demo and product.publish_mode != "INTERNAL_TEST":
+            if is_rx:
+                cta_type = "RX_PRESCRIPTION"
+                cta_label = "Tư Vấn Dược Sĩ"
+                eligibility_tier = "PRESCRIPTION_RESTRICTED"
+                is_sale_eligible = False
+                can_add_to_cart = False
+            elif product.publish_mode == "REFERENCE_ONLY":
+                cta_type = "CONSULT_PHARMACIST"
+                cta_label = "Tra Cứu Y Tế"
+                eligibility_tier = "REFERENCE_ONLY"
+                is_sale_eligible = False
+                can_add_to_cart = False
+            else:
+                # Active Published OTC Medicine
+                if stock > 0 or final_price > 0:
+                    is_sale_eligible = True
+                    can_add_to_cart = True
+                    cta_type = "BUY_NOW"
+                    cta_label = "Chọn Mua"
+                    eligibility_tier = "SALE_ELIGIBLE"
+                else:
+                    is_sale_eligible = False
+                    can_add_to_cart = False
+                    cta_type = "OUT_OF_STOCK"
+                    cta_label = "Tạm Hết Hàng"
+                    eligibility_tier = "OUT_OF_STOCK"
 
     return {
         "id": f"pt-{product.id}",

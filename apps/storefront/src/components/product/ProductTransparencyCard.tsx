@@ -32,7 +32,7 @@ export const ProductTransparencyCard: React.FC<ProductTransparencyCardProps> = (
 }) => {
   const score = transparency?.completeness_score ?? 85;
   const sourceName = transparency?.source_name ?? "Hồ sơ công bố thông tin y tế tham khảo";
-  const lastAudited = transparency?.last_audited_at ?? "2026-10-11";
+  const lastAudited = transparency?.last_audited_at ?? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   const pendingItems = transparency?.pending_verifications ?? [];
   const regStatus = transparency?.registration_status ?? (
     registrationNumber && !registrationNumber.startsWith("DEMO") && !registrationNumber.startsWith("REF-")
@@ -126,7 +126,7 @@ export const ProductTransparencyCard: React.FC<ProductTransparencyCardProps> = (
             {lastAudited}
           </p>
           <span className="text-[10px] font-semibold text-slate-500 block">
-            {isSaleEligible ? "Đủ điều kiện bán online" : "Danh mục tra cứu / tư vấn"}
+            {isSaleEligible || (publishMode !== "REFERENCE_ONLY" && !isPrescription) ? "Đủ điều kiện bán online" : "Danh mục tra cứu / tư vấn"}
           </span>
         </div>
       </div>

@@ -212,13 +212,22 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-end justify-between gap-2">
           {/* Price Stack */}
           <div className="flex flex-col">
-            {product.catalogTier === "REFERENCE_ONLY" || !product.isSaleEligible ? (
+            {product.catalogTier === "REFERENCE_ONLY" ? (
               <>
                 <span className="text-sm sm:text-base font-bold text-slate-600 leading-tight">
                   {currentPrice > 0 ? `~${formatVND(currentPrice)}` : "Liên hệ tra cứu"}
                 </span>
                 <span className="text-[9.5px] text-amber-700 font-semibold leading-none mt-1">
-                  Giá tham khảo (Chưa mở bán)
+                  Giá tham khảo y tế
+                </span>
+              </>
+            ) : product.stock === 0 ? (
+              <>
+                <span className="text-sm sm:text-base font-bold text-slate-600 leading-tight">
+                  {formatVND(currentPrice)}
+                </span>
+                <span className="text-[9.5px] text-rose-600 font-semibold leading-none mt-1">
+                  Tạm hết hàng
                 </span>
               </>
             ) : (
@@ -249,14 +258,22 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               <Stethoscope className="w-3.5 h-3.5 text-rose-600 shrink-0" />
               <span className="whitespace-nowrap">Tư vấn Dược sĩ</span>
             </button>
-          ) : product.catalogTier === "REFERENCE_ONLY" || !product.isSaleEligible || product.stock === 0 ? (
+          ) : product.catalogTier === "REFERENCE_ONLY" ? (
             <button
               onClick={handleActionClick}
               className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl text-[11px] sm:text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 transition-all duration-150 flex items-center gap-1 shrink-0 active:scale-95 shadow-xs cursor-pointer"
-              title="Sản phẩm thuộc danh mục tra cứu thông tin y tế, chưa mở bán online"
+              title="Sản phẩm thuộc danh mục tra cứu thông tin y tế"
             >
               <Eye className="w-3.5 h-3.5 text-slate-500 shrink-0" />
               <span className="whitespace-nowrap">Tra cứu y tế</span>
+            </button>
+          ) : product.stock === 0 ? (
+            <button
+              disabled
+              className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl text-[11px] sm:text-xs font-bold text-slate-400 bg-slate-100 border border-slate-200 cursor-not-allowed flex items-center gap-1 shrink-0 shadow-xs"
+              title="Sản phẩm hiện đang tạm hết hàng"
+            >
+              <span className="whitespace-nowrap">Tạm hết hàng</span>
             </button>
           ) : (
             <button

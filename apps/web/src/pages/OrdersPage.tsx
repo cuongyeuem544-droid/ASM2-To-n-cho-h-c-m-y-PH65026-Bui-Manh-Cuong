@@ -18,6 +18,7 @@ import { AdminPageHeader } from '../components/AdminPageHeader'
 import { FilterBar } from '../components/FilterBar'
 import { StatusBadge } from '../components/StatusBadge'
 import { api } from '../services/api'
+import { formatDateTimeVN } from '../utils/dateUtils'
 
 interface OrderSummary {
   id: number
@@ -292,7 +293,7 @@ export function OrdersPage() {
                       <td style={{ padding: '12px 16px', fontWeight: 700, color: '#1e40af' }}>
                         {o.order_code}
                         <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 400 }}>
-                          {o.created_at ? new Date(o.created_at).toLocaleString('vi-VN') : ''}
+                          {formatDateTimeVN(o.created_at)}
                         </div>
                       </td>
                       <td style={{ padding: '12px 16px' }}>

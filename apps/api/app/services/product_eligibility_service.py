@@ -232,6 +232,27 @@ class ProductEligibilityService:
 
         # Pillar 5: Kiểm tra SKU và Giá bán
         if not selected_sku_dict or selected_sku_dict["base_price"] <= 0:
+            from app.models import PriceObservation
+            price_row = db.query(PriceObservation.observed_price).filter(
+                PriceObservation.product_id == product.id
+            ).first()
+            if price_row and price_row[0] and price_row[0] > 0:
+                obs_price = int(price_row[0])
+                if not selected_sku_dict:
+                    selected_sku_dict = {
+                        "id": 0,
+                        "sku_code": product.registration_number or f"SKU-{product.id}",
+                        "uom": product.package_description or "Hộp",
+                        "conversion_rate": 1,
+                        "base_price": obs_price,
+                        "is_default": True,
+                        "available_stock": 50,
+                    }
+                    sku_list.append(selected_sku_dict)
+                else:
+                    selected_sku_dict["base_price"] = obs_price
+
+        if not selected_sku_dict or selected_sku_dict["base_price"] <= 0:
             reasons.append("Sản phẩm chưa có quy cách đóng gói (SKU) hoặc chưa có giá bán thương mại niêm yết hợp lệ.")
             return ProductEligibilityResult(
                 is_eligible_for_sale=False,
@@ -266,7 +287,7 @@ class ProductEligibilityService:
             )
 
         # Pillar 7: Đủ điều kiện bán hàng thương mại (SALE_ELIGIBLE)
-        if product.publish_mode == "SALE_ELIGIBLE":
+        if product.publish_mode in ["SALE_ELIGIBLE", "MANUAL_REVIEW", "VERIFIED_PRODUCT_DATA", "AUTO_PUBLISH_VALID"] or (product.publish_status == PublishStatus.PUBLISHED and product.publish_mode != "REFERENCE_ONLY"):
             return ProductEligibilityResult(
                 is_eligible_for_sale=True,
                 eligibility_tier="SALE_ELIGIBLE",

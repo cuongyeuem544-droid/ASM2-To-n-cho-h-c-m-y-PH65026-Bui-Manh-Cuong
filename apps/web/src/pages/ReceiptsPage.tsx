@@ -14,6 +14,7 @@ import {
 import { useEffect, useState } from 'react'
 import { EmptyState } from '../components/EmptyState'
 import { api } from '../services/api'
+import { getTodayDateStringVN } from '../utils/dateUtils'
 import type { Product, StockReceiptItemType, SupplierItem, WarehouseItem } from '../types'
 
 export function ReceiptsPage() {
@@ -69,12 +70,17 @@ export function ReceiptsPage() {
   }, [])
 
   function openCreateModal() {
+    const todayStr = getTodayDateStringVN()
+    const expDate = new Date()
+    expDate.setFullYear(expDate.getFullYear() + 2)
+    const expStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit' }).format(expDate)
+
     setItems([
       {
         sku_id: products[0]?.id || 1,
         batch_number: `LOT-${Date.now().toString().slice(-6)}`,
-        manufacture_date: new Date().toISOString().slice(0, 10),
-        expiry_date: new Date(Date.now() + 730 * 86400000).toISOString().slice(0, 10),
+        manufacture_date: todayStr,
+        expiry_date: expStr,
         quantity: 100,
         purchase_unit_price: 35000,
       },
@@ -85,13 +91,18 @@ export function ReceiptsPage() {
   }
 
   function addItemLine() {
+    const todayStr = getTodayDateStringVN()
+    const expDate = new Date()
+    expDate.setFullYear(expDate.getFullYear() + 2)
+    const expStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit' }).format(expDate)
+
     setItems(prev => [
       ...prev,
       {
         sku_id: products[0]?.id || 1,
         batch_number: `LOT-${Date.now().toString().slice(-6)}`,
-        manufacture_date: new Date().toISOString().slice(0, 10),
-        expiry_date: new Date(Date.now() + 730 * 86400000).toISOString().slice(0, 10),
+        manufacture_date: todayStr,
+        expiry_date: expStr,
         quantity: 50,
         purchase_unit_price: 40000,
       },
