@@ -14,6 +14,10 @@ export interface CartItem {
   unit: string;
   isPrescription: boolean;
   dbId?: number;
+  skuId?: number;
+  cartKey?: string;
+  catalogTier?: string;
+  isSaleEligible?: boolean;
 }
 
 interface CartItemsTableProps {
@@ -56,11 +60,15 @@ export default function CartItemsTable({
 
       {/* Prescription Warning Notice (if applicable) */}
       {hasPrescriptionItem && (
-        <div className="mx-4 mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2.5 text-xs text-amber-900">
-          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-          <div className="leading-relaxed">
-            <span className="font-bold">Lưu ý về thuốc kê đơn: </span>
-            Đơn hàng của bạn có thuốc kê đơn (Rx). Dược sĩ chuyên môn H4CARE sẽ liên hệ gọi điện xác nhận đơn thuốc của bác sĩ trước khi giao hàng theo đúng quy định của Bộ Y Tế.
+        <div className="mx-4 mt-3 p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-xs text-rose-900">
+          <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+          <div className="leading-relaxed flex-1">
+            <span className="font-bold">Lưu ý thuốc kê đơn (Rx): </span>
+            Theo quy định của Bộ Y Tế, thuốc kê đơn không được phép bán trực tuyến. Quý khách vui lòng gửi đơn thuốc qua chuyên mục{" "}
+            <Link href="/prescription" className="text-brand-blue-700 underline font-semibold">
+              Tư Vấn Dược Sĩ & Gửi Đơn Thuốc
+            </Link>{" "}
+            hoặc xóa thuốc kê đơn khỏi giỏ hàng để tiếp tục thanh toán các sản phẩm OTC.
           </div>
         </div>
       )}

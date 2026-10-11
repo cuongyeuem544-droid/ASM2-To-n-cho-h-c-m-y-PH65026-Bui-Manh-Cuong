@@ -422,6 +422,7 @@ class Order(TimestampMixin, Base):
     geocode_provider: Mapped[str | None] = mapped_column(String(50), default="nominatim")
     place_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(100), nullable=True, unique=True, index=True)
 
     items: Mapped[list["OrderItem"]] = relationship(back_populates="order", cascade="all, delete-orphan")
 

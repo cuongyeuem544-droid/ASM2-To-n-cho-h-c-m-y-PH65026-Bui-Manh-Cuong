@@ -98,6 +98,8 @@ def _serialize_fulfillments(db: Session, order_id: int) -> list[dict[str, Any]]:
 class CheckoutItem(BaseModel):
     product_id: int
     quantity: int = Field(default=1, ge=1, le=100)
+    sku_id: Optional[int] = None
+    client_unit_price: Optional[float] = None
 
 
 class CheckoutRequest(BaseModel):
@@ -109,6 +111,7 @@ class CheckoutRequest(BaseModel):
     payment_method: str = "COD"  # COD | BANK_TRANSFER | MOMO
     note: Optional[str] = None
     items: List[CheckoutItem] = Field(..., min_length=1)
+    idempotency_key: Optional[str] = None
 
     # Cấu trúc địa chỉ giao hàng xác minh (Mô hình 2 cấp 2025 & Legacy)
     fulfillment_type: Optional[str] = "DELIVERY"  # DELIVERY | STORE_PICKUP
@@ -128,6 +131,17 @@ class CheckoutRequest(BaseModel):
     store_id: Optional[int] = None
 
 
+class CartItemValidate(BaseModel):
+    product_id: int
+    sku_id: Optional[int] = None
+    quantity: int = Field(default=1, ge=1, le=100)
+    client_price: Optional[float] = None
+
+
+class CartValidateRequest(BaseModel):
+    items: List[CartItemValidate]
+
+
 class UpdateOrderStatusRequest(BaseModel):
     order_status: str  # PENDING | CONFIRMED | PROCESSING | SHIPPING | COMPLETED | CANCELLED
     payment_status: Optional[str] = None
@@ -142,13 +156,141 @@ def generate_order_code() -> str:
 # ==========================================
 # 1. STOREFRONT CHECKOUT & TRA CỨU ĐƠN HÀNG
 # ==========================================
+@store_order_router.post("/cart/validate")
+def validate_cart(payload: CartValidateRequest, db: Session = Depends(get_db)):
+    """
+    Kiểm tra và xác thực tính hợp lệ của toàn bộ giỏ hàng trước khi đặt hàng:
+    - Giá niêm yết chính thức từ máy chủ.
+    - Cảnh báo biến động giá nếu client giữ giá cũ.
+    - Tồn kho khả dụng thực tế theo FEFO.
+    - Tính hợp lệ mở bán theo Product Eligibility Engine.
+    """
+    from app.services.product_eligibility_service import ProductEligibilityService
+
+    product_ids = [it.product_id for it in payload.items]
+    products = db.scalars(
+        select(CanonicalProduct).where(CanonicalProduct.id.in_(product_ids))
+    ).all()
+    products_map = {p.id: p for p in products}
+
+    results = []
+    total_valid_amount = Decimal("0.0")
+    all_valid = True
+
+    for it in payload.items:
+        prod = products_map.get(it.product_id)
+        if not prod or prod.publish_status != PublishStatus.PUBLISHED:
+            results.append({
+                "product_id": it.product_id,
+                "sku_id": it.sku_id,
+                "product_name": prod.canonical_name if prod else f"Sản phẩm #{it.product_id}",
+                "uom": "Hộp",
+                "server_price": 0.0,
+                "client_price": it.client_price,
+                "price_changed": False,
+                "available_stock": 0,
+                "is_eligible": False,
+                "rejection_reason": "Sản phẩm không tồn tại hoặc đã ngừng kinh doanh",
+                "can_checkout": False,
+            })
+            all_valid = False
+            continue
+
+        eligibility = ProductEligibilityService.evaluate_product_eligibility(prod, db)
+        sku_obj = None
+        if it.sku_id:
+            sku_obj = db.get(ProductSku, it.sku_id)
+        if not sku_obj:
+            sku_obj = db.query(ProductSku).filter(
+                ProductSku.canonical_product_id == prod.id,
+                ProductSku.is_active == True,
+            ).order_by(ProductSku.is_default.desc()).first()
+
+        server_price = Decimal("0.0")
+        if sku_obj and sku_obj.base_price and sku_obj.base_price > 0:
+            server_price = Decimal(str(sku_obj.base_price))
+        else:
+            po = db.query(PriceObservation.observed_price).filter(
+                PriceObservation.product_id == prod.id
+            ).first()
+            if po and po[0]:
+                server_price = Decimal(str(po[0]))
+
+        uom = sku_obj.uom if sku_obj else (prod.package_description or "Hộp")
+        available_stock = eligibility.available_stock
+
+        price_changed = False
+        if it.client_price is not None and server_price > 0:
+            price_changed = abs(float(server_price) - it.client_price) > 0.01
+
+        can_checkout = (
+            eligibility.can_add_to_cart
+            and server_price > 0
+            and available_stock >= it.quantity
+        )
+
+        rejection = None
+        if not eligibility.can_add_to_cart:
+            rejection = eligibility.primary_reason
+        elif server_price <= 0:
+            rejection = "Sản phẩm chưa có giá niêm yết thương mại"
+        elif available_stock < it.quantity:
+            rejection = f"Chỉ còn {available_stock} {uom} trong kho (bạn chọn {it.quantity})"
+
+        if can_checkout:
+            total_valid_amount += server_price * it.quantity
+        else:
+            all_valid = False
+
+        results.append({
+            "product_id": it.product_id,
+            "sku_id": sku_obj.id if sku_obj else it.sku_id,
+            "product_name": prod.canonical_name,
+            "uom": uom,
+            "server_price": float(server_price),
+            "client_price": it.client_price,
+            "price_changed": price_changed,
+            "available_stock": available_stock,
+            "is_eligible": eligibility.can_add_to_cart,
+            "rejection_reason": rejection,
+            "can_checkout": can_checkout,
+        })
+
+    return {
+        "all_valid": all_valid,
+        "total_valid_amount": float(total_valid_amount),
+        "items": results,
+    }
+
+
 @store_order_router.post("/checkout")
 def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)):
     """
     Tạo đơn hàng mới từ Storefront Web Khách Hàng.
     Tính giá 100% tại máy chủ (Server-side Pricing), loại bỏ hoàn toàn thuốc kê đơn Rx và chặn can thiệp giá.
     Xác minh nghiêm ngặt địa chỉ giao hàng và tọa độ bản đồ.
+    Hỗ trợ Idempotency Key để chống tạo đơn trùng lặp khi người mua bấm 2 lần hoặc mạng retry.
     """
+    # 0. Chống tạo đơn trùng (Idempotency Replay)
+    if payload.idempotency_key and payload.idempotency_key.strip():
+        clean_idem = payload.idempotency_key.strip()
+        existing_order = db.scalar(
+            select(Order)
+            .options(selectinload(Order.items))
+            .where(Order.idempotency_key == clean_idem)
+        )
+        if existing_order:
+            return {
+                "status": "SUCCESS",
+                "message": f"Đơn hàng của bạn đã được ghi nhận thành công trước đó (Mã đơn: {existing_order.order_code}).",
+                "order_code": existing_order.order_code,
+                "total_amount": float(existing_order.total_amount),
+                "order_status": existing_order.order_status,
+                "created_at": existing_order.created_at.isoformat() if existing_order.created_at else None,
+                "fulfillments": _serialize_fulfillments(db, existing_order.id),
+                "is_idempotent_replay": True,
+            }
+
     name = payload.customer_name.strip()
     phone = payload.customer_phone.strip()
     address = payload.shipping_address.strip()
@@ -248,26 +390,35 @@ def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)):
         if pid not in prices_map and pval is not None:
             prices_map[pid] = Decimal(str(pval))
 
-    for p in products:
-        if p.id not in prices_map:
-            sku_obj = db.query(ProductSku).filter(
-                ProductSku.canonical_product_id == p.id,
-                ProductSku.is_active == True,
-            ).order_by(ProductSku.is_default.desc()).first()
-            if sku_obj and sku_obj.base_price and sku_obj.base_price > 0:
-                prices_map[p.id] = Decimal(str(sku_obj.base_price))
-
     order_items_to_add = []
     total_amount = Decimal("0.0")
 
     for item in payload.items:
         prod = products_map[item.product_id]
         prod_name = prod.canonical_name
-        prod_sku = prod.registration_number
+
+        # Multi-SKU resolution
+        sku_obj = None
+        if item.sku_id:
+            sku_obj = db.get(ProductSku, item.sku_id)
+            if not sku_obj or sku_obj.canonical_product_id != prod.id or not sku_obj.is_active:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Quy cách đóng gói (SKU #{item.sku_id}) không hợp lệ hoặc đã ngừng bán cho sản phẩm '{prod_name}'."
+                )
+        else:
+            sku_obj = db.query(ProductSku).filter(
+                ProductSku.canonical_product_id == prod.id,
+                ProductSku.is_active == True,
+            ).order_by(ProductSku.is_default.desc()).first()
 
         # Kiểm tra giá niêm yết
-        if item.product_id in prices_map and prices_map[item.product_id] > 0:
+        if sku_obj and sku_obj.base_price and sku_obj.base_price > 0:
+            unit_price = Decimal(str(sku_obj.base_price))
+            prod_sku = f"{sku_obj.sku_code} ({sku_obj.uom})"
+        elif item.product_id in prices_map and prices_map[item.product_id] > 0:
             unit_price = prices_map[item.product_id]
+            prod_sku = prod.registration_number or "Hộp"
         else:
             raise HTTPException(
                 status_code=400,
@@ -292,9 +443,13 @@ def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)):
     comm_info = AdministrativeDataService.get_commune_by_code(comm_code_val) if payload.province_code and comm_code_val else None
     prov_info = AdministrativeDataService.get_province_by_code(payload.province_code) if payload.province_code else None
 
+    # Trạng thái ban đầu: Tất cả đơn hàng mới tạo ở trạng thái PENDING chờ xử lý
+    initial_order_status = "PENDING"
+
     order_code = generate_order_code()
     order = Order(
         order_code=order_code,
+        idempotency_key=payload.idempotency_key.strip() if payload.idempotency_key else None,
         customer_name=name,
         customer_phone=phone,
         customer_email=payload.customer_email.strip() if payload.customer_email else None,
@@ -320,7 +475,7 @@ def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)):
         verified_at=datetime.datetime.utcnow() if payload.is_verified else None,
         payment_method=payload.payment_method.upper(),
         payment_status="PENDING",
-        order_status="PENDING",
+        order_status=initial_order_status,
         total_amount=total_amount,
         shipping_fee=Decimal("0.0"),
         note=payload.note.strip() if payload.note else None,

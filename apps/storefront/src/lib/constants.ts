@@ -17,5 +17,5 @@ export const PHARMACY_CONTACT = {
   operatingHours: "8:00 - 21:00 hàng ngày (Hỗ trợ trực tuyến)",
   supportEmail: "duocsi@h4care.vn",
   onlineConsultationLabel: "Gửi Yêu Cầu Tư Vấn Dược Sĩ",
-  disclaimer: "Kênh tư vấn chuyên môn trực tuyến do Dược sĩ phụ trách, không thay thế chẩn đoán cấp cứu y khoa 115.",
+  disclaimer: "Kênh tư vấn chuyên môn trực tuyến do Dược sĩ phụ trách, không thay thế chẩn đoán cấp cứu y khoa 115. Hộp thư duocsi@h4care.vn và cổng tiếp nhận đơn thuốc trực tuyến hiện phục vụ quy trình thẩm định kỹ thuật nội bộ dự án trước khi vận hành thương mại chính thức.",
 };

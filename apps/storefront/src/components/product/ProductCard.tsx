@@ -212,17 +212,30 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-end justify-between gap-2">
           {/* Price Stack */}
           <div className="flex flex-col">
-            <span className="text-sm sm:text-base font-black text-brand-blue-700 leading-tight">
-              {formatVND(currentPrice)}
-            </span>
-            {product.salePrice && product.salePrice < product.price ? (
-              <span className="text-[10.5px] text-slate-400 line-through leading-none mt-0.5">
-                {formatVND(product.price)}
-              </span>
+            {product.catalogTier === "REFERENCE_ONLY" || !product.isSaleEligible ? (
+              <>
+                <span className="text-sm sm:text-base font-bold text-slate-600 leading-tight">
+                  {currentPrice > 0 ? `~${formatVND(currentPrice)}` : "Liên hệ tra cứu"}
+                </span>
+                <span className="text-[9.5px] text-amber-700 font-semibold leading-none mt-1">
+                  Giá tham khảo (Chưa mở bán)
+                </span>
+              </>
             ) : (
-              <span className="text-[10px] text-emerald-600 font-semibold leading-none mt-0.5">
-                Đã có VAT
-              </span>
+              <>
+                <span className="text-sm sm:text-base font-black text-brand-blue-700 leading-tight">
+                  {formatVND(currentPrice)}
+                </span>
+                {product.salePrice && product.salePrice < product.price ? (
+                  <span className="text-[10.5px] text-slate-400 line-through leading-none mt-0.5">
+                    {formatVND(product.price)}
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-emerald-600 font-semibold leading-none mt-0.5">
+                    Đã có VAT
+                  </span>
+                )}
+              </>
             )}
           </div>
 

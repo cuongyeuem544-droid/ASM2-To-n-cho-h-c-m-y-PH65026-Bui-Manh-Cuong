@@ -100,6 +100,70 @@ export default function CartPage() {
     message?: string;
   } | null>(null);
 
+  // Idempotency key to prevent duplicate order placement
+  const idempotencyKeyRef = useRef<string>("");
+  const [validationAlert, setValidationAlert] = useState<{
+    type: "warning" | "error";
+    message: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!idempotencyKeyRef.current) {
+      idempotencyKeyRef.current =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `IDEM-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    }
+  }, []);
+
+  const validateCartWithServer = async (cartItems: CartItem[]) => {
+    if (!cartItems || cartItems.length === 0) {
+      setValidationAlert(null);
+      return;
+    }
+    try {
+      const payload = {
+        items: cartItems.map((it) => {
+          let dbId = it.dbId;
+          if (!dbId && it.id.startsWith("pt-")) dbId = parseInt(it.id.replace("pt-", ""), 10);
+          return {
+            product_id: dbId || 17,
+            sku_id: it.skuId,
+            quantity: it.quantity,
+            client_price: it.salePrice || it.price,
+          };
+        }),
+      };
+      const res = await fetch("/api/v1/store/orders/cart/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && Array.isArray(data.items)) {
+          const stockIssues = data.items.filter((resIt: any) => !resIt.can_checkout);
+          const priceChanges = data.items.filter((resIt: any) => resIt.price_changed);
+          if (stockIssues.length > 0) {
+            setValidationAlert({
+              type: "error",
+              message: `Một số sản phẩm không đủ điều kiện đặt hàng: ${stockIssues.map((s: any) => `${s.product_name} (${s.rejection_reason})`).join("; ")}`,
+            });
+          } else if (priceChanges.length > 0) {
+            setValidationAlert({
+              type: "warning",
+              message: "Đơn giá niêm yết của một số sản phẩm đã được máy chủ cập nhật. Tổng tiền sẽ tính chính xác theo giá mới.",
+            });
+          } else {
+            setValidationAlert(null);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Lỗi kiểm tra giỏ hàng với máy chủ:", e);
+    }
+  };
+
   // Initialize cart from localStorage
   useEffect(() => {
     try {
@@ -109,6 +173,7 @@ export default function CartPage() {
         if (Array.isArray(parsed) && parsed.length > 0) {
           setItems(parsed);
           setIsLoaded(true);
+          validateCartWithServer(parsed);
           return;
         }
       }
@@ -398,6 +463,8 @@ export default function CartPage() {
         return {
           product_id: dbId || 17,
           quantity: it.quantity,
+          sku_id: it.skuId,
+          client_unit_price: it.salePrice || it.price,
         };
       });
 
@@ -410,6 +477,7 @@ export default function CartPage() {
         payment_method: paymentMethod,
         note: orderNote.trim() || undefined,
         items: checkoutItems,
+        idempotency_key: idempotencyKeyRef.current || undefined,
         fulfillment_type: fulfillmentType,
         province_code: fulfillmentType === "DELIVERY" ? currentVerified?.provinceCode : undefined,
         commune_code: fulfillmentType === "DELIVERY" ? currentVerified?.communeCode : undefined,
@@ -583,6 +651,31 @@ export default function CartPage() {
                     type="button"
                     onClick={() => setErrorMessage("")}
                     className="text-rose-500 hover:text-rose-700 p-0.5"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
+              {/* Server-side Cart Validation Alert */}
+              {validationAlert && (
+                <div
+                  className={`p-3.5 rounded-xl border text-xs sm:text-sm flex items-start gap-2.5 ${
+                    validationAlert.type === "error"
+                      ? "bg-rose-50 border-rose-200 text-rose-800"
+                      : "bg-amber-50 border-amber-200 text-amber-800"
+                  }`}
+                >
+                  <AlertCircle
+                    className={`w-4 h-4 shrink-0 mt-0.5 ${
+                      validationAlert.type === "error" ? "text-rose-600" : "text-amber-600"
+                    }`}
+                  />
+                  <div className="flex-1 font-medium">{validationAlert.message}</div>
+                  <button
+                    type="button"
+                    onClick={() => setValidationAlert(null)}
+                    className="opacity-70 hover:opacity-100 p-0.5"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>

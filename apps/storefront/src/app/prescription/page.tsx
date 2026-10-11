@@ -60,10 +60,13 @@ export default function PrescriptionPage() {
               </div>
               <div>
                 <span className="text-[11px] text-slate-500 font-medium block">
-                  Kênh tiếp nhận chuyên môn
+                  Kênh tiếp nhận trực tuyến
                 </span>
                 <span className="text-sm sm:text-base font-bold text-brand-blue-800">
                   {PHARMACY_CONTACT.supportEmail}
+                </span>
+                <span className="text-[10px] text-slate-400 block">
+                  (Tiếp nhận thẩm định chuyên môn nội bộ)
                 </span>
               </div>
             </div>

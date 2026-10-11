@@ -165,18 +165,37 @@ export const ProductQuickViewModal: React.FC<ProductQuickViewModalProps> = ({
                   </div>
 
                   {/* Pricing */}
-                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 mb-4 flex items-baseline gap-3">
-                    <span className="text-2xl font-black text-brand-blue-700">
-                      {formatVND(currentPrice)}
-                    </span>
-                    {product.salePrice && (
-                      <span className="text-sm text-slate-400 line-through">
-                        {formatVND(product.price)}
-                      </span>
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 mb-4 flex flex-col gap-1">
+                    {product.catalogTier === "REFERENCE_ONLY" || product.isSaleEligible === false ? (
+                      <div>
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-xl font-bold text-slate-700">
+                            {currentPrice > 0 ? `~${formatVND(currentPrice)}` : "Liên hệ tra cứu"}
+                          </span>
+                          <span className="text-xs text-slate-500 font-medium">/ {product.packaging}</span>
+                        </div>
+                        <span className="text-[11px] text-amber-700 bg-amber-100/70 px-2 py-0.5 rounded font-medium inline-block mt-1">
+                          Giá tham khảo phục vụ tra cứu thông tin y tế (Chưa mở bán thương mại)
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex items-baseline gap-3">
+                        <span className="text-2xl font-black text-brand-blue-700">
+                          {formatVND(currentPrice)}
+                        </span>
+                        {product.salePrice && (
+                          <span className="text-sm text-slate-400 line-through">
+                            {formatVND(product.price)}
+                          </span>
+                        )}
+                        <span className="text-xs text-slate-500 font-medium">
+                          / {product.packaging}
+                        </span>
+                        <span className="text-[10px] text-emerald-600 font-semibold ml-auto">
+                          Đã có VAT
+                        </span>
+                      </div>
                     )}
-                    <span className="text-xs text-slate-500 font-medium">
-                      / {product.packaging}
-                    </span>
                   </div>
 
                   {/* Medical Specs bullet points */}
