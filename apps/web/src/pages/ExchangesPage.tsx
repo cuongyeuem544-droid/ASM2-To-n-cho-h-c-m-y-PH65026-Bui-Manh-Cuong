@@ -15,9 +15,10 @@ import {
   X,
   XCircle,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AdminPageHeader } from '../components/AdminPageHeader'
 import { FilterBar } from '../components/FilterBar'
+import { PaginationBar } from '../components/PaginationBar'
 import { api } from '../services/api'
 
 interface ExchangeSummary {
@@ -70,6 +71,10 @@ export function ExchangesPage() {
   const [search, setSearch] = useState<string>('')
   const [statusFilter, setStatusFilter] = useState<string>('')
 
+  // Phân trang
+  const [currentPage, setCurrentPage] = useState<number>(1)
+  const [pageSize, setPageSize] = useState<number>(15)
+
   // Detail Modal
   const [selectedExchangeCode, setSelectedExchangeCode] = useState<string | null>(null)
   const [exchangeDetail, setExchangeDetail] = useState<ExchangeDetailData | null>(null)
@@ -87,14 +92,16 @@ export function ExchangesPage() {
   const [paymentMethod, setPaymentMethod] = useState<string>('COD')
   const [transactionRef, setTransactionRef] = useState<string>('')
 
-  const loadExchanges = async () => {
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
+
+  const loadExchanges = async (page = currentPage, size = pageSize) => {
     setLoading(true)
     try {
       const params = new URLSearchParams()
       if (statusFilter) params.append('status', statusFilter)
       if (search.trim()) params.append('search', search.trim())
-      params.append('page', '1')
-      params.append('page_size', '50')
+      params.append('page', String(page))
+      params.append('page_size', String(size))
 
       const res = await api<{ total: number; items?: ExchangeSummary[]; exchanges?: ExchangeSummary[] }>(
         `/admin/exchanges?${params.toString()}`
@@ -110,8 +117,17 @@ export function ExchangesPage() {
   }
 
   useEffect(() => {
-    loadExchanges()
+    setCurrentPage(1)
+    loadExchanges(1, pageSize)
   }, [statusFilter])
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setCurrentPage(1)
+      loadExchanges(1, pageSize)
+    }, 350)
+    return () => clearTimeout(timer)
+  }, [search])
 
   const openDetail = async (code: string) => {
     setSelectedExchangeCode(code)
@@ -439,6 +455,25 @@ export function ExchangesPage() {
             </tbody>
           </table>
         </div>
+        {!loading && exchanges.length > 0 && (
+          <PaginationBar
+            currentPage={currentPage}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            totalItems={totalCount}
+            itemName="đơn đổi hàng"
+            onPageChange={(p) => {
+              setCurrentPage(p)
+              loadExchanges(p, pageSize)
+            }}
+            onPageSizeChange={(sz) => {
+              setPageSize(sz)
+              setCurrentPage(1)
+              loadExchanges(1, sz)
+            }}
+            pageSizeOptions={[10, 15, 25, 50]}
+          />
+        )}
       </div>
 
       {/* POPUP: Dispatch Order */}

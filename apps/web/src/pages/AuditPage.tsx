@@ -1,6 +1,7 @@
 import { History } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { EmptyState } from '../components/EmptyState'
+import { PaginationBar } from '../components/PaginationBar'
 import { api } from '../services/api'
 
 interface Audit { id: number; user_id: number | null; action: string; entity_type: string; entity_id: string | null; before_json: unknown; after_json: unknown; ip_address: string | null; created_at: string }
@@ -18,7 +19,18 @@ const ACTION_NAMES: Record<string, string> = {
 export function AuditPage() {
   const [items, setItems] = useState<Audit[]>([])
   const [error, setError] = useState('')
+
+  // Phân trang
+  const [currentPage, setCurrentPage] = useState<number>(1)
+  const [pageSize, setPageSize] = useState<number>(15)
+
   useEffect(() => { api<Audit[]>('/audit-logs').then(setItems).catch(err => setError(err.message)) }, [])
+
+  const totalPages = Math.max(1, Math.ceil(items.length / pageSize))
+  const displayedItems = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return items.slice(start, start + pageSize)
+  }, [items, currentPage, pageSize])
 
   return (
     <div className="page">
@@ -47,7 +59,7 @@ export function AuditPage() {
               </tr>
             </thead>
             <tbody>
-              {items.map(item => (
+              {displayedItems.map(item => (
                 <tr key={item.id}>
                   <td>{new Date(item.created_at).toLocaleString('vi-VN')}</td>
                   <td>#{item.user_id || 'Hệ thống tự động'}</td>
@@ -64,6 +76,18 @@ export function AuditPage() {
               ))}
             </tbody>
           </table>
+          {items.length > 0 && (
+            <PaginationBar
+              currentPage={currentPage}
+              totalPages={totalPages}
+              pageSize={pageSize}
+              totalItems={items.length}
+              itemName="nhật ký thao tác"
+              onPageChange={setCurrentPage}
+              onPageSizeChange={setPageSize}
+              pageSizeOptions={[10, 15, 25, 50]}
+            />
+          )}
         </div>
       )}
     </div>

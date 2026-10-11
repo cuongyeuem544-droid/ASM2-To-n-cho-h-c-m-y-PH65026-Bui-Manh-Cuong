@@ -17,9 +17,10 @@ import {
   X,
   XCircle,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AdminPageHeader } from '../components/AdminPageHeader'
 import { FilterBar } from '../components/FilterBar'
+import { PaginationBar } from '../components/PaginationBar'
 import { api } from '../services/api'
 
 interface RefundSummary {
@@ -82,6 +83,10 @@ export function RefundsPage() {
   const [methodFilter, setMethodFilter] = useState<string>('')
   const [reconFilter, setReconFilter] = useState<string>('')
 
+  // Phân trang
+  const [currentPage, setCurrentPage] = useState<number>(1)
+  const [pageSize, setPageSize] = useState<number>(15)
+
   // Detail Modal & Action Modal State
   const [selectedRefundCode, setSelectedRefundCode] = useState<string | null>(null)
   const [refundDetail, setRefundDetail] = useState<RefundDetailData | null>(null)
@@ -100,7 +105,9 @@ export function RefundsPage() {
   const [reconStatus, setReconStatus] = useState<string>('MATCHED')
   const [reconNotes, setReconNotes] = useState<string>('Khớp đúng sao kê tài khoản ngân hàng / ví MoMo.')
 
-  const loadRefunds = async () => {
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
+
+  const loadRefunds = async (page = currentPage, size = pageSize) => {
     setLoading(true)
     try {
       const params = new URLSearchParams()
@@ -108,8 +115,8 @@ export function RefundsPage() {
       if (methodFilter) params.append('refund_method', methodFilter)
       if (reconFilter) params.append('reconciliation_status', reconFilter)
       if (search.trim()) params.append('search', search.trim())
-      params.append('page', '1')
-      params.append('page_size', '50')
+      params.append('page', String(page))
+      params.append('page_size', String(size))
 
       const res = await api<{ total: number; items?: RefundSummary[]; refunds?: RefundSummary[] }>(
         `/admin/refunds?${params.toString()}`
@@ -125,8 +132,17 @@ export function RefundsPage() {
   }
 
   useEffect(() => {
-    loadRefunds()
+    setCurrentPage(1)
+    loadRefunds(1, pageSize)
   }, [statusFilter, methodFilter, reconFilter])
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setCurrentPage(1)
+      loadRefunds(1, pageSize)
+    }, 350)
+    return () => clearTimeout(timer)
+  }, [search])
 
   const openDetail = async (code: string) => {
     setSelectedRefundCode(code)
@@ -510,6 +526,25 @@ export function RefundsPage() {
             </tbody>
           </table>
         </div>
+        {!loading && refunds.length > 0 && (
+          <PaginationBar
+            currentPage={currentPage}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            totalItems={totalCount}
+            itemName="phiếu hoàn tiền"
+            onPageChange={(p) => {
+              setCurrentPage(p)
+              loadRefunds(p, pageSize)
+            }}
+            onPageSizeChange={(sz) => {
+              setPageSize(sz)
+              setCurrentPage(1)
+              loadRefunds(1, sz)
+            }}
+            pageSizeOptions={[10, 15, 25, 50]}
+          />
+        )}
       </div>
 
       {/* POPUP: Manual Bank Transfer Confirmation */}

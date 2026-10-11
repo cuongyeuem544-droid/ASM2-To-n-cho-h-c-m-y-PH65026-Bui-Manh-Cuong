@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
   AlertCircle,
   CalendarCheck,
@@ -16,6 +16,7 @@ import {
   X,
 } from 'lucide-react'
 import { EmptyState } from '../components/EmptyState'
+import { PaginationBar } from '../components/PaginationBar'
 import { api } from '../services/api'
 
 interface RecommendedProduct {
@@ -236,6 +237,20 @@ export function CampaignsPage() {
     )
   })
 
+  // Phân trang
+  const [currentPage, setCurrentPage] = useState<number>(1)
+  const [pageSize, setPageSize] = useState<number>(10)
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [statusFilter, searchQuery])
+
+  const totalPages = Math.max(1, Math.ceil(filteredCampaigns.length / pageSize))
+  const displayedCampaigns = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return filteredCampaigns.slice(start, start + pageSize)
+  }, [filteredCampaigns, currentPage, pageSize])
+
   // Metrics
   const totalCount = campaigns.length
   const activeCount = campaigns.filter((c) => c.status === 'ACTIVE').length
@@ -363,7 +378,7 @@ export function CampaignsPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredCampaigns.map((c) => (
+                {displayedCampaigns.map((c) => (
                   <tr key={c.id}>
                     <td>
                       <span className="font-mono text-muted">#{c.id}</span>
@@ -440,6 +455,19 @@ export function CampaignsPage() {
               </tbody>
             </table>
           </div>
+        )}
+        {!loading && filteredCampaigns.length > 0 && (
+          <PaginationBar
+            currentPage={currentPage}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            totalItems={campaigns.length}
+            filteredCount={filteredCampaigns.length}
+            itemName="chiến dịch"
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={[5, 10, 20, 50]}
+          />
         )}
       </div>
 

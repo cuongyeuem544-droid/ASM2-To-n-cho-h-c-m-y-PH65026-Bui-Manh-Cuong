@@ -19,6 +19,7 @@ import { AdminPageHeader } from '../components/AdminPageHeader'
 import { FilterBar } from '../components/FilterBar'
 import { EmptyState } from '../components/EmptyState'
 import { StatusBadge } from '../components/StatusBadge'
+import { PaginationBar } from '../components/PaginationBar'
 import { API_URL, api, tokenStore } from '../services/api'
 import type { Product, ProductPage } from '../types'
 
@@ -434,40 +435,19 @@ export function ProductsPage() {
       </div>
 
       {/* 4. Pagination */}
-      {data && data.pages > 1 && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginTop: '16px',
-            padding: '12px 16px',
-            background: 'var(--color-surface, #ffffff)',
-            borderRadius: '12px',
-            border: '1px solid var(--color-border, #e2e8f0)',
-          }}
-        >
-          <div style={{ fontSize: '13px', color: '#64748b' }}>
-            Hiển thị <strong>{displayedItems.length}</strong> / <strong>{data.total}</strong> sản phẩm (Trang {data.page}/{data.pages})
-          </div>
-          <div style={{ display: 'flex', gap: '6px' }}>
-            <button
-              className="secondary-button"
-              disabled={page <= 1}
-              onClick={() => setPage(p => Math.max(1, p - 1))}
-              style={{ padding: '6px 12px' }}
-            >
-              <ChevronLeft size={16} /> Trang trước
-            </button>
-            <button
-              className="secondary-button"
-              disabled={page >= data.pages}
-              onClick={() => setPage(p => Math.min(data.pages, p + 1))}
-              style={{ padding: '6px 12px' }}
-            >
-              Trang sau <ChevronRight size={16} />
-            </button>
-          </div>
+      {data && (
+        <div style={{ marginTop: '16px', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--color-border, #e2e8f0)' }}>
+          <PaginationBar
+            currentPage={page}
+            totalPages={data.pages}
+            pageSize={pageSize}
+            totalItems={data.total}
+            filteredCount={displayedItems.length !== (data.items || []).length ? displayedItems.length : undefined}
+            itemName="thuốc"
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={[15, 25, 50, 100]}
+          />
         </div>
       )}
 

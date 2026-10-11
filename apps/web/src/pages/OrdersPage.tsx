@@ -13,9 +13,10 @@ import {
   X,
   XCircle,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AdminPageHeader } from '../components/AdminPageHeader'
 import { FilterBar } from '../components/FilterBar'
+import { PaginationBar } from '../components/PaginationBar'
 import { StatusBadge } from '../components/StatusBadge'
 import { api } from '../services/api'
 import { formatDateTimeVN } from '../utils/dateUtils'
@@ -121,9 +122,20 @@ export function OrdersPage() {
   const [updatingFulfillmentId, setUpdatingFulfillmentId] = useState<number | null>(null)
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
 
+  // Phân trang
+  const [currentPage, setCurrentPage] = useState<number>(1)
+  const [pageSize, setPageSize] = useState<number>(15)
+
   useEffect(() => {
+    setCurrentPage(1)
     loadOrders()
   }, [selectedStatus])
+
+  const totalPages = Math.max(1, Math.ceil(orders.length / pageSize))
+  const displayedOrders = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return orders.slice(start, start + pageSize)
+  }, [orders, currentPage, pageSize])
 
   async function loadOrders() {
     setLoading(true)
@@ -286,7 +298,7 @@ export function OrdersPage() {
                 </tr>
               </thead>
               <tbody>
-                {orders.map((o) => {
+                {displayedOrders.map((o) => {
                   const badge = STATUS_LABELS[o.order_status] || { label: o.order_status, color: '#475569', bg: '#f1f5f9' }
                   return (
                     <tr key={o.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
@@ -392,6 +404,20 @@ export function OrdersPage() {
               </tbody>
             </table>
           </div>
+        )}
+
+        {/* Phân trang danh sách đơn hàng */}
+        {!loading && orders.length > 0 && (
+          <PaginationBar
+            currentPage={currentPage}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            totalItems={orders.length}
+            itemName="đơn hàng"
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={[10, 15, 25, 50]}
+          />
         )}
       </div>
 

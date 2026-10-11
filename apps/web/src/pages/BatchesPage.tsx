@@ -18,9 +18,10 @@ import {
   ShieldCheck,
   X,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AdminPageHeader } from '../components/AdminPageHeader'
 import { FilterBar } from '../components/FilterBar'
+import { PaginationBar } from '../components/PaginationBar'
 import { StatusBadge } from '../components/StatusBadge'
 import { EmptyState } from '../components/EmptyState'
 import { api } from '../services/api'
@@ -35,6 +36,16 @@ export function BatchesPage() {
   const [warehouseFilter, setWarehouseFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [nearExpiryOnly, setNearExpiryOnly] = useState(false)
+
+  // Phân trang danh sách lô & hạn dùng
+  const [currentPage, setCurrentPage] = useState<number>(1)
+  const [pageSize, setPageSize] = useState<number>(15)
+
+  const totalPages = Math.max(1, Math.ceil(batches.length / pageSize))
+  const displayedBatches = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return batches.slice(start, start + pageSize)
+  }, [batches, currentPage, pageSize])
 
   // Status Modal State
   const [statusModalOpen, setStatusModalOpen] = useState(false)
@@ -70,6 +81,7 @@ export function BatchesPage() {
   }, [])
 
   useEffect(() => {
+    setCurrentPage(1)
     loadBatches()
   }, [warehouseFilter, statusFilter, nearExpiryOnly])
 
@@ -233,7 +245,7 @@ export function BatchesPage() {
                 </td>
               </tr>
             ) : (
-              batches.map(batch => {
+              displayedBatches.map(batch => {
                 // Color highlight based on risk level
                 let riskBadgeStyle = { background: '#ecfdf5', color: '#065f46', border: '1px solid #a7f3d0' }
                 if (batch.risk_level === 'WARNING') {
@@ -400,6 +412,20 @@ export function BatchesPage() {
             )}
           </tbody>
         </table>
+
+        {/* Phân trang danh sách lô & hạn dùng */}
+        {!loading && batches.length > 0 && (
+          <PaginationBar
+            currentPage={currentPage}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            totalItems={batches.length}
+            itemName="lô thuốc"
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={[10, 15, 25, 50]}
+          />
+        )}
       </div>
 
       {/* Modal Chuyển Trạng Thái Lô */}

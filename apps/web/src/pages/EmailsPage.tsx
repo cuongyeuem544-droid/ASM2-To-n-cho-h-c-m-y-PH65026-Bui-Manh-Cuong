@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
   AlertCircle,
   CheckCircle2,
@@ -10,6 +10,7 @@ import {
   X,
   XCircle,
 } from 'lucide-react'
+import { PaginationBar } from '../components/PaginationBar'
 import { api } from '../services/api'
 
 interface EmailOutboxItem {
@@ -37,6 +38,20 @@ export function EmailsPage() {
   const [statusFilter, setStatusFilter] = useState<string>('ALL')
   const [searchRef, setSearchRef] = useState('')
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+
+  // Phân trang
+  const [currentPage, setCurrentPage] = useState<number>(1)
+  const [pageSize, setPageSize] = useState<number>(15)
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [statusFilter, searchRef])
+
+  const totalPages = Math.max(1, Math.ceil(emails.length / pageSize))
+  const displayedEmails = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return emails.slice(start, start + pageSize)
+  }, [emails, currentPage, pageSize])
 
   // Detail Modal state
   const [selectedEmail, setSelectedEmail] = useState<EmailOutboxDetail | null>(null)
@@ -286,7 +301,7 @@ export function EmailsPage() {
               </tr>
             </thead>
             <tbody>
-              {emails.map((m) => (
+              {displayedEmails.map((m) => (
                 <tr key={m.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                   <td style={{ padding: '12px 16px', fontWeight: 700, color: '#1e40af', fontFamily: 'monospace' }}>
                     {m.reference_id || `#${m.id}`}
@@ -350,6 +365,18 @@ export function EmailsPage() {
               ))}
             </tbody>
           </table>
+        )}
+        {!loading && emails.length > 0 && (
+          <PaginationBar
+            currentPage={currentPage}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            totalItems={emails.length}
+            itemName="email"
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={[10, 15, 25, 50]}
+          />
         )}
       </div>
 

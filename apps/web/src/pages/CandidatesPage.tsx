@@ -1,8 +1,9 @@
 import { Check, CheckCheck, CheckCircle2, FileSearch, RefreshCw, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { EmptyState } from '../components/EmptyState'
 import { StatusBadge } from '../components/StatusBadge'
+import { PaginationBar } from '../components/PaginationBar'
 import { api } from '../services/api'
 
 interface Candidate {
@@ -32,6 +33,20 @@ export function CandidatesPage() {
       .catch(err => setError(err.message))
       .finally(() => setLoading(false))
   }
+
+  // Phân trang
+  const [currentPage, setCurrentPage] = useState<number>(1)
+  const [pageSize, setPageSize] = useState<number>(15)
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [status])
+
+  const totalPages = Math.max(1, Math.ceil(items.length / pageSize))
+  const displayedCandidates = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return items.slice(start, start + pageSize)
+  }, [items, currentPage, pageSize])
 
   useEffect(() => {
     loadCandidates()
@@ -178,7 +193,7 @@ export function CandidatesPage() {
               </tr>
             </thead>
             <tbody>
-              {items.map(item => {
+              {displayedCandidates.map(item => {
                 const isPending = ['EXTRACTED', 'REVIEW_REQUIRED', 'NEW'].includes(item.processing_status)
                 const isMatched = item.processing_status === 'MATCHED'
                 const isBusy = actionId === item.id
@@ -272,6 +287,18 @@ export function CandidatesPage() {
               })}
             </tbody>
           </table>
+          {!loading && items.length > 0 && (
+            <PaginationBar
+              currentPage={currentPage}
+              totalPages={totalPages}
+              pageSize={pageSize}
+              totalItems={items.length}
+              itemName="bản ghi"
+              onPageChange={setCurrentPage}
+              onPageSizeChange={setPageSize}
+              pageSizeOptions={[10, 15, 25, 50]}
+            />
+          )}
         </div>
       )}
     </div>

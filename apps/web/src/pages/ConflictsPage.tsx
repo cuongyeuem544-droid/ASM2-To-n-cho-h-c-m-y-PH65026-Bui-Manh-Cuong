@@ -1,7 +1,8 @@
 import { AlertTriangle, Check, Filter } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { EmptyState } from '../components/EmptyState'
 import { StatusBadge } from '../components/StatusBadge'
+import { PaginationBar } from '../components/PaginationBar'
 import { api } from '../services/api'
 import type { Conflict } from '../types'
 
@@ -20,8 +21,23 @@ export function ConflictsPage() {
   const [items, setItems] = useState<Conflict[]>([])
   const [status, setStatus] = useState('OPEN')
   const [error, setError] = useState('')
+
+  // Phân trang
+  const [currentPage, setCurrentPage] = useState<number>(1)
+  const [pageSize, setPageSize] = useState<number>(10)
+
   const load = () => api<Conflict[]>(`/conflicts?status=${status}`).then(setItems).catch(err => setError(err.message))
-  useEffect(() => { void load() }, [status])
+  
+  useEffect(() => { 
+    setCurrentPage(1)
+    void load() 
+  }, [status])
+
+  const totalPages = Math.max(1, Math.ceil(items.length / pageSize))
+  const displayedItems = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return items.slice(start, start + pageSize)
+  }, [items, currentPage, pageSize])
 
   async function resolve(item: Conflict) {
     const note = window.prompt('Ghi chú quyết định xử lý dữ liệu:')
@@ -52,7 +68,7 @@ export function ConflictsPage() {
       {error && <div className="alert alert-error">{error}</div>}
       {!items.length && <EmptyState title="Không có mâu thuẫn nào" description="Dữ liệu đồng nhất, không có bản ghi nào bị lệch." />}
       <div className="conflict-list">
-        {items.map(item => (
+        {displayedItems.map(item => (
           <article className="conflict-card" key={item.id}>
             <div className="conflict-head">
               <span className="conflict-symbol"><AlertTriangle /></span>
@@ -84,6 +100,18 @@ export function ConflictsPage() {
           </article>
         ))}
       </div>
+      {items.length > 0 && (
+        <PaginationBar
+          currentPage={currentPage}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          totalItems={items.length}
+          itemName="mâu thuẫn"
+          onPageChange={setCurrentPage}
+          onPageSizeChange={setPageSize}
+          pageSizeOptions={[5, 10, 20, 50]}
+        />
+      )}
     </div>
   )
 }

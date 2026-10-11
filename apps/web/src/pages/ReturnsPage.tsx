@@ -22,9 +22,10 @@ import {
   X,
   XCircle,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AdminPageHeader } from '../components/AdminPageHeader'
 import { FilterBar } from '../components/FilterBar'
+import { PaginationBar } from '../components/PaginationBar'
 import { api } from '../services/api'
 
 interface ReturnSummary {
@@ -126,6 +127,10 @@ export function ReturnsPage() {
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [typeFilter, setTypeFilter] = useState<string>('')
 
+  // Phân trang
+  const [currentPage, setCurrentPage] = useState<number>(1)
+  const [pageSize, setPageSize] = useState<number>(15)
+
   // Detail Modal State
   const [selectedReturnCode, setSelectedReturnCode] = useState<string | null>(null)
   const [returnDetail, setReturnDetail] = useState<ReturnDetailData | null>(null)
@@ -154,15 +159,17 @@ export function ReturnsPage() {
   >([])
   const [generalInspectNote, setGeneralInspectNote] = useState<string>('Dược sĩ đã kiểm tra ngoại quan và tem seal GPP.')
 
-  const loadReturns = async () => {
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
+
+  const loadReturns = async (page = currentPage, size = pageSize) => {
     setLoading(true)
     try {
       const params = new URLSearchParams()
       if (statusFilter) params.append('status', statusFilter)
       if (typeFilter) params.append('request_type', typeFilter)
       if (search.trim()) params.append('search', search.trim())
-      params.append('page', '1')
-      params.append('page_size', '50')
+      params.append('page', String(page))
+      params.append('page_size', String(size))
 
       const res = await api<{ total: number; items?: ReturnSummary[]; returns?: ReturnSummary[] }>(
         `/admin/returns?${params.toString()}`
@@ -178,8 +185,17 @@ export function ReturnsPage() {
   }
 
   useEffect(() => {
-    loadReturns()
+    setCurrentPage(1)
+    loadReturns(1, pageSize)
   }, [statusFilter, typeFilter])
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setCurrentPage(1)
+      loadReturns(1, pageSize)
+    }, 350)
+    return () => clearTimeout(timer)
+  }, [search])
 
   const openDetail = async (code: string) => {
     setSelectedReturnCode(code)
@@ -538,6 +554,25 @@ export function ReturnsPage() {
             </tbody>
           </table>
         </div>
+        {!loading && returns.length > 0 && (
+          <PaginationBar
+            currentPage={currentPage}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            totalItems={totalCount}
+            itemName="yêu cầu đổi trả"
+            onPageChange={(p) => {
+              setCurrentPage(p)
+              loadReturns(p, pageSize)
+            }}
+            onPageSizeChange={(sz) => {
+              setPageSize(sz)
+              setCurrentPage(1)
+              loadReturns(1, sz)
+            }}
+            pageSizeOptions={[10, 15, 25, 50]}
+          />
+        )}
       </div>
 
       {/* DETAIL & ACTION MODAL */}

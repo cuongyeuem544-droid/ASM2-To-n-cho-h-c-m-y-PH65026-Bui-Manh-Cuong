@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Users,
   ShieldCheck,
@@ -14,6 +14,7 @@ import { AdminPageHeader } from '../components/AdminPageHeader'
 import { StatCard, StatGrid } from '../components/StatCard'
 import { FilterBar } from '../components/FilterBar'
 import { StatusBadge } from '../components/StatusBadge'
+import { PaginationBar } from '../components/PaginationBar'
 import { api } from '../services/api'
 import type { User } from '../types'
 
@@ -45,6 +46,20 @@ export function UsersPage() {
       (u.phone && u.phone.includes(term))
     return matchesRole && matchesSearch
   })
+
+  // Phân trang
+  const [currentPage, setCurrentPage] = useState<number>(1)
+  const [pageSize, setPageSize] = useState<number>(15)
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [search, roleFilter])
+
+  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize))
+  const displayedUsers = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return filteredUsers.slice(start, start + pageSize)
+  }, [filteredUsers, currentPage, pageSize])
 
   const totalUsers = users.length
   const totalAdmins = users.filter((u) => u.role === 'ADMIN').length
@@ -160,7 +175,7 @@ export function UsersPage() {
                   </td>
                 </tr>
               ) : (
-                filteredUsers.map((u) => {
+                displayedUsers.map((u) => {
                   const isAdmin = u.role === 'ADMIN'
                   const isCustomer = u.role === 'CUSTOMER'
                   return (
@@ -240,6 +255,19 @@ export function UsersPage() {
             </tbody>
           </table>
         </div>
+        {!loading && filteredUsers.length > 0 && (
+          <PaginationBar
+            currentPage={currentPage}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            totalItems={users.length}
+            filteredCount={filteredUsers.length}
+            itemName="tài khoản"
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={[10, 15, 25, 50]}
+          />
+        )}
       </div>
     </div>
   )

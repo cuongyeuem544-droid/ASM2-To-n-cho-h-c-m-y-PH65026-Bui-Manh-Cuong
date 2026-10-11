@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   AlertCircle,
   CheckCircle2,
@@ -16,6 +16,7 @@ import { FilterBar } from '../components/FilterBar'
 import { StatusBadge } from '../components/StatusBadge'
 import { ConfirmModal } from '../components/ConfirmModal'
 import { EmptyState } from '../components/EmptyState'
+import { PaginationBar } from '../components/PaginationBar'
 import { api } from '../services/api'
 
 interface ReviewItem {
@@ -124,6 +125,20 @@ export function ReviewsPage() {
       r.comment.toLowerCase().includes(q)
     )
   })
+
+  // Phân trang
+  const [currentPage, setCurrentPage] = useState<number>(1)
+  const [pageSize, setPageSize] = useState<number>(15)
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [statusFilter, verifiedFilter, searchQuery])
+
+  const totalPages = Math.max(1, Math.ceil(filteredReviews.length / pageSize))
+  const displayedReviews = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return filteredReviews.slice(start, start + pageSize)
+  }, [filteredReviews, currentPage, pageSize])
 
   // Derived statistics
   const totalCount = reviews.length
@@ -291,7 +306,7 @@ export function ReviewsPage() {
                   </td>
                 </tr>
               ) : (
-                filteredReviews.map((rev) => (
+                displayedReviews.map((rev) => (
                   <tr key={rev.id}>
                     <td>
                       <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#64748b' }}>#{rev.id}</span>
@@ -377,6 +392,19 @@ export function ReviewsPage() {
             </tbody>
           </table>
         </div>
+        {!loading && filteredReviews.length > 0 && (
+          <PaginationBar
+            currentPage={currentPage}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            totalItems={reviews.length}
+            filteredCount={filteredReviews.length}
+            itemName="nhận xét"
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={[10, 15, 25, 50]}
+          />
+        )}
       </div>
 
       {/* Clean Confirm Modal replacing window.confirm */}
