@@ -1,19 +1,84 @@
 import {
+  AlertCircle,
+  AlertTriangle,
   Building2,
+  Calendar,
   CheckCircle2,
   Edit2,
+  ExternalLink,
   Layers,
   MapPin,
   Package,
   Phone,
   Plus,
+  RefreshCw,
+  Search,
   ShieldCheck,
+  Tag,
   X,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { EmptyState } from '../components/EmptyState'
 import { api } from '../services/api'
 import type { WarehouseItem } from '../types'
+
+interface WarehouseStockDetailItem {
+  stock_id: number
+  product_id?: number | null
+  product_name: string
+  registration_number?: string | null
+  dosage_form?: string | null
+  package_description?: string | null
+  manufacturer?: string | null
+  rx_otc: string
+  is_prescription: boolean
+  rx_label: string
+  sku_id: number
+  sku_code: string
+  uom: string
+  price?: number | null
+  batch_id: number
+  batch_number: string
+  manufacture_date?: string | null
+  expiry_date: string
+  days_remaining: number
+  risk_level: 'CRITICAL' | 'WARNING' | 'SAFE'
+  risk_label: string
+  quantity_on_hand: number
+  quantity_available: number
+  quantity_reserved: number
+  location_code: string
+  location_name?: string | null
+  batch_status: string
+  supplier_name: string
+}
+
+interface WarehouseStockDetailResponse {
+  warehouse: {
+    id: number
+    code: string
+    name: string
+    address: string
+    district?: string
+    province?: string
+    phone?: string
+    is_central: boolean
+    is_active: boolean
+  }
+  stats: {
+    total_products: number
+    total_batches: number
+    total_on_hand: number
+    total_available: number
+    total_reserved: number
+    rx_count: number
+    otc_count: number
+    near_expiry_count: number
+    expired_count: number
+  }
+  stocks: WarehouseStockDetailItem[]
+}
 
 export function WarehousesPage() {
   const [warehouses, setWarehouses] = useState<WarehouseItem[]>([])
@@ -21,6 +86,15 @@ export function WarehousesPage() {
   const [error, setError] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [editingWh, setEditingWh] = useState<WarehouseItem | null>(null)
+
+  // Warehouse Stocks Detail Modal State
+  const [detailModalOpen, setDetailModalOpen] = useState(false)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailData, setDetailData] = useState<WarehouseStockDetailResponse | null>(null)
+  const [detailTab, setDetailTab] = useState<'ALL' | 'RX' | 'OTC' | 'NEAR_EXPIRY'>('ALL')
+  const [detailSearch, setDetailSearch] = useState('')
+  const [detailPage, setDetailPage] = useState(1)
+  const [detailPageSize, setDetailPageSize] = useState(25)
 
   // Form state
   const [code, setCode] = useState('')
@@ -48,6 +122,48 @@ export function WarehousesPage() {
   useEffect(() => {
     loadWarehouses()
   }, [])
+
+  async function openWarehouseDetail(wh: WarehouseItem) {
+    setDetailModalOpen(true)
+    setDetailLoading(true)
+    setDetailData(null)
+    setDetailTab('ALL')
+    setDetailSearch('')
+    setDetailPage(1)
+    try {
+      const data = await api<WarehouseStockDetailResponse>(`/warehouses/${wh.id}/stocks`)
+      setDetailData(data)
+    } catch (err: any) {
+      setError(err.message || 'Không thể tải chi tiết tồn kho chi nhánh')
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
+  const filteredStocks = useMemo(() => {
+    if (!detailData || !detailData.stocks) return []
+    const q = detailSearch.trim().toLowerCase()
+    return detailData.stocks.filter((st) => {
+      if (detailTab === 'RX' && !st.is_prescription) return false
+      if (detailTab === 'OTC' && st.is_prescription) return false
+      if (detailTab === 'NEAR_EXPIRY' && !(st.risk_level === 'CRITICAL' || st.risk_level === 'WARNING')) return false
+
+      if (q) {
+        const matchName = (st.product_name || '').toLowerCase().includes(q)
+        const matchReg = (st.registration_number || '').toLowerCase().includes(q)
+        const matchBatch = (st.batch_number || '').toLowerCase().includes(q)
+        const matchMfr = (st.manufacturer || '').toLowerCase().includes(q)
+        return matchName || matchReg || matchBatch || matchMfr
+      }
+      return true
+    })
+  }, [detailData, detailTab, detailSearch])
+
+  const totalDetailPages = Math.max(1, Math.ceil(filteredStocks.length / detailPageSize))
+  const paginatedStocks = useMemo(() => {
+    const start = (detailPage - 1) * detailPageSize
+    return filteredStocks.slice(start, start + detailPageSize)
+  }, [filteredStocks, detailPage, detailPageSize])
 
   function openCreateModal() {
     setEditingWh(null)
@@ -277,7 +393,7 @@ export function WarehousesPage() {
               </div>
             </div>
 
-            {/* Status footer */}
+            {/* Status footer & Detail Action */}
             <div
               style={{
                 marginTop: '16px',
@@ -286,6 +402,8 @@ export function WarehousesPage() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '8px',
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
@@ -301,6 +419,23 @@ export function WarehousesPage() {
                   {wh.is_active ? 'Đang hoạt động' : 'Tạm dừng tiếp nhận'}
                 </span>
               </div>
+
+              <button
+                type="button"
+                className="button button-primary"
+                onClick={() => openWarehouseDetail(wh)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '12.5px',
+                  fontWeight: 700,
+                  padding: '6px 14px',
+                  background: '#0284c7',
+                }}
+              >
+                <Package size={14} /> Xem chi tiết thuốc & hạn dùng
+              </button>
             </div>
           </div>
         ))}
@@ -462,6 +597,517 @@ export function WarehousesPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* Modal View Warehouse Stock & Medicine Details */}
+      {detailModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.6)',
+            backdropFilter: 'blur(4px)',
+            zIndex: 150,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+          }}
+          onClick={() => setDetailModalOpen(false)}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: '16px',
+              maxWidth: '1150px',
+              width: '100%',
+              maxHeight: '92vh',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              overflow: 'hidden',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div
+              style={{
+                padding: '20px 24px',
+                borderBottom: '1px solid #e2e8f0',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: '#f8fafc',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div
+                  style={{
+                    width: '42px',
+                    height: '42px',
+                    borderRadius: '10px',
+                    background: detailData?.warehouse.is_central ? '#dbeafe' : '#e0e7ff',
+                    color: detailData?.warehouse.is_central ? '#1d4ed8' : '#4338ca',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Building2 size={24} />
+                </div>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: '#0f172a' }}>
+                      {detailData ? detailData.warehouse.name : 'Chi Tiết Tồn Kho Chi Nhánh'}
+                    </h2>
+                    {detailData && (
+                      <span
+                        style={{
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                          background: detailData.warehouse.is_central ? '#dbeafe' : '#f1f5f9',
+                          color: detailData.warehouse.is_central ? '#1d4ed8' : '#475569',
+                          border: '1px solid #cbd5e1',
+                        }}
+                      >
+                        {detailData.warehouse.code} {detailData.warehouse.is_central ? '• KHO TỔNG' : ''}
+                      </span>
+                    )}
+                  </div>
+                  {detailData && (
+                    <p style={{ margin: '4px 0 0', fontSize: '12.5px', color: '#64748b' }}>
+                      <MapPin size={13} style={{ display: 'inline', marginRight: '4px', verticalAlign: '-1px' }} />
+                      {detailData.warehouse.address}
+                      {detailData.warehouse.phone ? ` • SĐT: ${detailData.warehouse.phone}` : ''}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                className="icon-button"
+                onClick={() => setDetailModalOpen(false)}
+                style={{ padding: '8px', borderRadius: '8px' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1 }}>
+              {detailLoading ? (
+                <div style={{ textAlign: 'center', padding: '60px 0', color: '#64748b' }}>
+                  <RefreshCw size={28} className="spin" style={{ margin: '0 auto 12px', display: 'block', color: '#0284c7' }} />
+                  <span>Đang tải thông tin mặt hàng thuốc và hạn dùng...</span>
+                </div>
+              ) : !detailData ? (
+                <div style={{ textAlign: 'center', padding: '40px 0', color: '#ef4444' }}>
+                  Không tải được dữ liệu tồn kho. Vui lòng thử lại.
+                </div>
+              ) : (
+                <>
+                  {/* Stats Metric Cards */}
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                      gap: '12px',
+                      marginBottom: '20px',
+                    }}
+                  >
+                    <div style={{ background: '#eff6ff', padding: '12px 14px', borderRadius: '10px', border: '1px solid #bfdbfe' }}>
+                      <span style={{ fontSize: '11.5px', color: '#1e40af', fontWeight: 700, display: 'block' }}>MẶT HÀNG THUỐC</span>
+                      <strong style={{ fontSize: '22px', color: '#1d4ed8' }}>{detailData.stats.total_products}</strong>
+                      <span style={{ fontSize: '11px', color: '#3b82f6', display: 'block', marginTop: '2px' }}>danh mục SKU</span>
+                    </div>
+
+                    <div style={{ background: '#f0fdf4', padding: '12px 14px', borderRadius: '10px', border: '1px solid #bbf7d0' }}>
+                      <span style={{ fontSize: '11.5px', color: '#166534', fontWeight: 700, display: 'block' }}>TỒN THỰC TẾ (ON-HAND)</span>
+                      <strong style={{ fontSize: '22px', color: '#16a34a' }}>{detailData.stats.total_on_hand.toLocaleString('vi-VN')}</strong>
+                      <span style={{ fontSize: '11px', color: '#22c55e', display: 'block', marginTop: '2px' }}>đơn vị thuốc</span>
+                    </div>
+
+                    <div style={{ background: '#faf5ff', padding: '12px 14px', borderRadius: '10px', border: '1px solid #e9d5ff' }}>
+                      <span style={{ fontSize: '11.5px', color: '#6b21a8', fontWeight: 700, display: 'block' }}>TỔNG SỐ LÔ HÀNG</span>
+                      <strong style={{ fontSize: '22px', color: '#7e22ce' }}>{detailData.stats.total_batches}</strong>
+                      <span style={{ fontSize: '11px', color: '#9333ea', display: 'block', marginTop: '2px' }}>lô theo dõi FEFO</span>
+                    </div>
+
+                    <div style={{ background: '#fff1f2', padding: '12px 14px', borderRadius: '10px', border: '1px solid #fecdd3' }}>
+                      <span style={{ fontSize: '11.5px', color: '#9f1239', fontWeight: 700, display: 'block' }}>THUỐC KÊ ĐƠN (Rx)</span>
+                      <strong style={{ fontSize: '22px', color: '#be123c' }}>{detailData.stats.rx_count}</strong>
+                      <span style={{ fontSize: '11px', color: '#e11d48', display: 'block', marginTop: '2px' }}>cần toa bác sĩ</span>
+                    </div>
+
+                    <div style={{ background: '#f0fdfa', padding: '12px 14px', borderRadius: '10px', border: '1px solid #99f6e4' }}>
+                      <span style={{ fontSize: '11.5px', color: '#115e59', fontWeight: 700, display: 'block' }}>THUỐC KHÔNG KÊ ĐƠN (OTC)</span>
+                      <strong style={{ fontSize: '22px', color: '#0f766e' }}>{detailData.stats.otc_count}</strong>
+                      <span style={{ fontSize: '11px', color: '#14b8a6', display: 'block', marginTop: '2px' }}>mở bán tự do</span>
+                    </div>
+
+                    <div style={{ background: '#fefce8', padding: '12px 14px', borderRadius: '10px', border: '1px solid #fef08a' }}>
+                      <span style={{ fontSize: '11.5px', color: '#854d0e', fontWeight: 700, display: 'block' }}>CẬN HẠN & HẾT HẠN</span>
+                      <strong style={{ fontSize: '22px', color: detailData.stats.near_expiry_count > 0 ? '#b45309' : '#16a34a' }}>
+                        {detailData.stats.near_expiry_count}
+                      </strong>
+                      <span style={{ fontSize: '11px', color: '#ca8a04', display: 'block', marginTop: '2px' }}>lô cần ưu tiên xuất</span>
+                    </div>
+                  </div>
+
+                  {/* Filter Toolbar (Tabs & Search) */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      gap: '12px',
+                      marginBottom: '14px',
+                      background: '#f8fafc',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      border: '1px solid #e2e8f0',
+                    }}
+                  >
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={() => { setDetailTab('ALL'); setDetailPage(1); }}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: '6px',
+                          border: detailTab === 'ALL' ? '1px solid #0284c7' : '1px solid #cbd5e1',
+                          background: detailTab === 'ALL' ? '#0284c7' : '#ffffff',
+                          color: detailTab === 'ALL' ? '#ffffff' : '#334155',
+                          fontWeight: detailTab === 'ALL' ? 700 : 500,
+                          fontSize: '12.5px',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                        }}
+                      >
+                        <span>Tất cả</span>
+                        <span style={{ background: detailTab === 'ALL' ? 'rgba(255,255,255,0.25)' : '#e2e8f0', color: detailTab === 'ALL' ? '#ffffff' : '#1e293b', borderRadius: 999, padding: '1px 7px', fontSize: '11px', fontWeight: 700 }}>
+                          {detailData.stocks.length}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => { setDetailTab('RX'); setDetailPage(1); }}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: '6px',
+                          border: detailTab === 'RX' ? '1px solid #be123c' : '1px solid #cbd5e1',
+                          background: detailTab === 'RX' ? '#be123c' : '#ffffff',
+                          color: detailTab === 'RX' ? '#ffffff' : '#334155',
+                          fontWeight: detailTab === 'RX' ? 700 : 500,
+                          fontSize: '12.5px',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                        }}
+                      >
+                        <span>Thuốc kê đơn (Rx)</span>
+                        <span style={{ background: detailTab === 'RX' ? 'rgba(255,255,255,0.25)' : '#ffe4e6', color: detailTab === 'RX' ? '#ffffff' : '#9f1239', borderRadius: 999, padding: '1px 7px', fontSize: '11px', fontWeight: 700 }}>
+                          {detailData.stats.rx_count}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => { setDetailTab('OTC'); setDetailPage(1); }}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: '6px',
+                          border: detailTab === 'OTC' ? '1px solid #0f766e' : '1px solid #cbd5e1',
+                          background: detailTab === 'OTC' ? '#0f766e' : '#ffffff',
+                          color: detailTab === 'OTC' ? '#ffffff' : '#334155',
+                          fontWeight: detailTab === 'OTC' ? 700 : 500,
+                          fontSize: '12.5px',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                        }}
+                      >
+                        <span>Thuốc OTC</span>
+                        <span style={{ background: detailTab === 'OTC' ? 'rgba(255,255,255,0.25)' : '#ccfbf1', color: detailTab === 'OTC' ? '#ffffff' : '#115e59', borderRadius: 999, padding: '1px 7px', fontSize: '11px', fontWeight: 700 }}>
+                          {detailData.stats.otc_count}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => { setDetailTab('NEAR_EXPIRY'); setDetailPage(1); }}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: '6px',
+                          border: detailTab === 'NEAR_EXPIRY' ? '1px solid #d97706' : '1px solid #cbd5e1',
+                          background: detailTab === 'NEAR_EXPIRY' ? '#d97706' : '#ffffff',
+                          color: detailTab === 'NEAR_EXPIRY' ? '#ffffff' : '#334155',
+                          fontWeight: detailTab === 'NEAR_EXPIRY' ? 700 : 500,
+                          fontSize: '12.5px',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                        }}
+                      >
+                        <span>Cận hạn / Hết hạn</span>
+                        <span style={{ background: detailTab === 'NEAR_EXPIRY' ? 'rgba(255,255,255,0.25)' : '#fef3c7', color: detailTab === 'NEAR_EXPIRY' ? '#ffffff' : '#b45309', borderRadius: 999, padding: '1px 7px', fontSize: '11px', fontWeight: 700 }}>
+                          {detailData.stats.near_expiry_count}
+                        </span>
+                      </button>
+                    </div>
+
+                    <div style={{ position: 'relative', minWidth: '260px' }}>
+                      <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                      <input
+                        type="text"
+                        placeholder="Tìm tên thuốc, SĐK, số lô..."
+                        value={detailSearch}
+                        onChange={(e) => { setDetailSearch(e.target.value); setDetailPage(1); }}
+                        style={{ width: '100%', padding: '6px 28px 6px 30px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12.5px', background: '#ffffff' }}
+                      />
+                      {detailSearch && (
+                        <button
+                          type="button"
+                          onClick={() => setDetailSearch('')}
+                          style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
+                        >
+                          <X size={13} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Stocks Table */}
+                  <div
+                    style={{
+                      maxHeight: '420px',
+                      overflowY: 'auto',
+                      overflowX: 'auto',
+                      border: '1px solid #e2e8f0',
+                      borderTopLeftRadius: '8px',
+                      borderTopRightRadius: '8px',
+                      position: 'relative',
+                    }}
+                  >
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
+                      <thead style={{ position: 'sticky', top: 0, zIndex: 5, background: '#f8fafc', boxShadow: '0 1px 2px rgba(0,0,0,0.06)' }}>
+                        <tr style={{ borderBottom: '1px solid #e2e8f0', color: '#475569', textAlign: 'left' }}>
+                          <th style={{ padding: '9px 12px' }}>#</th>
+                          <th style={{ padding: '9px 12px' }}>Tên thuốc & Dạng bào chế</th>
+                          <th style={{ padding: '9px 12px' }}>Phân loại</th>
+                          <th style={{ padding: '9px 12px' }}>Số đăng ký</th>
+                          <th style={{ padding: '9px 12px' }}>Số lô</th>
+                          <th style={{ padding: '9px 12px' }}>Hạn dùng (FEFO)</th>
+                          <th style={{ padding: '9px 12px' }}>Vị trí lưu</th>
+                          <th style={{ padding: '9px 12px', textAlign: 'right' }}>Tồn thực tế</th>
+                          <th style={{ padding: '9px 12px', textAlign: 'right' }}>Khả dụng</th>
+                          <th style={{ padding: '9px 12px', textAlign: 'center' }}>Trạng thái</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {paginatedStocks.length === 0 ? (
+                          <tr>
+                            <td colSpan={10} style={{ textAlign: 'center', padding: '36px 16px', color: '#64748b' }}>
+                              Không có thuốc nào phù hợp với bộ lọc trong kho này.
+                            </td>
+                          </tr>
+                        ) : (
+                          paginatedStocks.map((st, idx) => (
+                            <tr key={st.stock_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                              <td style={{ padding: '8px 12px', color: '#64748b' }}>
+                                #{(detailPage - 1) * detailPageSize + idx + 1}
+                              </td>
+                              <td style={{ padding: '8px 12px' }}>
+                                <div style={{ fontWeight: 700, color: '#0f172a' }}>{st.product_name}</div>
+                                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                                  {st.dosage_form || '—'} {st.package_description ? `• ${st.package_description}` : ''}
+                                </div>
+                              </td>
+                              <td style={{ padding: '8px 12px' }}>
+                                <span
+                                  style={{
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                    padding: '2px 7px',
+                                    borderRadius: '4px',
+                                    background: st.is_prescription ? '#ffe4e6' : '#ccfbf1',
+                                    color: st.is_prescription ? '#be123c' : '#0f766e',
+                                  }}
+                                >
+                                  {st.rx_label}
+                                </span>
+                              </td>
+                              <td style={{ padding: '8px 12px' }}>
+                                <code style={{ fontFamily: 'monospace', color: '#0369a1', fontSize: '12px' }}>
+                                  {st.registration_number || '—'}
+                                </code>
+                              </td>
+                              <td style={{ padding: '8px 12px' }}>
+                                <span style={{ fontFamily: 'monospace', fontWeight: 600, color: '#334155' }}>
+                                  {st.batch_number}
+                                </span>
+                              </td>
+                              <td style={{ padding: '8px 12px' }}>
+                                <span
+                                  style={{
+                                    fontWeight: 700,
+                                    padding: '2px 7px',
+                                    borderRadius: '4px',
+                                    fontSize: '11.5px',
+                                    background:
+                                      st.risk_level === 'CRITICAL'
+                                        ? '#fee2e2'
+                                        : st.risk_level === 'WARNING'
+                                        ? '#fef3c7'
+                                        : '#dcfce7',
+                                    color:
+                                      st.risk_level === 'CRITICAL'
+                                        ? '#b91c1c'
+                                        : st.risk_level === 'WARNING'
+                                        ? '#b45309'
+                                        : '#15803d',
+                                  }}
+                                >
+                                  {st.expiry_date}
+                                </span>
+                                <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '2px' }}>
+                                  {st.risk_label}
+                                </div>
+                              </td>
+                              <td style={{ padding: '8px 12px' }}>
+                                <code style={{ fontSize: '11.5px', background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>
+                                  {st.location_code}
+                                </code>
+                              </td>
+                              <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 700, color: '#0f172a' }}>
+                                {st.quantity_on_hand.toLocaleString('vi-VN')} {st.uom}
+                              </td>
+                              <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 700, color: '#16a34a' }}>
+                                {st.quantity_available.toLocaleString('vi-VN')}
+                              </td>
+                              <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                                <span
+                                  style={{
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                    padding: '2px 6px',
+                                    borderRadius: '4px',
+                                    background: st.batch_status === 'ACTIVE' ? '#f0fdf4' : '#fef2f2',
+                                    color: st.batch_status === 'ACTIVE' ? '#166534' : '#b91c1c',
+                                  }}
+                                >
+                                  {st.batch_status}
+                                </span>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Pagination footer */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      gap: '12px',
+                      padding: '10px 14px',
+                      background: '#f8fafc',
+                      borderTop: '1px solid #e2e8f0',
+                      borderBottomLeftRadius: '8px',
+                      borderBottomRightRadius: '8px',
+                      fontSize: '12.5px',
+                    }}
+                  >
+                    <span style={{ color: '#64748b' }}>
+                      Hiển thị <strong>{filteredStocks.length === 0 ? 0 : (detailPage - 1) * detailPageSize + 1} - {Math.min(detailPage * detailPageSize, filteredStocks.length)}</strong> trên tổng <strong>{filteredStocks.length.toLocaleString('vi-VN')}</strong> lô thuốc
+                    </span>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setDetailPage(p => Math.max(1, p - 1))}
+                        disabled={detailPage <= 1}
+                        className="button button-secondary"
+                        style={{ padding: '4px 10px', fontSize: '12px' }}
+                      >
+                        Trước
+                      </button>
+                      <span style={{ fontWeight: 600, padding: '0 6px' }}>
+                        Trang {detailPage} / {totalDetailPages}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setDetailPage(p => Math.min(totalDetailPages, p + 1))}
+                        disabled={detailPage >= totalDetailPages}
+                        className="button button-secondary"
+                        style={{ padding: '4px 10px', fontSize: '12px' }}
+                      >
+                        Sau
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div
+              style={{
+                padding: '14px 24px',
+                borderTop: '1px solid #e2e8f0',
+                background: '#f8fafc',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '12px',
+              }}
+            >
+              <div style={{ fontSize: '12.5px', color: '#64748b' }}>
+                Hệ thống tự động đồng bộ tồn kho thực tế và áp dụng nguyên tắc quản lý thuốc FEFO (Hết hạn trước - Xuất trước).
+              </div>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                {detailData && (
+                  <Link
+                    to={`/inventory/batches?warehouse_id=${detailData.warehouse.id}`}
+                    className="button button-secondary"
+                    style={{ textDecoration: 'none', fontSize: '12.5px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <Layers size={14} /> Quản lý lô tại trang Lô thuốc
+                  </Link>
+                )}
+                <Link
+                  to="/imports"
+                  className="button button-primary"
+                  style={{ textDecoration: 'none', fontSize: '12.5px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#16a34a' }}
+                >
+                  <Package size={14} /> Nhập thêm thuốc vào kho này
+                </Link>
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => setDetailModalOpen(false)}
+                  style={{ fontSize: '12.5px' }}
+                >
+                  Đóng
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

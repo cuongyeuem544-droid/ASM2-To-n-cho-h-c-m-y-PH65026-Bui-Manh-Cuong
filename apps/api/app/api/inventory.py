@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -230,6 +230,141 @@ def update_warehouse(
     return {"message": "Cập nhật thông tin kho thành công", "id": wh.id}
 
 
+@warehouses_router.get("/{wh_id}/stocks")
+def get_warehouse_stocks(
+    wh_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Xem chi tiết tất cả mặt hàng thuốc, số lượng, phân loại đơn thuốc (Rx/OTC)
+    và hạn sử dụng của từng lô trong kho / chi nhánh chỉ định.
+    """
+    wh = db.get(Warehouse, wh_id)
+    if not wh:
+        raise HTTPException(status_code=404, detail="Không tìm thấy thông tin kho chi nhánh")
+
+    stocks = db.scalars(
+        select(WarehouseBatchStock)
+        .where(WarehouseBatchStock.warehouse_id == wh_id)
+        .options(
+            selectinload(WarehouseBatchStock.batch).selectinload(InventoryBatch.sku).selectinload(ProductSku.canonical_product),
+            selectinload(WarehouseBatchStock.batch).selectinload(InventoryBatch.supplier),
+            selectinload(WarehouseBatchStock.location),
+        )
+    ).all()
+
+    today = date.today()
+    items = []
+    unique_product_ids = set()
+    total_on_hand = 0
+    total_available = 0
+    total_reserved = 0
+    rx_count = 0
+    otc_count = 0
+    near_expiry_count = 0
+    expired_count = 0
+
+    for s in stocks:
+        b = s.batch
+        if not b:
+            continue
+
+        prod = b.sku.canonical_product if b.sku else None
+        prod_name = prod.canonical_name if prod else "N/A"
+        prod_id = prod.id if prod else None
+        if prod_id:
+            unique_product_ids.add(prod_id)
+
+        rx_val = prod.rx_otc_status.value if prod and prod.rx_otc_status else "UNKNOWN"
+        is_rx = rx_val == "RX"
+        if is_rx:
+            rx_count += 1
+        elif rx_val == "OTC":
+            otc_count += 1
+
+        days_remaining = (b.expiry_date - today).days
+        if days_remaining <= 0 or b.status == "EXPIRED":
+            risk = "CRITICAL"
+            risk_label = "Đã hết hạn"
+            expired_count += 1
+        elif days_remaining <= 60:
+            risk = "CRITICAL"
+            risk_label = "Cận hạn khẩn cấp (<60 ngày)"
+            near_expiry_count += 1
+        elif days_remaining <= 180:
+            risk = "WARNING"
+            risk_label = "Cận hạn (2-6 tháng)"
+            near_expiry_count += 1
+        else:
+            risk = "SAFE"
+            risk_label = "An toàn (>6 tháng)"
+
+        total_on_hand += s.quantity_on_hand
+        total_available += s.quantity_available
+        total_reserved += s.quantity_reserved
+
+        items.append({
+            "stock_id": s.id,
+            "product_id": prod_id,
+            "product_name": prod_name,
+            "registration_number": prod.registration_number if prod else None,
+            "dosage_form": prod.dosage_form if prod else None,
+            "package_description": prod.package_description if prod else None,
+            "manufacturer": prod.manufacturer if prod else None,
+            "rx_otc": rx_val,
+            "is_prescription": is_rx,
+            "rx_label": "Kê đơn (Rx)" if is_rx else ("Không kê đơn (OTC)" if rx_val == "OTC" else "Chưa phân loại"),
+            "sku_id": b.sku_id,
+            "sku_code": b.sku.sku_code if b.sku else "",
+            "uom": b.sku.uom if b.sku else "Hộp",
+            "price": float(b.sku.base_price) if b.sku and b.sku.base_price else None,
+            "batch_id": b.id,
+            "batch_number": b.batch_number,
+            "manufacture_date": b.manufacture_date.isoformat() if b.manufacture_date else None,
+            "expiry_date": b.expiry_date.isoformat(),
+            "days_remaining": days_remaining,
+            "risk_level": risk,
+            "risk_label": risk_label,
+            "quantity_on_hand": s.quantity_on_hand,
+            "quantity_available": s.quantity_available,
+            "quantity_reserved": s.quantity_reserved,
+            "location_code": s.location.code if s.location else "Khu tiêu chuẩn",
+            "location_name": s.location.name if s.location else None,
+            "batch_status": b.status,
+            "supplier_name": b.supplier.name if b.supplier else "N/A",
+        })
+
+    # Sort items by FEFO (expiry date ascending)
+    items.sort(key=lambda x: x["expiry_date"])
+
+    return {
+        "warehouse": {
+            "id": wh.id,
+            "code": wh.code,
+            "name": wh.name,
+            "address": wh.address,
+            "district": wh.district,
+            "province": wh.province,
+            "phone": wh.phone,
+            "is_central": wh.is_central,
+            "is_active": wh.is_active,
+        },
+        "stats": {
+            "total_products": len(unique_product_ids),
+            "total_batches": len(items),
+            "total_on_hand": total_on_hand,
+            "total_available": total_available,
+            "total_reserved": total_reserved,
+            "rx_count": rx_count,
+            "otc_count": otc_count,
+            "near_expiry_count": near_expiry_count,
+            "expired_count": expired_count,
+        },
+        "stocks": items,
+    }
+
+
 # ==============================================================================
 # BATCHES & FEFO INVENTORY
 # ==============================================================================
@@ -260,7 +395,7 @@ def list_batches(
     today = date.today()
     if near_expiry:
         # Near expiry: between today and today + 90 days
-        query = query.where(InventoryBatch.expiry_date >= today, InventoryBatch.expiry_date <= today + datetime.timedelta(days=90))
+        query = query.where(InventoryBatch.expiry_date >= today, InventoryBatch.expiry_date <= today + timedelta(days=90))
 
     batches = db.scalars(query).all()
 

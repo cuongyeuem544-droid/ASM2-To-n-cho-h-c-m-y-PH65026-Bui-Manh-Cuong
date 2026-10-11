@@ -28,6 +28,7 @@ from app.models import (
     RawDocument,
     Warehouse,
     WarehouseBatchStock,
+    StockMovement,
 )
 from app.models.enums import (
     ConfidenceLabel,
@@ -576,6 +577,7 @@ def _allocate_batch_and_stock(
         db.add(batch)
         db.flush()
 
+    default_loc_id = wh.locations[0].id if wh.locations else None
     wh_stock = db.scalar(
         select(WarehouseBatchStock).where(
             WarehouseBatchStock.warehouse_id == wh.id,
@@ -586,6 +588,7 @@ def _allocate_batch_and_stock(
         wh_stock = WarehouseBatchStock(
             warehouse_id=wh.id,
             batch_id=batch.id,
+            location_id=default_loc_id,
             quantity_on_hand=item_qty,
             quantity_available=item_qty,
             quantity_reserved=0,
@@ -594,6 +597,22 @@ def _allocate_batch_and_stock(
     else:
         wh_stock.quantity_on_hand += item_qty
         wh_stock.quantity_available += item_qty
+        if not wh_stock.location_id and default_loc_id:
+            wh_stock.location_id = default_loc_id
+
+    # Ghi nhận thẻ kho (StockMovement)
+    mov = StockMovement(
+        movement_code=f"MOV-IMP-{int(datetime.now().timestamp() * 1000)}-{batch.id}",
+        movement_type="RECEIPT",
+        warehouse_id=wh.id,
+        batch_id=batch.id,
+        quantity=item_qty,
+        balance_after=wh_stock.quantity_on_hand,
+        reference_type="STOCK_RECEIPT",
+        reference_id=f"EXCEL-IMP-{wh.code}-{item_batch_no}",
+        note=f"Nhập thuốc từ tệp Excel vào chi nhánh {wh.name}",
+    )
+    db.add(mov)
 
     return item_batch_no, item_exp.isoformat(), item_qty
 

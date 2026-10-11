@@ -110,6 +110,7 @@ class ProductSku(Base):
     is_default: Mapped[bool] = mapped_column(Boolean, default=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    canonical_product: Mapped["CanonicalProduct"] = relationship()
     batches: Mapped[list["InventoryBatch"]] = relationship(back_populates="sku", cascade="all, delete-orphan")
 
 
