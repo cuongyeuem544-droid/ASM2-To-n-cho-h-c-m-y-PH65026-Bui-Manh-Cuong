@@ -202,7 +202,7 @@ export const RxConsultModal: React.FC<RxConsultModalProps> = ({
                   <p className="font-bold text-brand-blue-900">Thông tin yêu cầu:</p>
                   <p className="text-slate-600">• Người bệnh: <span className="font-semibold">{patientName || "Khách hàng"}</span></p>
                   <p className="text-slate-600">• Thuốc quan tâm: <span className="font-semibold">{product.name}</span></p>
-                  <p className="text-slate-600">• Kênh hỗ trợ Dược sĩ: <a href={`tel:${PHARMACY_CONTACT.consultationPhone}`} className="font-bold text-brand-blue-700 underline">{PHARMACY_CONTACT.consultationPhoneDisplay}</a></p>
+                  <p className="text-slate-600">• Kênh hỗ trợ Dược sĩ: <span className="font-semibold text-brand-blue-700">{PHARMACY_CONTACT.supportEmail}</span></p>
                 </div>
 
                 <Button variant="outline" size="md" onClick={handleReset} className="w-full">

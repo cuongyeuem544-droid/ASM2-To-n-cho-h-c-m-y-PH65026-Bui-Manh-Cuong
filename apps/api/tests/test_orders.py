@@ -1,5 +1,10 @@
+import os
+import sys
 import unittest
 from decimal import Decimal
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from fastapi.testclient import TestClient
 
 from app.db.base import Base
@@ -24,6 +29,7 @@ class TestOrdersSystem(unittest.TestCase):
             regulatory_status=RegulatoryStatus.ACTIVE,
             rx_otc_status=RxOtcStatus.OTC,
             publish_status=PublishStatus.PUBLISHED,
+            publish_mode="SALE_ELIGIBLE",
         )
         self.db.merge(self.prod)
 

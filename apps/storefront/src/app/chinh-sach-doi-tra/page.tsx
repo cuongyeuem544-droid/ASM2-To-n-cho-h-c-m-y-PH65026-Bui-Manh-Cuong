@@ -222,7 +222,7 @@ export default function ChinhSachDoiTraPage() {
                 Kho Trung Tâm Dược Phẩm H4Care: 123 Đường Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh
               </p>
               <p className="text-xs text-slate-400 mt-1">
-                Hotline hỗ trợ đổi trả dược sĩ: <strong className="text-white">1800 6868</strong> (Miễn cước, 8h00 - 21h00 hàng ngày)
+                Kênh hỗ trợ đổi trả Dược khoa: <strong className="text-white">duocsi@h4care.vn</strong> (Phản hồi 8h00 - 21h00 hàng ngày)
               </p>
             </div>
 

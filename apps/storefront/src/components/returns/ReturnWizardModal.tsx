@@ -257,7 +257,7 @@ export function ReturnWizardModal({
             </div>
             <p>{eligibility.rejection_reason}</p>
             <div className="pt-2 border-t border-amber-200/60 text-[11px] text-amber-700">
-              Cần hỗ trợ đặc biệt? Quý khách vui lòng gọi Dược sĩ trực: <strong>1800 6868</strong>
+              Cần hỗ trợ đặc biệt? Quý khách vui lòng liên hệ email: <strong>duocsi@h4care.vn</strong>
             </div>
           </div>
         ) : eligibility ? (

@@ -23,6 +23,7 @@ from app.models.entities import (
 )
 from app.models.inventory import (
     AdministrativeUnit,
+    BatchStatus,
     CustomerAddress,
     EmailOutbox,
     FulfillmentItem,
@@ -70,6 +71,7 @@ from app.models.returns import (
 __all__ = [
     "AdminAlert",
     "AdministrativeUnit",
+    "BatchStatus",
     "AuditLog",
     "CanonicalProduct",
     "ConfidenceScore",

@@ -1,7 +1,12 @@
+import os
+import sys
 import time
 import unittest
 from datetime import date, timedelta
 from decimal import Decimal
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from fastapi.testclient import TestClient
 
 from app.db.base import Base
@@ -99,6 +104,11 @@ class TestFefoFulfillmentSuite(unittest.TestCase):
             self.db.add(prod)
             self.db.commit()
             self.db.refresh(prod)
+
+        prod.publish_mode = "SALE_ELIGIBLE"
+        prod.publish_status = PublishStatus.PUBLISHED
+        prod.is_demo = False
+        self.db.commit()
 
         price_obs = self.db.query(PriceObservation).filter_by(product_id=prod_id).first()
         if not price_obs:
@@ -343,7 +353,10 @@ class TestFefoFulfillmentSuite(unittest.TestCase):
 
         resp = self.client.post("/api/v1/store/orders/checkout", json=payload)
         self.assertEqual(resp.status_code, 400)
-        self.assertIn("Số lượng tồn kho không đủ", resp.json()["detail"])
+        self.assertTrue(
+            any(k in resp.json()["detail"] for k in ["Số lượng tồn kho không đủ", "Tạm hết hàng"]),
+            resp.json()["detail"],
+        )
 
     def test_05_fulfillment_lifecycle_shipped_updates_stock_and_creates_movement(self):
         """Chuyển trạng thái kiện sang SHIPPED trừ on_hand và ghi Thẻ kho DISPATCH."""

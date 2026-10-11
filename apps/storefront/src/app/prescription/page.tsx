@@ -16,7 +16,9 @@ import {
   FileCheck,
   Stethoscope,
   Lock,
+  Mail,
 } from "lucide-react";
+import { PHARMACY_CONTACT } from "@/lib/constants";
 
 export default function PrescriptionPage() {
   return (
@@ -51,21 +53,18 @@ export default function PrescriptionPage() {
               </p>
             </div>
 
-            {/* Quick Hotline Pill */}
+            {/* Quick Contact Pill */}
             <div className="p-4 rounded-2xl bg-brand-blue-50/70 border border-brand-blue-100 shrink-0 flex items-center gap-3.5 w-full lg:w-auto">
               <div className="w-10 h-10 rounded-xl bg-brand-blue-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-                <PhoneCall className="w-5 h-5" />
+                <Mail className="w-5 h-5" />
               </div>
               <div>
                 <span className="text-[11px] text-slate-500 font-medium block">
-                  Tổng đài Dược sĩ trực tuyến
+                  Kênh tiếp nhận chuyên môn
                 </span>
-                <a
-                  href="tel:18006868"
-                  className="text-sm sm:text-base font-black text-brand-blue-800 hover:text-brand-blue-600 transition-colors"
-                >
-                  1800 6868 (Miễn phí)
-                </a>
+                <span className="text-sm sm:text-base font-bold text-brand-blue-800">
+                  {PHARMACY_CONTACT.supportEmail}
+                </span>
               </div>
             </div>
           </div>

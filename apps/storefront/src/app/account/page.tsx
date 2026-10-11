@@ -32,6 +32,7 @@ import {
   RefreshCw,
   Banknote,
   QrCode,
+  Stethoscope,
 } from "lucide-react";
 import { CustomerAddressBook } from "@/components/account/CustomerAddressBook";
 import { CustomerReturnsSection } from "@/components/returns/CustomerReturnsSection";
@@ -544,9 +545,9 @@ export default function AccountPage() {
                   <span className="text-emerald-700 font-bold flex items-center gap-1">
                     <ShieldCheck className="w-3.5 h-3.5" /> Dược sĩ tư vấn: DS. Nguyễn Minh Anh
                   </span>
-                  <a href="tel:18006868" className="text-brand-blue-600 font-bold hover:underline">
-                    Gọi tư vấn lại
-                  </a>
+                  <Link href="/prescription" className="text-brand-blue-600 font-bold hover:underline">
+                    Tư vấn lại trực tuyến
+                  </Link>
                 </div>
               </div>
             </div>
@@ -839,13 +840,13 @@ export default function AccountPage() {
             )}
 
             <div className="flex items-center gap-2">
-              <a
-                href="tel:18006868"
+              <Link
+                href="/prescription"
                 className="flex-1 py-2.5 rounded-xl bg-brand-blue-50 text-brand-blue-700 hover:bg-brand-blue-100 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
               >
-                <PhoneCall className="w-3.5 h-3.5" />
-                <span>Tư vấn lại về đơn này</span>
-              </a>
+                <Stethoscope className="w-3.5 h-3.5" />
+                <span>Tư vấn trực tuyến về đơn này</span>
+              </Link>
               <button
                 onClick={() => setSelectedOrder(null)}
                 className="px-4 py-2.5 rounded-xl bg-slate-900 text-white font-bold text-xs hover:bg-slate-800 transition-colors"

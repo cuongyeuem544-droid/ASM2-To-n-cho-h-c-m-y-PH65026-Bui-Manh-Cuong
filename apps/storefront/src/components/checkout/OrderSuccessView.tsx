@@ -175,11 +175,13 @@ export default function OrderSuccessView({
 
         {/* Pharmacy Support Hotline */}
         <div className="pt-4 text-center text-xs text-slate-500">
-          Cần hỗ trợ về đơn thuốc? Liên hệ Tổng đài Dược sĩ:{" "}
-          <a href={`tel:${PHARMACY_CONTACT.consultationPhone}`} className="font-bold text-brand-blue-700 hover:underline">
-            {PHARMACY_CONTACT.consultationPhoneDisplay}
-          </a>{" "}
-          ({PHARMACY_CONTACT.operatingHours})
+          Cần hỗ trợ về đơn hàng hoặc toa thuốc? Vui lòng gửi email tới{" "}
+          <span className="font-bold text-brand-blue-700">{PHARMACY_CONTACT.supportEmail}</span>{" "}
+          hoặc gửi yêu cầu qua trang{" "}
+          <Link href="/prescription" className="text-brand-blue-600 underline font-semibold">
+            Tư vấn Dược sĩ trực tuyến
+          </Link>
+          . ({PHARMACY_CONTACT.operatingHours})
         </div>
       </div>
     </div>

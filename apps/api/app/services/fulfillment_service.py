@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import (
+    BatchStatus,
     CanonicalProduct,
     FulfillmentItem,
     InventoryBatch,
@@ -152,13 +153,14 @@ class FulfillmentRoutingService:
         for w in ordered_warehouses:
             for it in items:
                 sku = item_sku_map[it.id]
-                avail = db.query(func.sum(WarehouseBatchStock.quantity_available)).join(
+                avail = db.query(func.coalesce(func.sum(WarehouseBatchStock.quantity_available), 0)).join(
                     InventoryBatch, InventoryBatch.id == WarehouseBatchStock.batch_id
                 ).filter(
                     WarehouseBatchStock.warehouse_id == w.id,
+                    WarehouseBatchStock.quantity_available > 0,
                     InventoryBatch.sku_id == sku.id,
-                    InventoryBatch.status == "ACTIVE",
-                    InventoryBatch.expiry_date >= today,
+                    InventoryBatch.status == BatchStatus.ACTIVE,
+                    InventoryBatch.expiry_date > today,
                 ).scalar() or 0
                 wh_sku_avail[w.id][sku.id] = int(avail)
 
@@ -329,8 +331,8 @@ class FulfillmentRoutingService:
             .filter(
                 WarehouseBatchStock.warehouse_id == warehouse.id,
                 InventoryBatch.sku_id == sku.id,
-                InventoryBatch.status == "ACTIVE",
-                InventoryBatch.expiry_date >= today,
+                InventoryBatch.status == BatchStatus.ACTIVE,
+                InventoryBatch.expiry_date > today,
                 WarehouseBatchStock.quantity_available > 0,
             )
             .order_by(InventoryBatch.expiry_date.asc(), InventoryBatch.id.asc())

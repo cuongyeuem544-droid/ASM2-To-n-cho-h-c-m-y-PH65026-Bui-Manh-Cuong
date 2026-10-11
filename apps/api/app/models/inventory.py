@@ -128,6 +128,13 @@ class Supplier(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class BatchStatus:
+    ACTIVE = "ACTIVE"
+    QUARANTINED = "QUARANTINED"
+    RECALLED = "RECALLED"
+    EXPIRED = "EXPIRED"
+
+
 class InventoryBatch(Base):
     __tablename__ = "inventory_batches"
 
@@ -138,7 +145,7 @@ class InventoryBatch(Base):
     expiry_date: Mapped[date] = mapped_column(Date, index=True)  # Key for FEFO
     supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id", ondelete="SET NULL"), nullable=True, index=True)
     initial_quantity: Mapped[int] = mapped_column(Integer, default=0)
-    status: Mapped[str] = mapped_column(String(50), default="ACTIVE")  # ACTIVE, QUARANTINED, RECALLED, EXPIRED
+    status: Mapped[str] = mapped_column(String(50), default=BatchStatus.ACTIVE)  # ACTIVE, QUARANTINED, RECALLED, EXPIRED
     certificate_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

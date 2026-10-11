@@ -20,6 +20,7 @@ from app.models import (
     OrderItemBatchAllocation,
     PaymentTransaction,
     PriceObservation,
+    ProductSku,
     User,
 )
 from app.models.enums import PublishStatus, RxOtcStatus, UserRole
@@ -246,6 +247,15 @@ def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)):
     for pid, pval in price_rows:
         if pid not in prices_map and pval is not None:
             prices_map[pid] = Decimal(str(pval))
+
+    for p in products:
+        if p.id not in prices_map:
+            sku_obj = db.query(ProductSku).filter(
+                ProductSku.canonical_product_id == p.id,
+                ProductSku.is_active == True,
+            ).order_by(ProductSku.is_default.desc()).first()
+            if sku_obj and sku_obj.base_price and sku_obj.base_price > 0:
+                prices_map[p.id] = Decimal(str(sku_obj.base_price))
 
     order_items_to_add = []
     total_amount = Decimal("0.0")

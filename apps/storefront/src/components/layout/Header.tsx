@@ -10,7 +10,7 @@ import { MobileDrawer } from "./MobileDrawer";
 import { MobileBottomNav } from "./MobileBottomNav";
 import {
   LayoutGrid,
-  PhoneCall,
+  Stethoscope,
   ShoppingBag,
   User,
   ChevronDown,
@@ -38,19 +38,7 @@ export const Header: React.FC<HeaderProps> = ({ onReplayIntro }) => {
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const [isAccountDropdownOpen, setIsAccountDropdownOpen] = useState(false);
   const [cartCount, setCartCount] = useState(0);
-  const [copiedHotline, setCopiedHotline] = useState(false);
 
-  const handleHotlineClick = (e: React.MouseEvent) => {
-    // Trên máy tính bàn/laptop Windows, tránh mở popup hệ thống 'Select an app to open tel link'
-    if (typeof window !== "undefined" && !/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
-      e.preventDefault();
-      try {
-        navigator.clipboard.writeText(PHARMACY_CONTACT.consultationPhone);
-        setCopiedHotline(true);
-        setTimeout(() => setCopiedHotline(false), 3000);
-      } catch (err) {}
-    }
-  };
 
   useEffect(() => {
     const updateCartCount = () => {
@@ -103,19 +91,14 @@ export const Header: React.FC<HeaderProps> = ({ onReplayIntro }) => {
           </div>
 
           <div className="flex items-center gap-4">
-            <a
-              href={`tel:${PHARMACY_CONTACT.consultationPhone}`}
-              onClick={handleHotlineClick}
+            <Link
+              href="/prescription"
               className="flex items-center gap-1.5 text-cyan-300 hover:text-white font-semibold transition-colors cursor-pointer"
-              title="Nhấn để gọi trên di động hoặc sao chép số trên máy tính"
+              title="Tư vấn Dược sĩ chuyên môn trực tuyến"
             >
-              <PhoneCall className="w-3 h-3 text-cyan-400" />
-              <span>
-                {copiedHotline
-                  ? `✓ Đã sao chép ${PHARMACY_CONTACT.consultationPhoneDisplay}`
-                  : `Tư vấn Dược sĩ: ${PHARMACY_CONTACT.consultationPhoneDisplay}`}
-              </span>
-            </a>
+              <Stethoscope className="w-3.5 h-3.5 text-cyan-400" />
+              <span>{PHARMACY_CONTACT.consultationPhoneDisplay}</span>
+            </Link>
 
             {onReplayIntro && (
               <button
@@ -193,22 +176,21 @@ export const Header: React.FC<HeaderProps> = ({ onReplayIntro }) => {
               </button>
 
               {/* Consultation Hotline Pill - Minimalist on xl */}
-              <a
-                href={`tel:${PHARMACY_CONTACT.consultationPhone}`}
-                onClick={handleHotlineClick}
+              <Link
+                href="/prescription"
                 className="hidden xl:flex items-center gap-2 px-3 py-2 rounded-xl border border-cyan-200 bg-cyan-50/50 hover:bg-cyan-100/60 text-slate-800 transition-all duration-150 cursor-pointer"
-                title="Nhấn để gọi trên di động hoặc sao chép số trên máy tính"
+                title="Gửi yêu cầu tư vấn Dược sĩ chuyên môn"
               >
                 <div className="w-6 h-6 rounded-lg bg-cyan-100 text-cyan-700 flex items-center justify-center shrink-0">
-                  <PhoneCall className="w-3.5 h-3.5" />
+                  <Stethoscope className="w-3.5 h-3.5" />
                 </div>
                 <div className="text-left leading-none">
-                  <span className="text-[10px] text-slate-500 block font-normal">Tư vấn Dược sĩ</span>
+                  <span className="text-[10px] text-slate-500 block font-normal">Dược sĩ chuyên môn</span>
                   <span className="text-xs font-bold text-slate-900">
-                    {copiedHotline ? "✓ Đã copy" : PHARMACY_CONTACT.consultationPhoneDisplay}
+                    Tư vấn trực tuyến
                   </span>
                 </div>
-              </a>
+              </Link>
 
               {/* Admin & Crawler Portal Quick Access Button */}
               {user?.isAdmin ? (

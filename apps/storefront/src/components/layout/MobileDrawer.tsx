@@ -76,13 +76,13 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ isOpen, onClose }) =
                 </div>
                 <div>
                   <p className="text-xs font-bold text-brand-blue-950">Tư vấn Dược sĩ chuyên môn</p>
-                  <a
-                    href={`tel:${PHARMACY_CONTACT.consultationPhone}`}
-                    className="text-sm font-extrabold text-brand-blue-600 flex items-center gap-1 hover:underline"
+                  <Link
+                    href="/prescription"
+                    onClick={onClose}
+                    className="text-xs font-bold text-brand-blue-600 flex items-center gap-1 hover:underline mt-0.5"
                   >
-                    <PhoneCall className="w-3.5 h-3.5" />
-                    <span>{PHARMACY_CONTACT.consultationPhoneDisplay}</span>
-                  </a>
+                    <span>Gửi yêu cầu trực tuyến &rarr;</span>
+                  </Link>
                 </div>
               </div>
             </div>

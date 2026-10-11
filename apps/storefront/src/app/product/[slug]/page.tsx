@@ -38,7 +38,6 @@ import {
   MapPin,
   QrCode,
   Info,
-  Phone,
   Layers,
   Sparkles,
   ArrowRight,
@@ -558,7 +557,9 @@ export default function ProductDetailPage() {
                   </div>
 
                   <span className="text-xs text-slate-500 font-medium bg-white px-2.5 py-1 rounded-full border border-slate-200/80">
-                    Giá đã bao gồm thuế VAT
+                    {product.isSaleEligible
+                      ? "Giá niêm yết (Đã gồm VAT)"
+                      : "Giá tham khảo (Chưa mở bán thương mại)"}
                   </span>
                 </div>
 
@@ -598,27 +599,16 @@ export default function ProductDetailPage() {
                       </div>
                     </div>
 
-                    <div className="flex flex-col sm:flex-row items-center gap-3">
+                    <div className="flex items-center">
                       <Button
                         variant="primary"
                         size="lg"
-                        className="w-full sm:flex-1 shadow-xs bg-brand-blue-600 hover:bg-brand-blue-700 text-white"
+                        className="w-full shadow-xs bg-brand-blue-600 hover:bg-brand-blue-700 text-white"
                         leftIcon={<Stethoscope className="w-5 h-5" />}
                         onClick={() => setIsRxModalOpen(true)}
                       >
-                        Gửi Đơn Thuốc & Tư Vấn Dược Sĩ
+                        Gửi Đơn Thuốc & Tư Vấn Dược Sĩ Trực Tuyến
                       </Button>
-
-                      <a href={`tel:${PHARMACY_CONTACT.consultationPhone}`} className="w-full sm:w-auto">
-                        <Button
-                          variant="outline"
-                          size="lg"
-                          className="w-full border-brand-blue-300 text-brand-blue-700 hover:bg-brand-blue-50"
-                          leftIcon={<Phone className="w-4 h-4" />}
-                        >
-                          {PHARMACY_CONTACT.consultationPhoneDisplay}
-                        </Button>
-                      </a>
                     </div>
                   </div>
                 ) : product.catalogTier === "REFERENCE_ONLY" || !product.isSaleEligible ? (
@@ -637,27 +627,16 @@ export default function ProductDetailPage() {
                       </div>
                     </div>
 
-                    <div className="flex flex-col sm:flex-row items-center gap-3">
+                    <div className="flex items-center">
                       <Button
                         variant="primary"
                         size="lg"
-                        className="w-full sm:flex-1 shadow-xs bg-brand-blue-600 hover:bg-brand-blue-700 text-white"
+                        className="w-full shadow-xs bg-brand-blue-600 hover:bg-brand-blue-700 text-white"
                         leftIcon={<Stethoscope className="w-5 h-5" />}
                         onClick={() => setIsRxModalOpen(true)}
                       >
-                        Gửi Câu Hỏi Cho Dược Sĩ
+                        Gửi Câu Hỏi Cho Dược Sĩ Trực Tuyến
                       </Button>
-
-                      <a href={`tel:${PHARMACY_CONTACT.consultationPhone}`} className="w-full sm:w-auto">
-                        <Button
-                          variant="outline"
-                          size="lg"
-                          className="w-full border-slate-300 text-slate-700 hover:bg-slate-50"
-                          leftIcon={<Phone className="w-4 h-4" />}
-                        >
-                          {PHARMACY_CONTACT.consultationPhoneDisplay}
-                        </Button>
-                      </a>
                     </div>
                   </div>
                 ) : (

@@ -4,7 +4,7 @@ import React from "react";
 import Link from "next/link";
 import { H4CareLogo } from "../branding/H4CareLogo";
 import { FptPolyBadge } from "../branding/FptPolyBadge";
-import { PhoneCall, ShieldCheck, Heart, MapPin, Mail, ExternalLink } from "lucide-react";
+import { Stethoscope, ShieldCheck, Heart, MapPin, Mail, ExternalLink } from "lucide-react";
 import { PHARMACY_CONTACT } from "@/lib/constants";
 
 export const Footer: React.FC = () => {
@@ -31,18 +31,18 @@ export const Footer: React.FC = () => {
 
             {/* Hotline consultation card */}
             <div className="pt-2">
-              <a
-                href={`tel:${PHARMACY_CONTACT.consultationPhone}`}
+              <Link
+                href="/prescription"
                 className="inline-flex items-center gap-3 px-4 py-2.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-cyan-400/50 hover:bg-slate-900 text-slate-200 transition-all duration-150 group shadow-xs"
               >
                 <div className="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 flex items-center justify-center group-hover:scale-105 transition-transform">
-                  <PhoneCall className="w-4 h-4" />
+                  <Stethoscope className="w-4 h-4" />
                 </div>
                 <div>
-                  <span className="text-[10.5px] text-slate-400 block font-medium">{PHARMACY_CONTACT.fullLabel}</span>
-                  <span className="text-xs font-bold text-cyan-300 tracking-wide group-hover:text-white transition-colors">{PHARMACY_CONTACT.consultationPhoneDisplay}</span>
+                  <span className="text-[10.5px] text-slate-400 block font-medium">Kênh tư vấn Dược khoa trực tuyến</span>
+                  <span className="text-xs font-bold text-cyan-300 tracking-wide group-hover:text-white transition-colors">Gửi yêu cầu tư vấn Dược sĩ &rarr;</span>
                 </div>
-              </a>
+              </Link>
             </div>
           </div>
 

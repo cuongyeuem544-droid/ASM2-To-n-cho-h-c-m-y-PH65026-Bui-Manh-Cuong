@@ -250,12 +250,12 @@ export function SeasonalCampaignsSection() {
 
               <div className="pt-4 mt-4 border-t border-slate-200/60 flex items-center justify-between text-xs">
                 <span className="text-slate-500 font-medium">Cần Dược sĩ hỗ trợ thêm?</span>
-                <a
-                  href="tel:18006868"
+                <Link
+                  href="/prescription"
                   className="font-bold text-brand-blue-700 hover:underline"
                 >
-                  Hotline miễn cước 1800 6868
-                </a>
+                  Tư vấn Dược sĩ trực tuyến &rarr;
+                </Link>
               </div>
             </div>
           </div>

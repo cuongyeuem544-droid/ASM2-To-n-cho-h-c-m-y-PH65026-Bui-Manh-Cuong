@@ -1,3 +1,4 @@
+from datetime import date
 import re
 import unicodedata
 from typing import Any
@@ -240,7 +241,7 @@ def get_store_products(
             if pid not in prices_map and pval is not None:
                 prices_map[pid] = int(pval)
 
-        from app.models.inventory import InventoryBatch, ProductReview, ProductSku, WarehouseBatchStock
+        from app.models.inventory import BatchStatus, InventoryBatch, ProductReview, ProductSku, WarehouseBatchStock
         rev_rows = db.query(
             ProductReview.canonical_product_id,
             func.avg(ProductReview.rating),
@@ -261,7 +262,9 @@ def get_store_products(
             WarehouseBatchStock, WarehouseBatchStock.batch_id == InventoryBatch.id
         ).filter(
             ProductSku.canonical_product_id.in_(prod_ids),
-            InventoryBatch.status == "ACTIVE",
+            InventoryBatch.status == BatchStatus.ACTIVE,
+            InventoryBatch.expiry_date > date.today(),
+            WarehouseBatchStock.quantity_available > 0,
         ).group_by(ProductSku.canonical_product_id).all()
         for pid, s_qty in stock_rows:
             stocks_map[pid] = int(s_qty)

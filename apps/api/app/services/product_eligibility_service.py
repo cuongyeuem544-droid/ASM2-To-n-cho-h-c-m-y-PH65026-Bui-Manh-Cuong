@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.models import CanonicalProduct
 from app.models.enums import PublishStatus, RxOtcStatus
-from app.models.inventory import InventoryBatch, ProductSku, WarehouseBatchStock
+from app.models.inventory import BatchStatus, InventoryBatch, ProductSku, WarehouseBatchStock
 
 
 class ProductEligibilityResult:
@@ -107,7 +107,7 @@ class ProductEligibilityService:
                 InventoryBatch, InventoryBatch.id == WarehouseBatchStock.batch_id
             ).filter(
                 InventoryBatch.sku_id == s.id,
-                InventoryBatch.status == "ACTIVE",
+                InventoryBatch.status == BatchStatus.ACTIVE,
                 InventoryBatch.expiry_date > today,
                 WarehouseBatchStock.quantity_available > 0,
             )

@@ -30,7 +30,7 @@ export const UploadError: React.FC<UploadErrorProps> = ({
       case "NETWORK_ERROR":
         return "Gợi ý: Vui lòng kiểm tra đường truyền Wi-Fi/4G và thử bấm nút tải lại.";
       default:
-        return "Nếu sự cố tiếp tục xảy ra, vui lòng liên hệ tổng đài Dược sĩ 1800 6868 để được hỗ trợ gửi đơn thuốc trực tiếp.";
+        return "Nếu sự cố tiếp tục xảy ra, vui lòng gửi email về duocsi@h4care.vn kèm ảnh toa thuốc để được hỗ trợ trực tiếp.";
     }
   };
 
