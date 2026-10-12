@@ -1,11 +1,15 @@
+from datetime import datetime, timezone
 from typing import Any, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_current_user, require_roles
 from app.db.session import get_db
-from app.models import Order, PaymentTransaction
+from app.models import Order, PaymentTransaction, User
+from app.models.enums import UserRole
+from app.services.audit import write_audit
 from app.services.fulfillment_service import FulfillmentRoutingService
 from app.services.momo_service import MomoPaymentService
 from app.services.payment_intent_service import PaymentIntentService
@@ -279,13 +283,27 @@ def simulate_exchange_payment(
 def get_order_payment_status(
     order_code: str,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Kiểm tra trạng thái thanh toán hiện tại của đơn hàng, kèm toàn bộ lịch sử giao dịch.
+    Bắt buộc JWT. Khách hàng chỉ xem được trạng thái đơn của chính mình (chống IDOR).
+    ADMIN và VIEWER được xem.
     """
+    clean_code = order_code.strip()
+    order = db.scalar(select(Order).where(Order.order_code == clean_code))
+    if not order:
+        raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng.")
+
+    if current_user.role == UserRole.CUSTOMER:
+        if order.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập trạng thái đơn hàng này.")
+    elif current_user.role not in [UserRole.ADMIN, UserRole.VIEWER]:
+        raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập thông tin đơn hàng này.")
+
     return PaymentIntentService.get_order_payment_summary(
         db=db,
-        order_code=order_code.strip(),
+        order_code=clean_code,
     )
 
 
@@ -293,9 +311,11 @@ def get_order_payment_status(
 def get_transaction_status(
     transaction_code: str,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Tra cứu chi tiết một giao dịch thanh toán theo mã giao dịch duy nhất.
+    Chỉ ADMIN và người sở hữu đơn hàng tương ứng được xem.
     """
     trans = db.scalar(
         select(PaymentTransaction).where(
@@ -304,6 +324,13 @@ def get_transaction_status(
     )
     if not trans:
         raise HTTPException(status_code=404, detail="Không tìm thấy giao dịch thanh toán.")
+
+    if current_user.role == UserRole.CUSTOMER:
+        order = db.get(Order, trans.order_id)
+        if not order or order.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Bạn không có quyền xem giao dịch này.")
+    elif current_user.role not in [UserRole.ADMIN, UserRole.VIEWER]:
+        raise HTTPException(status_code=403, detail="Bạn không có quyền xem giao dịch này.")
 
     return {
         "id": trans.id,
@@ -321,17 +348,18 @@ def get_transaction_status(
 
 
 # ==============================================================================
-# 6. PAYMENT RECONCILIATION CORE
+# 6. PAYMENT RECONCILIATION CORE (CHỈ ADMIN)
 # ==============================================================================
 
 @payments_router.get("/reconciliation/order/{order_code}")
 def reconcile_single_order(
     order_code: str,
     db: Session = Depends(get_db),
+    admin: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
     Đối soát tài chính giữa số tiền đơn hàng và các giao dịch thanh toán thực nhận.
-    Phát hiện MATCHED, OVERPAID, UNDERPAID, DUPLICATE_PAYMENT, INCONSISTENT_STATUS.
+    Chỉ ADMIN được truy cập.
     """
     return PaymentReconciliationService.reconcile_order(
         db=db,
@@ -343,9 +371,11 @@ def reconcile_single_order(
 def auto_heal_order_status(
     order_code: str,
     db: Session = Depends(get_db),
+    admin: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
     Tự động khắc phục sai lệch trạng thái nếu tiền đã vào cổng thành công 100% nhưng đơn hàng chưa chuyển PAID.
+    Chỉ ADMIN được truy cập.
     """
     return PaymentReconciliationService.auto_heal_order(
         db=db,
@@ -357,9 +387,11 @@ def auto_heal_order_status(
 def audit_payment_reconciliation(
     limit: int = 50,
     db: Session = Depends(get_db),
+    admin: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
     Báo cáo kiểm toán đối soát tổng thể toàn hệ thống cho các đơn hàng gần đây.
+    Chỉ ADMIN được truy cập.
     """
     return PaymentReconciliationService.audit_system(
         db=db,
@@ -375,16 +407,35 @@ def audit_payment_reconciliation(
 def cancel_order_and_release_stock(
     order_code: str,
     payload: CancelOrderRequest,
+    request: Request,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
-    Khách hàng hủy đơn hàng khi chưa xuất kho (SHIPPED).
-    Tự động giải phóng tồn kho thuốc đã giữ chỗ (StockReservation) và hoàn lại quantity_available theo FEFO.
+    Hủy đơn hàng có xác thực và phân quyền:
+    - Buyer chỉ được hủy đơn của chính mình (chống IDOR).
+    - Đơn còn ở trạng thái PENDING hoặc trong vòng 30 phút.
+    - Idempotent: nếu đơn đã hủy thì trả về kết quả an toàn.
+    - Ghi audit log đầy đủ.
     """
     clean_code = order_code.strip()
     order = db.scalar(select(Order).where(Order.order_code == clean_code))
     if not order:
         raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng.")
+
+    if current_user.role == UserRole.CUSTOMER:
+        if order.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Bạn không có quyền hủy đơn hàng này.")
+    elif current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Bạn không có quyền hủy đơn hàng này.")
+
+    if order.order_status == "CANCELLED":
+        return {
+            "status": "SUCCESS",
+            "message": "Đơn hàng này đã được hủy trước đó.",
+            "order_code": clean_code,
+            "order_status": "CANCELLED",
+        }
 
     if order.order_status in ["SHIPPING", "COMPLETED"]:
         raise HTTPException(
@@ -392,14 +443,41 @@ def cancel_order_and_release_stock(
             detail=f"Đơn hàng đang ở trạng thái '{order.order_status}', không thể tự hủy. Vui lòng liên hệ Dược sĩ trực tuyến.",
         )
 
-    if order.order_status == "CANCELLED":
-        return {"status": "SUCCESS", "message": "Đơn hàng này đã được hủy trước đó.", "order_code": clean_code}
+    # Khách hàng chỉ được hủy khi PENDING hoặc trong vòng 30 phút sau khi đặt
+    if current_user.role == UserRole.CUSTOMER:
+        now = datetime.now(timezone.utc)
+        order_time = order.created_at
+        if order_time:
+            if order_time.tzinfo is None:
+                order_time = order_time.replace(tzinfo=timezone.utc)
+            time_elapsed = (now - order_time).total_seconds()
+            if order.order_status != "PENDING" and time_elapsed > 1800:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Đơn hàng đã được xác nhận quá 30 phút. Không thể tự hủy trực tuyến.",
+                )
 
+    before_status = order.order_status
     released_qty = FulfillmentRoutingService.release_order_reservations(
         db=db,
         order_id=order.id,
         reason=payload.reason or "Khách hàng yêu cầu hủy đơn",
     )
+    order.order_status = "CANCELLED"
+
+    write_audit(
+        db,
+        action="CANCEL_ORDER",
+        entity_type="Order",
+        entity_id=order.id,
+        user=current_user,
+        request=request,
+        before={"order_status": before_status},
+        after={"order_status": "CANCELLED", "released_quantity": released_qty, "reason": payload.reason},
+    )
+
+    db.commit()
+    db.refresh(order)
 
     return {
         "status": "SUCCESS",
@@ -414,10 +492,11 @@ def cancel_order_and_release_stock(
 def trigger_stale_reservations_expiration(
     max_age_minutes: int = 30,
     db: Session = Depends(get_db),
+    admin: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
     [JOB BẢO TRÌ ĐỊNH KỲ] Tự động quét và giải phóng thuốc giữ chỗ cho các đơn hàng trực tuyến
-    (MoMo/VietQR) đã quá thời hạn cho phép thanh toán mà khách chưa hoàn tất.
+    (MoMo/VietQR) đã quá thời hạn cho phép thanh toán mà khách chưa hoàn tất. Chỉ ADMIN được kích hoạt.
     """
     cancelled = FulfillmentRoutingService.expire_stale_reservations(
         db=db,

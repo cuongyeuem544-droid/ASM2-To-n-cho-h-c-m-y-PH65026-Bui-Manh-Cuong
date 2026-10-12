@@ -29,12 +29,21 @@ export function ProductsPage() {
   const [searchInput, setSearchInput] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [rxOtcStatus, setRxOtcStatus] = useState('')
+  const [productType, setProductType] = useState('')
+  const [categorySlug, setCategorySlug] = useState('')
   const [publishStatus, setPublishStatus] = useState('')
   const [stockFilter, setStockFilter] = useState<'ALL' | 'IN_STOCK' | 'OUT_OF_STOCK' | 'NEAR_EXPIRY'>('ALL')
   const [pageSize, setPageSize] = useState(25)
   const [page, setPage] = useState(1)
   const [error, setError] = useState('')
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
+  const [categoriesTree, setCategoriesTree] = useState<any[]>([])
+
+  useEffect(() => {
+    api<any[]>('/admin/categories/tree')
+      .then(res => setCategoriesTree(res))
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -49,6 +58,8 @@ export function ProductsPage() {
     const query = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
     if (debouncedSearch) query.set('search', debouncedSearch)
     if (rxOtcStatus) query.set('rx_otc_status', rxOtcStatus)
+    if (productType) query.set('product_type', productType)
+    if (categorySlug) query.set('category_slug', categorySlug)
     if (publishStatus) query.set('publish_status', publishStatus)
 
     api<ProductPage>(`/products?${query}`)
@@ -58,7 +69,7 @@ export function ProductsPage() {
       })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false))
-  }, [page, pageSize, debouncedSearch, rxOtcStatus, publishStatus])
+  }, [page, pageSize, debouncedSearch, rxOtcStatus, productType, categorySlug, publishStatus])
 
   // Filter items in memory for stock filter
   const displayedItems = (data?.items || []).filter(item => {
@@ -135,6 +146,42 @@ export function ProductsPage() {
         }}
         isRefreshing={loading}
       >
+        <select
+          value={productType}
+          onChange={e => {
+            setProductType(e.target.value)
+            setPage(1)
+          }}
+          style={{ minWidth: '150px' }}
+        >
+          <option value="">Tất cả loại sản phẩm</option>
+          <option value="MEDICINE">Thuốc</option>
+          <option value="SUPPLEMENT">Thực phẩm BVSK</option>
+          <option value="COSMETIC">Mỹ phẩm</option>
+          <option value="MEDICAL_DEVICE">Thiết bị y tế</option>
+          <option value="MOTHER_BABY">Mẹ & Bé</option>
+          <option value="PERSONAL_CARE">Chăm sóc cá nhân</option>
+        </select>
+
+        <select
+          value={categorySlug}
+          onChange={e => {
+            setCategorySlug(e.target.value)
+            setPage(1)
+          }}
+          style={{ minWidth: '160px' }}
+        >
+          <option value="">Tất cả danh mục</option>
+          {categoriesTree.map((cat: any) => (
+            <optgroup key={cat.dbId} label={cat.name}>
+              <option value={cat.slug}>{cat.name} (Tất cả)</option>
+              {(cat.subCategories || []).map((sub: any) => (
+                <option key={sub.dbId} value={sub.slug}>-- {sub.name}</option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+
         <select
           value={rxOtcStatus}
           onChange={e => {
@@ -288,6 +335,11 @@ export function ProductsPage() {
                           >
                             {prod.canonical_name}
                           </Link>
+                          {prod.product_type && (
+                            <span style={{ marginLeft: '6px', fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: '#e0e7ff', color: '#4338ca', fontWeight: 600 }}>
+                              {prod.product_type}
+                            </span>
+                          )}
                           <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
                             {prod.manufacturer || 'Chưa rõ NSX'}
                           </div>

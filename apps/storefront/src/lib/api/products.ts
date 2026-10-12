@@ -1,11 +1,31 @@
 import { Product, Category } from "@/types";
 import { PRODUCTS_DATA } from "@/data/products";
+import { CATEGORIES_DATA } from "@/data/mockData";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
+
+export async function getStoreCategoriesTree(): Promise<Category[]> {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/store/categories/tree`, {
+      next: { revalidate: 60 },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        return data;
+      }
+    }
+  } catch (err) {
+    console.warn("Backend API unavailable for categories tree, using local CATEGORIES_DATA:", err);
+  }
+  return CATEGORIES_DATA;
+}
 
 export async function getStoreProducts(params?: {
   category?: string;
   subCategory?: string;
+  productType?: string;
+  prescriptionStatus?: string;
   prescriptionType?: "all" | "otc" | "rx";
   search?: string;
   sort?: string;
@@ -16,6 +36,8 @@ export async function getStoreProducts(params?: {
     const query = new URLSearchParams();
     if (params?.category) query.set("category", params.category);
     if (params?.subCategory) query.set("subCategory", params.subCategory);
+    if (params?.productType) query.set("product_type", params.productType);
+    if (params?.prescriptionStatus) query.set("prescription_status", params.prescriptionStatus);
     if (params?.prescriptionType) query.set("prescriptionType", params.prescriptionType);
     if (params?.search) query.set("search", params.search);
     if (params?.sort) query.set("sort", params.sort);

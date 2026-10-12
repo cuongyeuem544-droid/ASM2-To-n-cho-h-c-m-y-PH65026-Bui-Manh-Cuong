@@ -6,92 +6,7 @@ import { AuthUser, AuthContextType, RegisterFormState } from "@/types/auth";
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const STORAGE_KEY = "h4care_auth_session";
-const ACCOUNTS_DB_KEY = "h4care_accounts_db";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
-// Default initial accounts for isolated local fallback if backend is unreachable
-const INITIAL_ACCOUNTS: Record<string, AuthUser> = {
-  "admin@pharmatrust.vn": {
-    id: 1,
-    fullName: "Quản trị viên Hệ thống",
-    phone: "0988888888",
-    email: "admin@pharmatrust.vn",
-    role: "Quản trị viên",
-    isAdmin: true,
-    points: 9999,
-    createdAt: "2024-01-01",
-  },
-  "0901234567": {
-    id: 2,
-    fullName: "Nguyễn Văn An",
-    phone: "0901234567",
-    email: "khachhang1@h4care.vn",
-    role: "Hội viên Thân thiết",
-    isAdmin: false,
-    points: 150,
-    createdAt: "2024-01-15",
-  },
-  "khachhang1@h4care.vn": {
-    id: 2,
-    fullName: "Nguyễn Văn An",
-    phone: "0901234567",
-    email: "khachhang1@h4care.vn",
-    role: "Hội viên Thân thiết",
-    isAdmin: false,
-    points: 150,
-    createdAt: "2024-01-15",
-  },
-  "0909888999": {
-    id: 3,
-    fullName: "Trần Thị Mai",
-    phone: "0909888999",
-    email: "khachhang2@h4care.vn",
-    role: "Hội viên VIP",
-    isAdmin: false,
-    points: 320,
-    createdAt: "2024-02-10",
-  },
-  "khachhang2@h4care.vn": {
-    id: 3,
-    fullName: "Trần Thị Mai",
-    phone: "0909888999",
-    email: "khachhang2@h4care.vn",
-    role: "Hội viên VIP",
-    isAdmin: false,
-    points: 320,
-    createdAt: "2024-02-10",
-  },
-};
-
-function getLocalAccounts(): Record<string, AuthUser> {
-  if (typeof window === "undefined") return INITIAL_ACCOUNTS;
-  try {
-    const raw = localStorage.getItem(ACCOUNTS_DB_KEY);
-    if (raw) {
-      return { ...INITIAL_ACCOUNTS, ...JSON.parse(raw) };
-    }
-  } catch (e) {
-    console.warn("Failed to load local accounts DB:", e);
-  }
-  return INITIAL_ACCOUNTS;
-}
-
-function saveLocalAccount(key: string, user: AuthUser) {
-  if (typeof window === "undefined") return;
-  try {
-    const accounts = getLocalAccounts();
-    accounts[key.toLowerCase().trim()] = user;
-    if (user.phone) {
-      accounts[user.phone.trim()] = user;
-    }
-    if (user.email) {
-      accounts[user.email.toLowerCase().trim()] = user;
-    }
-    localStorage.setItem(ACCOUNTS_DB_KEY, JSON.stringify(accounts));
-  } catch (e) {
-    console.warn("Failed to save account to local accounts DB:", e);
-  }
-}
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -115,21 +30,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(userData);
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(userData));
-      // Save across local accounts map so it never collides
-      if (userData.phone) saveLocalAccount(userData.phone, userData);
-      if (userData.email) saveLocalAccount(userData.email, userData);
     } catch (e) {
       console.warn("Failed to persist auth session", e);
     }
   };
 
   const sendPhoneOtp = async (phone: string): Promise<{ success: boolean; error?: string }> => {
-    const cleanPhone = phone.trim();
+    const cleanPhone = phone.trim().replace(/\s+/g, "").replace(/-/g, "");
     if (!cleanPhone || cleanPhone.length < 9) {
       return { success: false, error: "Số điện thoại chưa hợp lệ (tối thiểu 9-10 chữ số)." };
     }
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    return { success: true };
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/auth/otp/request`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identifier: cleanPhone, purpose: "LOGIN" }),
+      });
+      if (res.ok) {
+        return { success: true };
+      }
+      const data = await res.json().catch(() => ({}));
+      return { success: false, error: data.detail || "Không thể gửi mã xác thực OTP. Vui lòng thử lại sau." };
+    } catch (e) {
+      return {
+        success: false,
+        error: "Không thể kết nối đến máy chủ H4CARE. Vui lòng kiểm tra kết nối mạng và thử lại.",
+      };
+    }
   };
 
   const loginWithPhone = async (
@@ -139,30 +66,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const cleanPhone = phone.trim().replace(/\s+/g, "").replace(/-/g, "");
     const cleanOtp = otp.trim();
 
-    if (!cleanOtp || cleanOtp.length < 4) {
-      return { success: false, error: "Vui lòng nhập đầy đủ mã xác thực OTP." };
+    if (!cleanOtp || cleanOtp.length < 6) {
+      return { success: false, error: "Vui lòng nhập đầy đủ 6 chữ số mã xác thực OTP." };
     }
 
-    // First try backend if available
     try {
-      const res = await fetch(`${API_BASE}/api/v1/auth/login`, {
+      const res = await fetch(`${API_BASE}/api/v1/auth/otp/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ identifier: cleanPhone, password: "H4carePass@2026" }),
+        body: JSON.stringify({ phone: cleanPhone, otp: cleanOtp }),
       });
+
       if (res.ok) {
         const data = await res.json();
         const role = data.user?.role || "CUSTOMER";
-        const isAdmin = role === "ADMIN" || role === "DATA_REVIEWER";
+        const isAdmin = role === "ADMIN";
         const authUser: AuthUser = {
           id: data.user?.id || `usr_${cleanPhone}`,
           fullName: data.user?.full_name || `Khách hàng ${cleanPhone.slice(-4)}`,
           phone: data.user?.phone || cleanPhone,
           email: data.user?.email || `${cleanPhone}@customer.pharmatrust.vn`,
-          role: isAdmin ? "Quản trị viên" : "Hội viên Thân thiết",
+          role: isAdmin ? "Quản trị viên" : role === "DATA_REVIEWER" ? "Kiểm duyệt viên" : "Hội viên Thân thiết",
           isAdmin,
-          points: data.user?.loyalty_points ?? 150,
-          createdAt: data.user?.created_at?.split("T")[0] || "2026-01-01",
+          points: data.user?.loyalty_points ?? 50,
+          createdAt: data.user?.created_at?.split("T")[0] || new Date().toISOString().split("T")[0],
         };
         if (data.access_token) {
           localStorage.setItem("pharmatrust_access_token", data.access_token);
@@ -170,29 +97,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
         saveSession(authUser);
         return { success: true, user: authUser };
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        return {
+          success: false,
+          error: errData.detail || "Mã OTP không chính xác hoặc đã hết hạn.",
+        };
       }
     } catch (e) {
-      console.warn("Backend auth fetch error, falling back to isolated account DB:", e);
+      return {
+        success: false,
+        error: "Không thể kết nối đến máy chủ xác thực. Vui lòng kiểm tra lại backend.",
+      };
     }
-
-    // Isolated account lookup fallback
-    const accounts = getLocalAccounts();
-    const existing = accounts[cleanPhone];
-    const loggedUser: AuthUser = existing
-      ? { ...existing }
-      : {
-          id: `usr_${cleanPhone}`,
-          fullName: `Khách hàng ${cleanPhone.slice(-4)}`,
-          phone: cleanPhone,
-          email: `${cleanPhone}@customer.pharmatrust.vn`,
-          role: "Hội viên Thân thiết",
-          isAdmin: false,
-          points: 100,
-          createdAt: new Date().toISOString().split("T")[0],
-        };
-
-    saveSession(loggedUser);
-    return { success: true, user: loggedUser };
   };
 
   const loginWithPassword = async (
@@ -207,7 +124,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, error: "Mật khẩu tối thiểu 6 ký tự." };
     }
 
-    // 1. Authenticate with FastAPI Backend & SQLite
     try {
       const res = await fetch(`${API_BASE}/api/v1/auth/login`, {
         method: "POST",
@@ -218,7 +134,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (res.ok) {
         const data = await res.json();
         const role = data.user?.role || "CUSTOMER";
-        const isAdmin = role === "ADMIN" || role === "DATA_REVIEWER";
+        const isAdmin = role === "ADMIN";
         const authUser: AuthUser = {
           id: data.user?.id || Date.now(),
           fullName: data.user?.full_name || (isAdmin ? "Quản trị viên" : cleanId),
@@ -228,8 +144,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             ? "Quản trị viên"
             : role === "DATA_REVIEWER"
             ? "Kiểm duyệt viên"
-            : (data.user?.loyalty_points ?? 0) >= 300
-            ? "Hội viên VIP"
+            : role === "VIEWER"
+            ? "Người xem"
             : "Hội viên Thân thiết",
           isAdmin,
           points: data.user?.loyalty_points ?? (isAdmin ? 9999 : 50),
@@ -251,28 +167,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
       }
     } catch (e) {
-      console.warn("Backend server not reachable, attempting isolated fallback account:", e);
+      return {
+        success: false,
+        error: "Không thể kết nối đến máy chủ xác thực. Vui lòng đảm bảo backend đang hoạt động.",
+      };
     }
-
-    // 2. Offline / Local Isolated Fallback (No shared demo user)
-    const accounts = getLocalAccounts();
-    const existing = accounts[cleanId.toLowerCase()] || accounts[cleanId];
-    if (existing) {
-      saveSession(existing);
-      return { success: true, user: existing };
-    }
-
-    // Default admin fallback if offline
-    if (cleanId.toLowerCase() === "admin@pharmatrust.vn" && password === "Admin@123456") {
-      const adminAcc = INITIAL_ACCOUNTS["admin@pharmatrust.vn"];
-      saveSession(adminAcc);
-      return { success: true, user: adminAcc };
-    }
-
-    return {
-      success: false,
-      error: "Không thể kết nối đến máy chủ xác thực hoặc thông tin không chính xác.",
-    };
   };
 
   const register = async (
@@ -287,13 +186,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const cleanPhone = data.phone.trim().replace(/\s+/g, "").replace(/-/g, "");
 
-    // 1. Register with Backend API
     try {
       const res = await fetch(`${API_BASE}/api/v1/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          full_name: data.fullName?.trim() || `Thành viên ${cleanPhone.slice(-4)}`,
+          full_name: data.fullName?.trim() || `Khách hàng ${cleanPhone.slice(-4)}`,
           phone: cleanPhone,
           email: data.email?.trim() || undefined,
           password: data.password,
@@ -328,23 +226,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
       }
     } catch (e) {
-      console.warn("Backend server not reachable during registration, saving locally:", e);
+      return {
+        success: false,
+        error: "Không thể kết nối đến máy chủ đăng ký. Vui lòng kiểm tra lại kết nối mạng.",
+      };
     }
-
-    // 2. Offline isolated account registration
-    const newUser: AuthUser = {
-      id: `usr_${Date.now()}`,
-      fullName: data.fullName?.trim() || `Khách hàng ${cleanPhone.slice(-4)}`,
-      phone: cleanPhone,
-      email: data.email?.trim() || `${cleanPhone}@customer.pharmatrust.vn`,
-      role: "Hội viên",
-      isAdmin: false,
-      points: 50,
-      createdAt: new Date().toISOString().split("T")[0],
-    };
-
-    saveSession(newUser);
-    return { success: true, user: newUser };
   };
 
   const logout = () => {

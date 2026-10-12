@@ -1,12 +1,13 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { useParams, notFound } from "next/navigation";
 import { Header } from "@/components/layout/Header";
 import { CATEGORIES_DATA } from "@/data/mockData";
 import { PRODUCTS_DATA } from "@/data/products";
-import { Product, ProductFilterState, ProductSortOption } from "@/types";
+import { getStoreCategoriesTree, getStoreProducts } from "@/lib/api/products";
+import { Category, Product, ProductFilterState, ProductSortOption } from "@/types";
 import { ProductCard } from "@/components/product/ProductCard";
 import { ProductSortBar } from "@/components/product/ProductSortBar";
 import { ProductFilterSidebar } from "@/components/product/ProductFilterSidebar";
@@ -21,6 +22,7 @@ import {
   ShieldCheck,
   CheckCircle2,
   Sparkles,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 
@@ -28,8 +30,35 @@ export default function CategoryPage() {
   const params = useParams();
   const slug = params?.slug as string;
 
-  // Find corresponding category from mockData
-  const currentCategory = CATEGORIES_DATA.find((c) => c.slug === slug);
+  const [categories, setCategories] = useState<Category[]>(CATEGORIES_DATA);
+  const [apiProducts, setApiProducts] = useState<Product[]>([]);
+  const [isLoadingProducts, setIsLoadingProducts] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    getStoreCategoriesTree().then((cats) => {
+      if (mounted && cats?.length) setCategories(cats);
+    });
+    return () => { mounted = false; };
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    setIsLoadingProducts(true);
+    getStoreProducts({ category: slug, limit: 120 })
+      .then((res) => {
+        if (mounted && res?.items && res.items.length > 0) {
+          setApiProducts(res.items);
+        }
+      })
+      .finally(() => {
+        if (mounted) setIsLoadingProducts(false);
+      });
+    return () => { mounted = false; };
+  }, [slug]);
+
+  // Find corresponding category from dynamic tree or mockData
+  const currentCategory = categories.find((c) => c.slug === slug) || CATEGORIES_DATA.find((c) => c.slug === slug);
 
   const [activeSubCategory, setActiveSubCategory] = useState<string>("");
   const [sortOption, setSortOption] = useState<ProductSortOption>("popular");
@@ -52,11 +81,13 @@ export default function CategoryPage() {
     prescriptionType: "all",
   });
 
+  const sourceProducts = apiProducts.length > 0 ? apiProducts : PRODUCTS_DATA;
+
   // Filter products by category and active filters
   const categoryProducts = useMemo(() => {
-    return PRODUCTS_DATA.filter((p) => {
+    return sourceProducts.filter((p) => {
       // Must match current category
-      if (p.category !== slug) return false;
+      if (p.category !== slug && p.subCategory !== slug) return false;
 
       // Subcategory filter if selected
       if (activeSubCategory && p.subCategory !== activeSubCategory) {

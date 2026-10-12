@@ -35,6 +35,9 @@ export interface Product {
   near_expiry_count?: number
   active_ingredient?: string | null
   rx_otc_status: 'OTC' | 'PRESCRIPTION' | 'UNKNOWN'
+  product_type?: string | null
+  prescription_status?: string | null
+  category_slug?: string | null
   regulatory_status: string
   overall_score: number
   confidence_label: ConfidenceLabel

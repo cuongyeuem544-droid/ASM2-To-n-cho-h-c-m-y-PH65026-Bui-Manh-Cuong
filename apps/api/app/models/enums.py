@@ -82,3 +82,43 @@ class ReviewDecisionType(StrEnum):
     MERGE_ACCEPTED = "MERGE_ACCEPTED"
     MERGE_REJECTED = "MERGE_REJECTED"
 
+
+class LegalProductType(StrEnum):
+    MEDICINE = "MEDICINE"
+    SUPPLEMENT = "SUPPLEMENT"
+    MEDICAL_DEVICE = "MEDICAL_DEVICE"
+    COSMETIC = "COSMETIC"
+    MOTHER_BABY = "MOTHER_BABY"
+    PERSONAL_CARE = "PERSONAL_CARE"
+    OTHER = "OTHER"
+
+
+class PrescriptionStatus(StrEnum):
+    OTC = "OTC"
+    RX = "RX"
+    CONTROLLED = "CONTROLLED"
+    UNKNOWN = "UNKNOWN"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+
+
+class CategoryKind(StrEnum):
+    STOREFRONT = "STOREFRONT"
+    THERAPEUTIC = "THERAPEUTIC"
+    AUDIENCE = "AUDIENCE"
+    SEASONAL = "SEASONAL"
+
+
+class AssignmentMethod(StrEnum):
+    OFFICIAL_IMPORT = "OFFICIAL_IMPORT"
+    RULE_SUGGESTION = "RULE_SUGGESTION"
+    AI_SUGGESTION = "AI_SUGGESTION"
+    MANUAL = "MANUAL"
+
+
+class ClassificationReviewStatus(StrEnum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    AUTO_RESOLVED = "AUTO_RESOLVED"
+
+

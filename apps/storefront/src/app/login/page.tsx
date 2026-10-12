@@ -51,15 +51,15 @@ function LoginContent() {
   }, [isAuthenticated, user, router, redirectUrl]);
 
   // ================= FORM STATE =================
-  const [identifier, setIdentifier] = useState<string>("0901234567");
-  const [password, setPassword] = useState<string>("H4carePass@2026");
+  const [identifier, setIdentifier] = useState<string>("");
+  const [password, setPassword] = useState<string>("");
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [rememberMe, setRememberMe] = useState<boolean>(true);
 
   // OTP mode toggle
   const [useOtpMode, setUseOtpMode] = useState<boolean>(false);
   const [otpStep, setOtpStep] = useState<"phone" | "verify">("phone");
-  const [otpValues, setOtpValues] = useState<string[]>(["8", "4", "2", "6", "9", "1"]);
+  const [otpValues, setOtpValues] = useState<string[]>(["", "", "", "", "", ""]);
   const [countdown, setCountdown] = useState<number>(60);
 
   // Focus tracking for dynamic input glows
@@ -103,12 +103,6 @@ function LoginContent() {
       const stored = localStorage.getItem("h4care_recent_accounts");
       if (stored) {
         setRecentAccounts(JSON.parse(stored));
-      } else {
-        setRecentAccounts([
-          { fullName: "Nguyễn Văn An", identifier: "0901234567", role: "Hội viên Thân thiết" },
-          { fullName: "Trần Thị Mai", identifier: "0909888999", role: "Hội viên VIP" },
-          { fullName: "Quản trị viên", identifier: "admin@pharmatrust.vn", role: "ADMIN" },
-        ]);
       }
     } catch (e) {
       console.warn("Failed to load recent accounts", e);
@@ -650,60 +644,62 @@ function LoginContent() {
               </div>
             )}
 
-            {/* 6. Quick Test Role Switcher (1-Click Model Demo) */}
-            <motion.div variants={itemVariants} className="mt-7 pt-5 border-t border-sky-100">
-              <div className="flex items-center justify-between mb-2.5">
-                <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
-                  <Sparkles className="w-3 h-3 text-sky-600" />
-                  <span>Thử nghiệm nhanh vai trò</span>
-                </span>
-                <span className="text-[10px] text-sky-600 font-mono">1-Click Fast Fill</span>
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIdentifier("admin@pharmatrust.vn");
-                    setPassword("Admin@123456");
-                    setUseOtpMode(false);
-                    setErrorMessage(null);
-                  }}
-                  className="p-2.5 rounded-xl border border-indigo-200/80 bg-indigo-50/80 hover:bg-indigo-100/90 hover:border-indigo-300 text-indigo-700 text-[11px] font-semibold transition-all text-center group cursor-pointer shadow-xs"
-                  title="Đăng nhập tài khoản Quản trị viên (Chuyển tới Admin Portal)"
-                >
-                  <span className="block group-hover:scale-105 transition-transform">🛡️ Quản trị viên</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIdentifier("0901234567");
-                    setPassword("H4carePass@2026");
-                    setUseOtpMode(false);
-                    setErrorMessage(null);
-                  }}
-                  className="p-2.5 rounded-xl border border-sky-200/80 bg-sky-50/80 hover:bg-sky-100/90 hover:border-sky-300 text-sky-700 text-[11px] font-semibold transition-all text-center group cursor-pointer shadow-xs"
-                  title="Khách hàng Nguyễn Văn An"
-                >
-                  <span className="block group-hover:scale-105 transition-transform">👤 Khách (An)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIdentifier("0909888999");
-                    setPassword("H4carePass@2026");
-                    setUseOtpMode(false);
-                    setErrorMessage(null);
-                  }}
-                  className="p-2.5 rounded-xl border border-emerald-200/80 bg-emerald-50/80 hover:bg-emerald-100/90 hover:border-emerald-300 text-emerald-700 text-[11px] font-semibold transition-all text-center group cursor-pointer shadow-xs"
-                  title="Hội viên VIP Trần Thị Mai"
-                >
-                  <span className="block group-hover:scale-105 transition-transform">⭐ Khách (Mai VIP)</span>
-                </button>
-              </div>
-              <p className="text-[10px] text-slate-500 mt-2 leading-relaxed">
-                * <strong>Quản trị viên</strong> tự động kích hoạt Cổng Quản Trị Hệ Thống. <strong>Hội viên</strong> vào trang Hồ sơ sức khỏe & Đơn thuốc.
-              </p>
-            </motion.div>
+            {/* 6. Quick Test Role Switcher (Chỉ hiển thị khi DEMO_MODE = true) */}
+            {process.env.NEXT_PUBLIC_DEMO_MODE === "true" && (
+              <motion.div variants={itemVariants} className="mt-7 pt-5 border-t border-sky-100">
+                <div className="flex items-center justify-between mb-2.5">
+                  <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
+                    <Sparkles className="w-3 h-3 text-sky-600" />
+                    <span>Thử nghiệm vai trò Demo</span>
+                  </span>
+                  <span className="text-[10px] text-sky-600 font-mono">DEMO MODE</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIdentifier("admin@pharmatrust.vn");
+                      setPassword("Admin@123456");
+                      setUseOtpMode(false);
+                      setErrorMessage(null);
+                    }}
+                    className="p-2.5 rounded-xl border border-indigo-200/80 bg-indigo-50/80 hover:bg-indigo-100/90 hover:border-indigo-300 text-indigo-700 text-[11px] font-semibold transition-all text-center group cursor-pointer shadow-xs"
+                    title="Đăng nhập tài khoản Quản trị viên (Chuyển tới Admin Portal)"
+                  >
+                    <span className="block group-hover:scale-105 transition-transform">🛡️ Admin</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIdentifier("reviewer@pharmatrust.vn");
+                      setPassword("Reviewer@123456");
+                      setUseOtpMode(false);
+                      setErrorMessage(null);
+                    }}
+                    className="p-2.5 rounded-xl border border-amber-200/80 bg-amber-50/80 hover:bg-amber-100/90 hover:border-amber-300 text-amber-700 text-[11px] font-semibold transition-all text-center group cursor-pointer shadow-xs"
+                    title="Dược sĩ Kiểm duyệt Dữ liệu"
+                  >
+                    <span className="block group-hover:scale-105 transition-transform">🔬 Dược sĩ</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIdentifier("buyer@pharmatrust.vn");
+                      setPassword("Buyer@123456");
+                      setUseOtpMode(false);
+                      setErrorMessage(null);
+                    }}
+                    className="p-2.5 rounded-xl border border-sky-200/80 bg-sky-50/80 hover:bg-sky-100/90 hover:border-sky-300 text-sky-700 text-[11px] font-semibold transition-all text-center group cursor-pointer shadow-xs"
+                    title="Khách mua thuốc"
+                  >
+                    <span className="block group-hover:scale-105 transition-transform">👤 Người mua</span>
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-500 mt-2 leading-relaxed">
+                  * Dữ liệu tài khoản demo được sinh tự động bởi script seed.
+                </p>
+              </motion.div>
+            )}
 
             {/* 7. Bottom Registration Link */}
             <motion.div variants={itemVariants} className="mt-6 text-center text-xs text-slate-600">

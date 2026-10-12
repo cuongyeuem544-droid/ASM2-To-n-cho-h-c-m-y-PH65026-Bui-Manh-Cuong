@@ -47,6 +47,7 @@ class User(TimestampMixin, Base):
     role: Mapped[UserRole] = mapped_column(enum_column(UserRole), default=UserRole.VIEWER)
     loyalty_points: Mapped[int] = mapped_column(Integer, default=50)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    token_version: Mapped[int] = mapped_column(Integer, default=1)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
@@ -174,6 +175,15 @@ class CanonicalProduct(TimestampMixin, Base):
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
     # Phân loại danh mục bởi AI & Hàng chờ Admin phân loại
+    product_type: Mapped[str] = mapped_column(String(50), default="OTHER", index=True)  # MEDICINE, SUPPLEMENT, MEDICAL_DEVICE, COSMETIC, MOTHER_BABY, PERSONAL_CARE, OTHER
+    prescription_status: Mapped[str] = mapped_column(String(50), default="UNKNOWN", index=True)  # OTC, RX, CONTROLLED, UNKNOWN, NOT_APPLICABLE
+    target_audience: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    atc_code: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    atc_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    atc_level: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    atc_source: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    atc_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     category_slug: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     subcategory_slug: Mapped[str | None] = mapped_column(String(100), nullable=True)
     category_confidence: Mapped[float] = mapped_column(Float, default=0.0)
@@ -186,6 +196,8 @@ class CanonicalProduct(TimestampMixin, Base):
     conflicts: Mapped[list[DataConflict]] = relationship(back_populates="product", cascade="all, delete-orphan")
     scores: Mapped[list[ConfidenceScore]] = relationship(back_populates="product", cascade="all, delete-orphan")
     price_observations: Mapped[list["PriceObservation"]] = relationship(back_populates="product", cascade="all, delete-orphan")
+    category_links: Mapped[list["ProductCategory"]] = relationship("ProductCategory", back_populates="product", cascade="all, delete-orphan")
+
 
 
 class Ingredient(Base):
@@ -423,6 +435,10 @@ class Order(TimestampMixin, Base):
     place_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     idempotency_key: Mapped[str | None] = mapped_column(String(100), nullable=True, unique=True, index=True)
+    voucher_code: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    promotion_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.0"))
+    discount_breakdown: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     items: Mapped[list["OrderItem"]] = relationship(back_populates="order", cascade="all, delete-orphan")
 

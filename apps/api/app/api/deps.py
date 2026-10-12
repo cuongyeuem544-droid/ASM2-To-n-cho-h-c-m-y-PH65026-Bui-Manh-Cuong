@@ -29,6 +29,12 @@ def get_current_user(
     user = db.scalar(select(User).where(User.id == user_id, User.is_active.is_(True)))
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Tài khoản không còn hoạt động")
+    token_ver = payload.get("token_version")
+    if token_ver is not None and getattr(user, "token_version", 1) != token_ver:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Phiên đăng nhập đã bị thu hồi do thay đổi mật khẩu. Vui lòng đăng nhập lại.",
+        )
     return user
 
 

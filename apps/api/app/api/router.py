@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 from app.api import (
+    admin_classification,
     admin_exchanges,
     admin_refunds,
     admin_returns,
@@ -14,6 +15,7 @@ from app.api import (
     imports,
     inventory,
     locations,
+    me,
     orders,
     payments,
     products,
@@ -54,5 +56,7 @@ api_router.include_router(returns.router)
 api_router.include_router(admin_returns.router)
 api_router.include_router(admin_refunds.router)
 api_router.include_router(admin_exchanges.router)
+api_router.include_router(admin_classification.router)
+api_router.include_router(me.me_router)
 
 

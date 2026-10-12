@@ -9,6 +9,7 @@ import {
   ExternalLink,
   FileInput,
   FlaskConical,
+  FolderTree,
   Globe,
   History,
   Layers,
@@ -63,6 +64,8 @@ const navGroups: NavGroup[] = [
     items: [
       { to: '/', label: 'Tổng quan hệ thống', icon: LayoutDashboard },
       { to: '/products', label: 'Hồ sơ thuốc & Duyệt bán', icon: Boxes },
+      { to: '/categories', label: 'Cây danh mục & Bán hàng', icon: FolderTree },
+      { to: '/classification/queue', label: 'Duyệt phân loại Y tế', icon: ShieldCheck },
       { to: '/orders', label: 'Quản lý đơn hàng', icon: ShoppingBag },
       { to: '/reviews', label: 'Đánh giá & Nhận xét', icon: MessageSquare },
       { to: '/campaigns', label: 'Chiến dịch mùa bệnh', icon: ThermometerSnowflake },

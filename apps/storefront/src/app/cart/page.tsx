@@ -303,36 +303,114 @@ export default function CartPage() {
   };
 
   const [dynamicShippingFee, setDynamicShippingFee] = useState<number>(25000);
+  const [serverQuote, setServerQuote] = useState<{
+    subtotal: number;
+    shipping_fee: number;
+    discount_amount: number;
+    grand_total: number;
+  } | null>(null);
+
+  // Server quote calculation
+  const fetchQuote = async (
+    cartItems: CartItem[],
+    voucherToTry?: string | null,
+    overrideFulfill?: FulfillmentType
+  ) => {
+    if (!cartItems || cartItems.length === 0) {
+      setServerQuote(null);
+      return;
+    }
+    try {
+      const itemsPayload = cartItems.map((it) => {
+        let dbId = it.dbId;
+        if (!dbId && it.id.startsWith("pt-")) dbId = parseInt(it.id.replace("pt-", ""), 10);
+        return {
+          product_id: dbId || 1,
+          sku_id: it.skuId,
+          quantity: it.quantity,
+        };
+      });
+
+      const effectiveVoucher = voucherToTry !== undefined ? voucherToTry : appliedVoucher;
+      const effectiveType = overrideFulfill || fulfillmentType;
+
+      const calcPayload: any = {
+        items: itemsPayload,
+        voucher_code: effectiveVoucher || undefined,
+        fulfillment_type: effectiveType,
+        province_code: selectedProvinceCode,
+        district_code: selectedDistrictCode,
+      };
+      if (coords) {
+        calcPayload.lat = coords.lat;
+        calcPayload.lng = coords.lng;
+      }
+
+      const res = await fetch("/api/v1/store/orders/cart/calculate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(calcPayload),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setServerQuote({
+          subtotal: data.subtotal,
+          shipping_fee: data.shipping_fee,
+          discount_amount: data.discount_amount,
+          grand_total: data.grand_total,
+        });
+
+        if (voucherToTry !== undefined) {
+          if (data.voucher && data.voucher.is_valid) {
+            setAppliedVoucher(data.voucher.code);
+            setDiscount(data.discount_amount);
+            setVoucherError("");
+          } else if (voucherToTry) {
+            setAppliedVoucher(null);
+            setDiscount(0);
+            setVoucherError(data.voucher?.message || "Mã giảm giá không hợp lệ.");
+          } else {
+            setAppliedVoucher(null);
+            setDiscount(0);
+            setVoucherError("");
+          }
+        } else if (data.voucher && data.voucher.is_valid) {
+          setDiscount(data.discount_amount);
+        }
+      }
+    } catch (e) {
+      console.warn("Could not calculate cart quote from server:", e);
+    }
+  };
+
+  useEffect(() => {
+    if (items.length > 0) {
+      fetchQuote(items);
+    }
+  }, [items, fulfillmentType, selectedProvinceCode, coords]);
 
   // Pricing calculations
-  const subtotal = items.reduce(
+  const clientSubtotal = items.reduce(
     (sum, item) => sum + (item.salePrice || item.price) * item.quantity,
     0
   );
+  const subtotal = serverQuote ? serverQuote.subtotal : clientSubtotal;
   const isFreeShip = subtotal >= 300000;
-  const baseShippingFee = isFreeShip || subtotal === 0 ? 0 : dynamicShippingFee;
+  const baseShippingFee = isFreeShip || subtotal === 0 ? 0 : (serverQuote ? serverQuote.shipping_fee : dynamicShippingFee);
   const effectiveShippingFee =
     fulfillmentType === "STORE_PICKUP" ? 0 : baseShippingFee;
-  const grandTotal = Math.max(0, subtotal + effectiveShippingFee - discount);
+  const grandTotal = serverQuote
+    ? serverQuote.grand_total
+    : Math.max(0, subtotal + effectiveShippingFee - discount);
   const totalCount = items.reduce((sum, item) => sum + item.quantity, 0);
 
-  // Voucher application
+  // Voucher application via server validation
   const handleApplyVoucher = (code: string) => {
     setVoucherError("");
     const clean = code.trim().toUpperCase();
-    if (clean === "H4CARENEW") {
-      setAppliedVoucher(clean);
-      setDiscount(20000);
-    } else if (clean === "FREESHIP") {
-      setAppliedVoucher(clean);
-      setDiscount(effectiveShippingFee);
-    } else if (clean === "HEALTH2026") {
-      const tenPercent = Math.min(50000, Math.round(subtotal * 0.1));
-      setAppliedVoucher(clean);
-      setDiscount(tenPercent);
-    } else {
-      setVoucherError("Mã giảm giá không hợp lệ hoặc đã hết hạn.");
-    }
+    if (!clean) return;
+    fetchQuote(items, clean);
   };
 
   const handleRemoveVoucher = () => {
@@ -340,6 +418,7 @@ export default function CartPage() {
     setDiscount(0);
     setVoucherCode("");
     setVoucherError("");
+    fetchQuote(items, null);
   };
 
   // Checkout submission handler
@@ -444,24 +523,9 @@ export default function CartPage() {
         let dbId = it.dbId;
         if (!dbId && it.id.startsWith("pt-")) {
           dbId = parseInt(it.id.replace("pt-", ""), 10);
-        } else if (!dbId && it.id.startsWith("prod-")) {
-          const mockMap: Record<string, number> = {
-            "prod-01": 17, // Panadol Extra
-            "prod-02": 16, // Efferalgan 500mg
-            "prod-03": 18, // Hapacol 650
-            "prod-04": 20, // Phosphalugel 20g
-            "prod-05": 21, // Duphalac 667g/l
-            "prod-06": 19, // Telfast HD 180mg
-            "prod-07": 22, // Orlistat Stada 120mg
-            "prod-08": 23, // Daflon 500mg
-            "prod-13": 43, // Berocca Performance
-          };
-          dbId = mockMap[it.id] || 17;
-        } else if (!dbId || dbId < 16) {
-          dbId = 17; // Safe published OTC fallback (Panadol Extra) instead of facility record (1-15)
         }
         return {
-          product_id: dbId || 17,
+          product_id: dbId || 1,
           quantity: it.quantity,
           sku_id: it.skuId,
           client_unit_price: it.salePrice || it.price,
@@ -478,6 +542,7 @@ export default function CartPage() {
         note: orderNote.trim() || undefined,
         items: checkoutItems,
         idempotency_key: idempotencyKeyRef.current || undefined,
+        voucher_code: appliedVoucher || undefined,
         fulfillment_type: fulfillmentType,
         province_code: fulfillmentType === "DELIVERY" ? currentVerified?.provinceCode : undefined,
         commune_code: fulfillmentType === "DELIVERY" ? currentVerified?.communeCode : undefined,
@@ -492,9 +557,15 @@ export default function CartPage() {
         ward_code: fulfillmentType === "DELIVERY" ? (currentVerified?.communeCode || currentVerified?.wardCode) : undefined,
       };
 
+      const token = typeof window !== "undefined" ? localStorage.getItem("pharmatrust_access_token") : null;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
       const res = await fetch("/api/v1/store/orders/checkout", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify(orderPayload),
       });
 

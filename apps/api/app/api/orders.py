@@ -3,13 +3,15 @@ import random
 from decimal import Decimal
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.api.deps import get_current_user, require_roles
+from app.api.deps import get_current_user, get_optional_current_user, require_roles
 from app.db.session import get_db
+from app.services.audit import write_audit
+from app.services.pricing_service import PricingService
 from app.models import (
     AdministrativeUnit,
     CanonicalProduct,
@@ -112,6 +114,7 @@ class CheckoutRequest(BaseModel):
     note: Optional[str] = None
     items: List[CheckoutItem] = Field(..., min_length=1)
     idempotency_key: Optional[str] = None
+    voucher_code: Optional[str] = None
 
     # Cấu trúc địa chỉ giao hàng xác minh (Mô hình 2 cấp 2025 & Legacy)
     fulfillment_type: Optional[str] = "DELIVERY"  # DELIVERY | STORE_PICKUP
@@ -140,6 +143,16 @@ class CartItemValidate(BaseModel):
 
 class CartValidateRequest(BaseModel):
     items: List[CartItemValidate]
+
+
+class CartCalculateRequest(BaseModel):
+    items: List[CartItemValidate]
+    voucher_code: Optional[str] = None
+    fulfillment_type: Optional[str] = "DELIVERY"
+    province_code: Optional[str] = None
+    district_code: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
 
 
 class UpdateOrderStatusRequest(BaseModel):
@@ -263,8 +276,46 @@ def validate_cart(payload: CartValidateRequest, db: Session = Depends(get_db)):
     }
 
 
+@store_order_router.post("/cart/calculate")
+def calculate_cart_quote(payload: CartCalculateRequest, db: Session = Depends(get_db)):
+    """
+    Bảng tính tiền chính thức từ máy chủ (Server-side Pricing & Voucher Engine):
+    - Tải giá niêm yết từ DB.
+    - Kiểm tra tồn kho khả dụng FEFO.
+    - Tính cước vận chuyển chuẩn xác (miễn cước >= 300.000đ).
+    - Thẩm định điều kiện voucher (thời hạn, lượt dùng, giá trị tối thiểu, chiết khấu).
+    - Trả về subtotal, shipping_fee, discount_amount, grand_total trước khi xác nhận đặt hàng.
+    """
+    items_data = [
+        {
+            "product_id": it.product_id,
+            "sku_id": it.sku_id,
+            "quantity": it.quantity,
+        }
+        for it in payload.items
+    ]
+    res = PricingService.calculate_cart_pricing(
+        db=db,
+        items=items_data,
+        voucher_code=payload.voucher_code,
+        fulfillment_type=payload.fulfillment_type or "DELIVERY",
+        province_code=payload.province_code,
+        district_code=payload.district_code,
+        lat=payload.lat,
+        lng=payload.lng,
+    )
+    # Remove internal _voucher_obj before returning JSON
+    res.pop("_voucher_obj", None)
+    return res
+
+
 @store_order_router.post("/checkout")
-def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)):
+def checkout_order(
+    payload: CheckoutRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
+):
     """
     Tạo đơn hàng mới từ Storefront Web Khách Hàng.
     Tính giá 100% tại máy chủ (Server-side Pricing), loại bỏ hoàn toàn thuốc kê đơn Rx và chặn can thiệp giá.
@@ -333,7 +384,6 @@ def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)):
         # 2. Kiểm tra tính hợp lệ của cấp hành chính 2 cấp theo dataset 2025
         is_valid_sel, sel_err = AdministrativeDataService.validate_selection(p_code, c_code)
         if not is_valid_sel:
-            # Fallback tra cứu DB
             prov_db = db.scalar(
                 select(AdministrativeUnit).where(
                     AdministrativeUnit.code == p_code,
@@ -352,90 +402,47 @@ def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)):
                     detail=sel_err or "Cấp hành chính không hợp lệ hoặc không thuộc Tỉnh/Thành phố đã chọn.",
                 )
 
-    # Tìm thông tin sản phẩm
-    product_ids = [it.product_id for it in payload.items]
-    products = db.scalars(
-        select(CanonicalProduct).where(CanonicalProduct.id.in_(product_ids))
-    ).all()
-    products_map = {p.id: p for p in products}
+    # Tính giá toàn diện và kiểm tra voucher tại máy chủ (Server-side Pricing & Voucher Engine)
+    pricing_payload = [
+        {
+            "product_id": it.product_id,
+            "sku_id": it.sku_id,
+            "quantity": it.quantity,
+        }
+        for it in payload.items
+    ]
+    pricing = PricingService.calculate_cart_pricing(
+        db=db,
+        items=pricing_payload,
+        voucher_code=payload.voucher_code,
+        fulfillment_type=payload.fulfillment_type or "DELIVERY",
+        province_code=payload.province_code,
+        district_code=payload.district_code,
+        lat=payload.lat,
+        lng=payload.lng,
+    )
 
-    # Kiểm tra tính hợp lệ: Sản phẩm phải tồn tại, đang được đăng bán và ĐỦ ĐIỀU KIỆN MỞ BÁN THEO PRODUCT ELIGIBILITY ENGINE
-    from app.services.product_eligibility_service import ProductEligibilityService
+    if not pricing["all_eligible"]:
+        for cit in pricing["items"]:
+            if not cit["can_checkout"]:
+                raise HTTPException(status_code=400, detail=f"Sản phẩm '{cit['product_name']}': {cit['rejection_reason']}")
+        raise HTTPException(status_code=400, detail="Một số sản phẩm không đủ điều kiện mở bán hoặc không đủ tồn kho.")
 
-    for item in payload.items:
-        prod = products_map.get(item.product_id)
-        if not prod:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Sản phẩm #{item.product_id} không tồn tại hoặc đã ngừng kinh doanh."
-            )
-        if prod.publish_status != PublishStatus.PUBLISHED:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Sản phẩm '{prod.canonical_name}' chưa sẵn sàng để đặt hàng."
-            )
-        eligibility = ProductEligibilityService.evaluate_product_eligibility(prod, db)
-        if not eligibility.can_add_to_cart:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Sản phẩm '{prod.canonical_name}': {eligibility.primary_reason}"
-            )
-
-    # Tra cứu giá bán chính thức từ hệ thống (Server-side Pricing, tuyệt đối không tin client)
-    prices_map: dict[int, Decimal] = {}
-    price_rows = db.query(PriceObservation.product_id, PriceObservation.observed_price).filter(
-        PriceObservation.product_id.in_(product_ids)
-    ).all()
-    for pid, pval in price_rows:
-        if pid not in prices_map and pval is not None:
-            prices_map[pid] = Decimal(str(pval))
+    if payload.voucher_code and payload.voucher_code.strip():
+        if not pricing.get("voucher") or not pricing["voucher"]["is_valid"]:
+            v_msg = pricing["voucher"]["message"] if pricing.get("voucher") else "Mã giảm giá không hợp lệ."
+            raise HTTPException(status_code=400, detail=v_msg)
 
     order_items_to_add = []
-    total_amount = Decimal("0.0")
-
-    for item in payload.items:
-        prod = products_map[item.product_id]
-        prod_name = prod.canonical_name
-
-        # Multi-SKU resolution
-        sku_obj = None
-        if item.sku_id:
-            sku_obj = db.get(ProductSku, item.sku_id)
-            if not sku_obj or sku_obj.canonical_product_id != prod.id or not sku_obj.is_active:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Quy cách đóng gói (SKU #{item.sku_id}) không hợp lệ hoặc đã ngừng bán cho sản phẩm '{prod_name}'."
-                )
-        else:
-            sku_obj = db.query(ProductSku).filter(
-                ProductSku.canonical_product_id == prod.id,
-                ProductSku.is_active == True,
-            ).order_by(ProductSku.is_default.desc()).first()
-
-        # Kiểm tra giá niêm yết
-        if sku_obj and sku_obj.base_price and sku_obj.base_price > 0:
-            unit_price = Decimal(str(sku_obj.base_price))
-            prod_sku = f"{sku_obj.sku_code} ({sku_obj.uom})"
-        elif item.product_id in prices_map and prices_map[item.product_id] > 0:
-            unit_price = prices_map[item.product_id]
-            prod_sku = prod.registration_number or "Hộp"
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Sản phẩm '{prod_name}' chưa có giá bán niêm yết hợp lệ từ hệ thống."
-            )
-
-        subtotal = unit_price * item.quantity
-        total_amount += subtotal
-
+    for cit in pricing["items"]:
         order_items_to_add.append(
             OrderItem(
-                product_id=item.product_id,
-                product_name=prod_name,
-                product_sku=prod_sku,
-                price=unit_price,
-                quantity=item.quantity,
-                subtotal=subtotal,
+                product_id=cit["product_id"],
+                product_name=cit["product_name"],
+                product_sku=cit["sku_code"] or cit["uom"],
+                price=Decimal(str(cit["unit_price"])),
+                quantity=cit["quantity"],
+                subtotal=Decimal(str(cit["subtotal"])),
             )
         )
 
@@ -443,12 +450,16 @@ def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)):
     comm_info = AdministrativeDataService.get_commune_by_code(comm_code_val) if payload.province_code and comm_code_val else None
     prov_info = AdministrativeDataService.get_province_by_code(payload.province_code) if payload.province_code else None
 
-    # Trạng thái ban đầu: Tất cả đơn hàng mới tạo ở trạng thái PENDING chờ xử lý
     initial_order_status = "PENDING"
-
     order_code = generate_order_code()
+
+    voucher_obj = pricing.get("_voucher_obj")
+    if voucher_obj:
+        voucher_obj.used_count += 1
+
     order = Order(
         order_code=order_code,
+        user_id=current_user.id if current_user else None,
         idempotency_key=payload.idempotency_key.strip() if payload.idempotency_key else None,
         customer_name=name,
         customer_phone=phone,
@@ -461,7 +472,6 @@ def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)):
         lat=payload.lat,
         lng=payload.lng,
         is_verified=bool(payload.is_verified),
-        # 2-Tier 2025 Administrative Model & Legacy Snapshot
         province_code_current=payload.province_code,
         commune_code_current=comm_code_val,
         commune_type=payload.commune_type or (comm_info.get("type") if comm_info else None),
@@ -476,8 +486,12 @@ def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)):
         payment_method=payload.payment_method.upper(),
         payment_status="PENDING",
         order_status=initial_order_status,
-        total_amount=total_amount,
-        shipping_fee=Decimal("0.0"),
+        total_amount=Decimal(str(pricing["grand_total"])),
+        shipping_fee=Decimal(str(pricing["shipping_fee"])),
+        discount_amount=Decimal(str(pricing["discount_amount"])),
+        voucher_code=pricing["voucher"]["code"] if pricing.get("voucher") and pricing["voucher"]["is_valid"] else None,
+        promotion_id=voucher_obj.id if voucher_obj else None,
+        discount_breakdown=pricing["voucher"].get("discount_breakdown") if pricing.get("voucher") else None,
         note=payload.note.strip() if payload.note else None,
         items=order_items_to_add,
     )
@@ -504,6 +518,25 @@ def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)):
         status="PENDING",
     )
     db.add(initial_tx)
+
+    # Ghi audit log
+    write_audit(
+        db,
+        action="CREATE_ORDER",
+        entity_type="Order",
+        entity_id=order.id,
+        user=current_user,
+        request=request,
+        before=None,
+        after={
+            "order_code": order.order_code,
+            "total_amount": float(order.total_amount),
+            "shipping_fee": float(order.shipping_fee),
+            "discount_amount": float(order.discount_amount),
+            "voucher_code": order.voucher_code,
+            "items_count": len(order_items_to_add),
+        },
+    )
 
     db.commit()
     db.refresh(order)
@@ -553,86 +586,78 @@ def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)):
 
 
 @store_order_router.get("/{order_code}")
-def get_order_by_code(order_code: str, db: Session = Depends(get_db)):
+def get_order_by_code(
+    order_code: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """
-    Tra cứu thông tin tiến độ đơn hàng cho khách hàng.
+    Tra cứu thông tin tiến độ đơn hàng.
+    Bắt buộc JWT. Khách hàng chỉ xem được đơn hàng của chính mình (chống IDOR).
+    ADMIN và VIEWER được xem. DATA_REVIEWER tuyệt đối không có quyền xem đơn hàng.
     """
+    clean_code = order_code.strip()
     order = db.scalar(
         select(Order)
         .options(selectinload(Order.items))
-        .where(Order.order_code == order_code.strip())
+        .where(Order.order_code == clean_code)
     )
     if not order:
         raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng với mã này.")
 
+    if current_user.role == UserRole.CUSTOMER:
+        if order.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập thông tin đơn hàng này.")
+    elif current_user.role not in [UserRole.ADMIN, UserRole.VIEWER]:
+        raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập thông tin đơn hàng này.")
+
+    is_admin = current_user.role in [UserRole.ADMIN, UserRole.VIEWER]
+    masked_phone = (
+        order.customer_phone
+        if is_admin
+        else (order.customer_phone[:3] + "****" + order.customer_phone[-3:] if len(order.customer_phone) >= 7 else order.customer_phone)
+    )
+
     return {
         "order_code": order.order_code,
         "customer_name": order.customer_name,
-        "customer_phone": order.customer_phone,
+        "customer_phone": masked_phone,
         "shipping_address": order.shipping_address,
+        "shipping_city": order.shipping_city,
         "payment_method": order.payment_method,
         "payment_status": order.payment_status,
         "order_status": order.order_status,
         "total_amount": float(order.total_amount),
+        "shipping_fee": float(order.shipping_fee or 0),
+        "discount_amount": float(order.discount_amount or 0),
+        "voucher_code": order.voucher_code,
         "created_at": order.created_at.isoformat() if order.created_at else None,
         "items": [
             {
                 "product_id": it.product_id,
                 "product_name": it.product_name,
+                "product_sku": it.product_sku,
                 "price": float(it.price),
                 "quantity": it.quantity,
                 "subtotal": float(it.subtotal),
             }
             for it in order.items
         ],
-        "fulfillments": _serialize_fulfillments(db, order.id),
+        "fulfillments": _serialize_fulfillments(db, order.id) if is_admin else [],
     }
 
 
 @store_order_router.get("/customer/{phone}")
-def get_customer_orders(phone: str, db: Session = Depends(get_db)):
+def get_customer_orders(phone: str):
     """
-    Lấy danh sách đơn hàng riêng biệt của khách hàng theo số điện thoại (bảo đảm cách ly tài khoản).
+    [ĐÃ VÔ HIỆU HÓA - BẢO MẬT PII]
+    Không sử dụng số điện thoại như bằng chứng quyền sở hữu đơn hàng.
+    Vui lòng đăng nhập và sử dụng GET /api/v1/me/orders.
     """
-    clean_phone = phone.strip().replace(" ", "").replace("-", "")
-    orders = db.scalars(
-        select(Order)
-        .options(selectinload(Order.items))
-        .where(
-            or_(
-                Order.customer_phone == phone.strip(),
-                Order.customer_phone == clean_phone,
-            )
-        )
-        .order_by(desc(Order.id))
-        .limit(20)
-    ).all()
-
-    return [
-        {
-            "id": o.id,
-            "order_code": o.order_code,
-            "customer_name": o.customer_name,
-            "customer_phone": o.customer_phone,
-            "shipping_address": o.shipping_address,
-            "total_amount": float(o.total_amount),
-            "order_status": o.order_status,
-            "payment_method": o.payment_method,
-            "payment_status": o.payment_status,
-            "created_at": o.created_at.isoformat() if o.created_at else None,
-            "items_count": len(o.items),
-            "items": [
-                {
-                    "product_name": it.product_name,
-                    "quantity": it.quantity,
-                    "price": float(it.price),
-                    "subtotal": float(it.subtotal),
-                }
-                for it in o.items
-            ],
-        }
-        for o in orders
-    ]
+    raise HTTPException(
+        status_code=403,
+        detail="Tra cứu đơn hàng bằng số điện thoại đã bị vô hiệu hóa vì lý do bảo mật. Vui lòng đăng nhập và truy cập GET /api/v1/me/orders.",
+    )
 
 
 # ==========================================
@@ -645,10 +670,10 @@ def list_orders(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
-    admin: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin: User = Depends(require_roles(UserRole.ADMIN, UserRole.VIEWER)),
 ):
     """
-    Danh sách đơn hàng dành cho Admin quản lý.
+    Danh sách đơn hàng dành cho Admin & Viewer quản lý/theo dõi.
     """
     query = select(Order).options(selectinload(Order.items))
 
@@ -696,10 +721,10 @@ def list_orders(
 def get_admin_order_detail(
     order_id: int,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin: User = Depends(require_roles(UserRole.ADMIN, UserRole.VIEWER)),
 ):
     """
-    Chi tiết đơn hàng cho Admin xử lý.
+    Chi tiết đơn hàng cho Admin & Viewer.
     """
     order = db.scalar(
         select(Order).options(selectinload(Order.items)).where(Order.id == order_id)
@@ -760,13 +785,10 @@ def update_fulfillment_status(
     fulfillment_id: int,
     payload: UpdateFulfillmentStatusRequest,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
-    Cập nhật trạng thái kiện hàng theo quy trình kho (PICKED -> PACKED -> SHIPPED -> DELIVERED -> CANCELLED).
-    Khi SHIPPED: Tự động trừ tồn thực tế on_hand, giảm reserved, sinh Thẻ kho (StockMovement DISPATCH).
-    Khi CANCELLED: Tự động hoàn lại tồn khả dụng available, giải phóng reservation.
-    Đồng thời tự động đồng bộ trạng thái đơn hàng cha.
+    Cập nhật trạng thái kiện hàng theo quy trình kho (chỉ ADMIN).
     """
     ff = FulfillmentRoutingService.transition_fulfillment_status(
         db=db,
@@ -792,7 +814,7 @@ def update_order_status(
     order_id: int,
     payload: UpdateOrderStatusRequest,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
     Cập nhật trạng thái đơn hàng (Duyệt, Giao, Hoàn thành, Hủy).

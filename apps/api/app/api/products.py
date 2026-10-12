@@ -22,6 +22,7 @@ from app.models import (
     User,
     WarehouseBatchStock,
 )
+from app.models.classification import Category, ProductCategory
 from app.models.enums import (
     ConfidenceLabel,
     ConflictStatus,
@@ -111,6 +112,8 @@ def list_products(
     search: str | None = None,
     label: ConfidenceLabel | None = None,
     rx_otc: RxOtcStatus | None = None,
+    product_type: str | None = None,
+    category_slug: str | None = None,
     is_demo: bool | None = None,
     publish_status: PublishStatus | None = None,
     has_conflict: bool | None = None,
@@ -125,6 +128,18 @@ def list_products(
         conditions.append(CanonicalProduct.confidence_label == label)
     if rx_otc:
         conditions.append(CanonicalProduct.rx_otc_status == rx_otc)
+    if product_type:
+        conditions.append(CanonicalProduct.product_type == product_type)
+    if category_slug:
+        cat_id_subq = select(ProductCategory.product_id).join(Category, Category.id == ProductCategory.category_id).where(
+            or_(Category.slug == category_slug, Category.parent_id.in_(select(Category.id).where(Category.slug == category_slug)))
+        )
+        conditions.append(
+            or_(
+                CanonicalProduct.category_slug == category_slug,
+                CanonicalProduct.id.in_(cat_id_subq)
+            )
+        )
     if is_demo is not None:
         conditions.append(CanonicalProduct.is_demo == is_demo)
     if publish_status:

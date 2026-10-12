@@ -880,8 +880,9 @@ def import_rows(
                 if auto_approve:
                     prod.publish_status = PublishStatus.PUBLISHED
                     prod.publish_mode = "SALE_ELIGIBLE"
-                    prod.confidence_label = ConfidenceLabel.HIGH_OFFICIAL_MATCH
-                    prod.overall_score = max(prod.overall_score or 0, 88)
+                    score_res = calculate_product_score(db, prod, "Cập nhật dữ liệu từ phiếu nhập")
+                    prod.overall_score = score_res.total_score
+                    prod.confidence_label = score_res.label
 
                 try:
                     from app.services.search_service import index_single_product
@@ -917,8 +918,8 @@ def import_rows(
                 rx_otc_status=rx_status,
                 publish_status=PublishStatus.PUBLISHED,
                 publish_mode="SALE_ELIGIBLE",
-                overall_score=85,
-                confidence_label=ConfidenceLabel.HIGH_OFFICIAL_MATCH,
+                overall_score=0,
+                confidence_label=ConfidenceLabel.INSUFFICIENT_EVIDENCE,
                 is_demo=is_demo,
             )
             db.add(prod)
@@ -973,8 +974,9 @@ def import_rows(
 
             prod.publish_status = PublishStatus.PUBLISHED
             prod.publish_mode = "SALE_ELIGIBLE"
-            prod.confidence_label = ConfidenceLabel.HIGH_OFFICIAL_MATCH
-            prod.overall_score = 90
+            score_res = calculate_product_score(db, prod, "Tính điểm tự động khi nhập sản phẩm mới")
+            prod.overall_score = score_res.total_score
+            prod.confidence_label = score_res.label
 
             try:
                 from app.services.search_service import index_single_product

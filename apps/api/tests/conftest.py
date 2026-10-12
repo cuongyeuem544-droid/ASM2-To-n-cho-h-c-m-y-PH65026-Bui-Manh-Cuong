@@ -15,6 +15,7 @@ from app.db.base import Base  # noqa: E402
 from app.db.session import SessionLocal, engine  # noqa: E402
 from app.main import app  # noqa: E402
 from app.seed import seed_administrative_units, seed_demo_products, seed_sources, seed_users  # noqa: E402
+from app.services.category_service import seed_standard_categories_and_types  # noqa: E402
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -25,6 +26,7 @@ def database():
         seed_users(db)
         seed_sources(db)
         seed_administrative_units(db)
+        seed_standard_categories_and_types(db)
         db.commit()
         seed_demo_products(db)
         db.commit()

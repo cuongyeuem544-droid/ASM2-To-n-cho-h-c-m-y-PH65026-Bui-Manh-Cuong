@@ -7,8 +7,9 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
-from app.models import CanonicalProduct, PriceObservation, ProductIngredient
+from app.models import CanonicalProduct, Category, PriceObservation, ProductCategory, ProductIngredient
 from app.models.enums import PublishStatus, RxOtcStatus
+from app.services.category_service import get_category_tree
 
 router = APIRouter(prefix="/store", tags=["Storefront Khách Hàng"])
 
@@ -19,7 +20,35 @@ def slugify(text: str) -> str:
     return re.sub(r"[-\s]+", "-", text)
 
 
+CATEGORY_NAME_MAP = {
+    "thuoc-khong-ke-don": "Thuốc Không Kê Đơn",
+    "thuoc-ke-don": "Thuốc Kê Đơn (Rx)",
+    "thuc-pham-chuc-nang": "Vitamin & Thực Phẩm Chức Năng",
+    "duoc-my-pham": "Dược Mỹ Phẩm & Chăm Sóc Da",
+    "thiet-bi-y-te": "Thiết Bị & Dụng Cụ Y Tế",
+    "me-va-be": "Mẹ & Bé",
+}
+
+
 def determine_category_and_subcategory(product: CanonicalProduct) -> tuple[str, str, str]:
+    # 1. Ưu tiên liên kết ProductCategory đã được gán hoặc category_slug trên sản phẩm
+    if product.category_slug and product.category_slug in CATEGORY_NAME_MAP:
+        cat_slug = product.category_slug
+        cat_name = CATEGORY_NAME_MAP[cat_slug]
+        sub_cat = product.subcategory_slug or "pho-bien"
+        return cat_slug, cat_name, sub_cat
+
+    # 2. Kiểm tra theo product_type
+    p_type = getattr(product, "product_type", None)
+    if p_type == "COSMETIC":
+        return "duoc-my-pham", CATEGORY_NAME_MAP["duoc-my-pham"], product.subcategory_slug or "cham-soc-da"
+    elif p_type == "MEDICAL_DEVICE":
+        return "thiet-bi-y-te", CATEGORY_NAME_MAP["thiet-bi-y-te"], product.subcategory_slug or "thiet-bi-khac"
+    elif p_type == "SUPPLEMENT":
+        return "thuc-pham-chuc-nang", CATEGORY_NAME_MAP["thuc-pham-chuc-nang"], product.subcategory_slug or "vitamin-khoang-chat"
+    elif p_type == "MOTHER_BABY":
+        return "me-va-be", CATEGORY_NAME_MAP["me-va-be"], product.subcategory_slug or "me-be-khac"
+
     name = (product.canonical_name or "").lower()
     indications = (product.indications or "").lower()
     dosage = (product.dosage_form or "").lower()
@@ -27,38 +56,46 @@ def determine_category_and_subcategory(product: CanonicalProduct) -> tuple[str, 
 
     is_rx = product.rx_otc_status == RxOtcStatus.PRESCRIPTION
 
-    # 1. Subcategory detection
+    # 3. Phân loại theo từ khóa y tế
+    if any(k in combined for k in ["bầu", "mẹ và bé", "sơ sinh", "trẻ em", "tã", "bỉm"]):
+        return "me-va-be", CATEGORY_NAME_MAP["me-va-be"], product.subcategory_slug or "me-be-khac"
+    elif any(k in combined for k in ["sữa rửa mặt", "chống nắng", "dưỡng da", "mỹ phẩm", "serum"]):
+        return "duoc-my-pham", CATEGORY_NAME_MAP["duoc-my-pham"], product.subcategory_slug or "cham-soc-da"
+    elif any(k in combined for k in ["máy đo", "nhiệt kế", "huyết áp", "băng gạc", "khí dung"]):
+        return "thiet-bi-y-te", CATEGORY_NAME_MAP["thiet-bi-y-te"], product.subcategory_slug or "thiet-bi-khac"
+
+    # Subcategory detection cho Thuốc & TPCN
     if any(k in combined for k in ["paracetamol", "efferalgan", "panadol", "hapacol", "giảm đau", "hạ sốt"]):
         sub_cat = "giam-dau-ha-sot"
     elif any(k in combined for k in ["strepsils", "viên ngậm", "rát họng", "viêm họng", "đau họng"]):
-        sub_cat = "tai-mui-hong"
+        sub_cat = "tri-ho-cam-cum"
     elif any(k in combined for k in ["bổ phế", "nam hà", "otrivin", "avamys", "hadocort", "xịt mũi", "nghẹt mũi", "ho", "đờm", "viêm phế quản"]):
-        sub_cat = "ho-hap-xoang"
+        sub_cat = "tri-ho-cam-cum"
     elif any(k in combined for k in ["phosphalugel", "duphalac", "nexium", "smecta", "gaviscon", "dạ dày", "tiêu hóa", "táo bón", "berberin", "tiêu chảy"]):
-        sub_cat = "tieu-hoa-da-day"
+        sub_cat = "da-day-tieu-hoa"
     elif any(k in combined for k in ["amlor", "lipitor", "crestor", "huyết áp", "mỡ máu", "tim mạch", "daflon"]):
         sub_cat = "tim-mach-huyet-ap"
     elif any(k in combined for k in ["augmentin", "amoxicillin", "zinnat", "cravit", "klacid", "medrol", "kháng sinh", "nhiễm khuẩn"]):
-        sub_cat = "khang-sinh-khang-viem"
+        sub_cat = "khang-sinh"
     elif any(k in combined for k in ["berocca", "vitamin", "khoáng chất", "kẽm", "canxi", "d3"]):
         sub_cat = "vitamin-khoang-chat"
     elif any(k in combined for k in ["orlistat", "béo phì", "giảm cân"]):
-        sub_cat = "ho-tro-dieu-tri"
+        sub_cat = "otc-khac"
     else:
-        sub_cat = "cham-soc-suc-khoe"
+        sub_cat = "otc-khac"
 
-    # 2. Main category detection
     if sub_cat == "vitamin-khoang-chat" or "bổ sung" in combined:
         cat_slug = "thuc-pham-chuc-nang"
-        cat_name = "Thực Phẩm Chức Năng"
+        cat_name = CATEGORY_NAME_MAP["thuc-pham-chuc-nang"]
     elif is_rx:
         cat_slug = "thuoc-ke-don"
-        cat_name = "Thuốc Kê Đơn"
+        cat_name = CATEGORY_NAME_MAP["thuoc-ke-don"]
     else:
         cat_slug = "thuoc-khong-ke-don"
-        cat_name = "Thuốc Không Kê Đơn"
+        cat_name = CATEGORY_NAME_MAP["thuoc-khong-ke-don"]
 
     return cat_slug, cat_name, sub_cat
+
 
 
 def serialize_product(
@@ -138,11 +175,12 @@ def serialize_product(
         # Default intelligent evaluation for product listing when eligibility is not explicitly passed
         if product.publish_status == PublishStatus.PUBLISHED and not product.is_demo and product.publish_mode != "INTERNAL_TEST":
             if is_rx:
-                cta_type = "RX_PRESCRIPTION"
-                cta_label = "Tư Vấn Dược Sĩ"
-                eligibility_tier = "PRESCRIPTION_RESTRICTED"
-                is_sale_eligible = False
-                can_add_to_cart = False
+                cta_type = "RESERVE_RX"
+                cta_label = "Đặt Giữ Chỗ / Tư Vấn Toa"
+                eligibility_tier = "PRESCRIPTION_RESERVATION"
+                is_sale_eligible = True
+                can_add_to_cart = True
+                primary_reason = "Thuốc kê đơn: Cho phép tạo đơn giữ chỗ. Dược sĩ PharmaTrust sẽ liên hệ kiểm tra đơn thuốc trước khi giao hàng."
             elif product.publish_mode == "REFERENCE_ONLY":
                 cta_type = "CONSULT_PHARMACIST"
                 cta_label = "Tra Cứu Y Tế"
@@ -171,6 +209,8 @@ def serialize_product(
         "slug": slug,
         "sku": product.registration_number or f"PT-MED-{product.id:04d}",
         "brand": product.manufacturer or "PharmaTrust",
+        "productType": getattr(product, "product_type", "MEDICINE") or "MEDICINE",
+        "prescriptionStatus": getattr(product, "prescription_status", "RX" if is_rx else "OTC") or ("RX" if is_rx else "OTC"),
         "category": cat_slug,
         "categoryName": cat_name,
         "subCategory": sub_cat,
@@ -211,10 +251,39 @@ def serialize_product(
     }
 
 
+@router.get("/categories/tree")
+def get_store_category_tree(db: Session = Depends(get_db)):
+    """Lấy cây danh mục dược phẩm chuẩn hóa 6 nhóm cho MegaMenu Storefront."""
+    return get_category_tree(db)
+
+
+@router.get("/categories/{slug}/products")
+def get_category_products(
+    slug: str,
+    prescriptionType: str = Query("all", regex="^(all|otc|rx)$"),
+    sort: str = "popular",
+    limit: int = Query(24, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """Lấy danh sách sản phẩm theo slug danh mục (hỗ trợ cả nhóm cấp 1 và nhóm con)."""
+    return get_store_products(
+        category=slug,
+        prescriptionType=prescriptionType,
+        sort=sort,
+        limit=limit,
+        offset=offset,
+        db=db,
+    )
+
+
 @router.get("/products")
 def get_store_products(
     category: str | None = None,
     subCategory: str | None = None,
+    product_type: str | None = None,
+    prescription_status: str | None = None,
+    tag: str | None = None,
     prescriptionType: str = Query("all", regex="^(all|otc|rx)$"),
     search: str | None = Query(None, max_length=100),
     sort: str = "popular",
@@ -309,11 +378,35 @@ def get_store_products(
             stock=stocks_map.get(p.id, 0),
         )
         
-        # Category filters in memory
-        if category and item["category"] != category:
-            continue
+        # Category matching: support matching root category or subcategories
+        if category:
+            matching_slugs = {category}
+            cat_obj = db.scalar(select(Category).where(Category.slug == category))
+            if cat_obj and cat_obj.parent_id is None:
+                ch_slugs = db.scalars(select(Category.slug).where(Category.parent_id == cat_obj.id)).all()
+                matching_slugs.update(ch_slugs)
+
+            if item["category"] not in matching_slugs and item["subCategory"] not in matching_slugs:
+                continue
+
         if subCategory and item["subCategory"] != subCategory:
             continue
+
+        if product_type and item.get("productType") != product_type:
+            continue
+
+        if prescription_status and item.get("prescriptionStatus") != prescription_status:
+            continue
+
+        if tag:
+            t = tag.lower().strip()
+            if t in ["hot", "popular"]:
+                if not (item.get("isBestSeller") or item.get("isFeatured")):
+                    continue
+            elif t == "bestseller" and not item.get("isBestSeller"):
+                continue
+            elif t == "featured" and not item.get("isFeatured"):
+                continue
 
         serialized.append(item)
 

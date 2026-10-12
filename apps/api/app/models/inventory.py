@@ -395,6 +395,7 @@ class EmailOutbox(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     recipient_email: Mapped[str] = mapped_column(String(255), index=True)
+    recipient_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     subject: Mapped[str] = mapped_column(String(500))
     body_html: Mapped[str] = mapped_column(Text)
     body_text: Mapped[str | None] = mapped_column(Text, nullable=True)

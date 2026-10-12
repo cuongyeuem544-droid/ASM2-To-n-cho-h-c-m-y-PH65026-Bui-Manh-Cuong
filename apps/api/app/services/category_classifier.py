@@ -1,9 +1,12 @@
-import re
-import unicodedata
-from dataclasses import dataclass
+from __future__ import annotations
+
+from dataclasses import dataclass, field
 from typing import Any
 
 from app.core.config import settings
+from app.db.session import SessionLocal
+from app.models.entities import CanonicalProduct
+from app.services.classification_pipeline import ProductClassificationPipeline, ClassificationProposal
 
 
 @dataclass
@@ -14,11 +17,15 @@ class CategoryClassificationResult:
     subcategory_name: str | None
     confidence: float
     reasoning: str
-    model_version: str = "pharmatrust-cat-v1.0"
+    model_version: str = "pharmatrust-cat-v2.0"
     requires_review: bool = False
+    product_type: str | None = None
+    prescription_status: str | None = None
+    missing_fields: list[str] = field(default_factory=list)
+    conflicts: list[str] = field(default_factory=list)
 
 
-# Danh mục tiêu chuẩn duy nhất của hệ thống PharmaTrust Storefront
+# Danh mục tiêu chuẩn 6 nhóm đầy đủ bao gồm Mẹ & Bé
 VALID_CATEGORIES = {
     "thuoc-khong-ke-don": {
         "name": "Thuốc Không Kê Đơn",
@@ -29,8 +36,10 @@ VALID_CATEGORIES = {
             "nho-mat-mui-tai": "Thuốc nhỏ mắt & Mũi tai",
             "say-xe-di-ung": "Chống say xe & Dị ứng",
             "khang-viem": "Kháng viêm & Phù nề",
-            "ho-tro-dieu-tri": "Hỗ trợ điều trị chuyên khoa",
-            "cham-soc-suc-khoe": "Chăm sóc sức khỏe thông thường",
+            "da-lieu-ngoai": "Da liễu dùng ngoài",
+            "sat-khuan-vet-thuong": "Sát khuẩn & Vết thương",
+            "cham-soc-rang-mieng": "Chăm sóc răng miệng",
+            "otc-khac": "Nhóm OTC khác",
         },
     },
     "thuoc-ke-don": {
@@ -42,6 +51,9 @@ VALID_CATEGORIES = {
             "co-xuong-khop": "Cơ - Xương - Khớp",
             "than-kinh-giac-ngu": "Thần kinh & Giấc ngủ",
             "ho-hap-chuyen-sau": "Hô hấp chuyên sâu",
+            "tieu-hoa-ke-don": "Tiêu hóa chuyên khoa",
+            "da-lieu-ke-don": "Da liễu chuyên sâu",
+            "ke-don-khac": "Nhóm kê đơn khác",
         },
     },
     "thuc-pham-chuc-nang": {
@@ -53,6 +65,12 @@ VALID_CATEGORIES = {
             "bo-khop": "Glucosamine & Khớp xương",
             "omega-3": "Omega 3 & Sức khỏe Tim",
             "giai-doc-gan": "Thanh nhiệt & Giải độc gan",
+            "ho-tro-tieu-hoa": "Hỗ trợ Tiêu hóa & Men vi sinh",
+            "ho-tro-tim-mach": "Hỗ trợ Tim mạch",
+            "ho-tro-giac-ngu": "Hỗ trợ Giấc ngủ ngon",
+            "nguoi-cao-tuoi": "Dinh dưỡng Người cao tuổi",
+            "tre-em": "Vi chất cho Trẻ em",
+            "ho-tro-khac": "Hỗ trợ sức khỏe khác",
         },
     },
     "duoc-my-pham": {
@@ -63,6 +81,10 @@ VALID_CATEGORIES = {
             "tri-mun-phuc-hoi": "Trị mụn & Phục hồi da",
             "duong-am": "Kem dưỡng ẩm chuyên sâu",
             "serum-dac-tri": "Serum đặc trị thâm nám",
+            "da-nhay-cam": "Chăm sóc da nhạy cảm",
+            "cham-soc-toc": "Chăm sóc tóc & Da đầu",
+            "cham-soc-co-the": "Chăm sóc cơ thể",
+            "my-pham-khac": "Mỹ phẩm khác",
         },
     },
     "thiet-bi-y-te": {
@@ -72,108 +94,36 @@ VALID_CATEGORIES = {
             "may-do-duong-huyet": "Máy & Que đo Đường huyết",
             "nhiet-ke-spo2": "Nhiệt kế hồng ngoại & SpO2",
             "may-xong-khi-dung": "Máy xông khí dung mũi họng",
-            "bang-gac-sat-trung": "Băng gạc & Sát trùng vết thương",
+            "bang-gac-sat-trung": "Băng gạc & Sơ cứu vết thương",
+            "khau-trang": "Khẩu trang y tế & Kháng khuẩn",
+            "dung-cu-cham-soc": "Dụng cụ chăm sóc tại nhà",
+            "thiet-bi-khac": "Thiết bị y tế khác",
+        },
+    },
+    "me-va-be": {
+        "name": "Mẹ & Bé",
+        "subcategories": {
+            "vitamin-me-bau": "Vitamin & Sắt cho Mẹ bầu",
+            "men-vi-sinh-be": "Men vi sinh & Tiêu hóa trẻ em",
+            "de-khang-be": "Tăng đề kháng & Trị ho cho bé",
+            "tam-goi-be": "Tắm gội & Dưỡng ẩm dịu nhẹ",
+            "cham-soc-thai-ky": "Chăm sóc thai kỳ & Rạn da",
+            "cham-soc-sau-sinh": "Chăm sóc Mẹ sau sinh",
+            "dinh-duong-be": "Dinh dưỡng & Sữa cho bé",
+            "ve-sinh-be": "Vệ sinh & Tã bỉm cho bé",
+            "dung-cu-me-be": "Dụng cụ chăm sóc Mẹ & Bé",
+            "me-be-khac": "Sản phẩm mẹ và bé khác",
         },
     },
 }
 
 
-def _normalize(text: str) -> str:
-    if not text:
-        return ""
-    text = unicodedata.normalize("NFC", text).lower().strip()
-    return re.sub(r"\s+", " ", text)
-
-
-# Tập luật nhận diện hoạt chất & từ khóa y khoa đã kiểm chứng
-KEYWORD_RULES = [
-    # 1. Kháng sinh kê đơn
-    {
-        "keywords": ["amoxicillin", "clavulanic", "augmentin", "zinnat", "cefuroxime", "cefixim", "ciprofloxacin", "clarithromycin", "klacid", "azithromycin", "zithromax", "kháng sinh"],
-        "cat": "thuoc-ke-don",
-        "sub": "khang-sinh",
-        "confidence": 0.96,
-        "reason": "Chứa hoạt chất kháng sinh phổ rộng theo danh mục kê đơn bắt buộc",
-    },
-    # 2. Tim mạch & Huyết áp
-    {
-        "keywords": ["concor", "bisoprolol", "amlor", "amlodipine", "coversyl", "perindopril", "lipitor", "atorvastatin", "crestor", "rosuvastatin", "plavix", "clopidogrel", "huyết áp", "tim mạch", "suy tim", "daflon", "diosmin"],
-        "cat": "thuoc-ke-don",
-        "sub": "tim-mach-huyet-ap",
-        "confidence": 0.95,
-        "reason": "Hoạt chất điều trị tim mạch, huyết áp hoặc bảo vệ thành mạch",
-    },
-    # 3. Tiểu đường
-    {
-        "keywords": ["glucophage", "metformin", "gliclazide", "diamicron", "tiểu đường", "hạ đường huyết", "insulin"],
-        "cat": "thuoc-ke-don",
-        "sub": "tieu-duong",
-        "confidence": 0.95,
-        "reason": "Hoạt chất kiểm soát đường huyết và đái tháo đường",
-    },
-    # 4. Cơ xương khớp kê đơn
-    {
-        "keywords": ["celebrex", "celecoxib", "mobic", "meloxicam", "voltaren", "diclofenac", "medrol", "methylprednisolone"],
-        "cat": "thuoc-ke-don",
-        "sub": "co-xuong-khop",
-        "confidence": 0.93,
-        "reason": "Kháng viêm NSAID hoặc Corticoid liều chỉ định",
-    },
-    # 5. Giảm đau & Hạ sốt OTC
-    {
-        "keywords": ["paracetamol", "efferalgan", "panadol", "hapacol", "acetaminophen", "hạ sốt", "giảm đau đầu"],
-        "cat": "thuoc-khong-ke-don",
-        "sub": "giam-dau-ha-sot",
-        "confidence": 0.96,
-        "reason": "Hoạt chất Paracetamol tiêu chuẩn giảm đau hạ sốt không kê đơn",
-    },
-    # 6. Dạ dày & Tiêu hóa OTC
-    {
-        "keywords": ["phosphalugel", "gaviscon", "duphalac", "lactulose", "smecta", "diosmectite", "nexium", "esomeprazole", "omeprazole", "trào ngược", "đau dạ dày", "tiêu chảy", "táo bón", "berberin"],
-        "cat": "thuoc-khong-ke-don",
-        "sub": "da-day-tieu-hoa",
-        "confidence": 0.94,
-        "reason": "Thuốc kháng acid, tráng niêm mạc, nhuận tràng hoặc cầm tiêu chảy",
-    },
-    # 7. Trị ho, Cảm cúm & Viêm họng OTC
-    {
-        "keywords": ["strepsils", "viên ngậm", "rát họng", "viêm họng", "bổ phế", "nam hà", "prospan", "siro ho", "eugica", "cảm cúm", "long đờm"],
-        "cat": "thuoc-khong-ke-don",
-        "sub": "tri-ho-cam-cum",
-        "confidence": 0.94,
-        "reason": "Chế phẩm trị ho thảo dược, viên ngậm sát khuẩn hoặc siro cảm cúm",
-    },
-    # 8. Nhỏ mắt mũi tai & Dị ứng OTC
-    {
-        "keywords": ["telfast", "fexofenadine", "clarityne", "loratadine", "cetirizine", "say xe", "dị ứng", "mày đay", "otrivin", "nhỏ mắt", "nước mắt nhân tạo"],
-        "cat": "thuoc-khong-ke-don",
-        "sub": "say-xe-di-ung",
-        "confidence": 0.92,
-        "reason": "Thuốc kháng histamin chống dị ứng hoặc chế phẩm nhỏ mắt mũi",
-    },
-    # 9. Vitamin & Khoáng chất
-    {
-        "keywords": ["berocca", "vitamin c", "vitamin b", "vitamin tổng hợp", "kẽm zinc", "canxi corbiere", "d3", "khoáng chất", "multivitamin"],
-        "cat": "thuc-pham-chuc-nang",
-        "sub": "vitamin-khoang-chat",
-        "confidence": 0.93,
-        "reason": "Chế phẩm bổ sung vi chất dinh dưỡng, vitamin và khoáng chất",
-    },
-    # 10. Hỗ trợ điều trị chuyên khoa OTC
-    {
-        "keywords": ["orlistat", "giảm béo", "giảm cân"],
-        "cat": "thuoc-khong-ke-don",
-        "sub": "ho-tro-dieu-tri",
-        "confidence": 0.90,
-        "reason": "Chế phẩm hỗ trợ điều trị thừa cân, béo phì",
-    },
-]
-
-
 class AICategoryClassifier:
     """
-    Module AI phân loại sản phẩm vào cây danh mục hiện có của PharmaTrust.
-    Tuyệt đối không tự tạo danh mục mới, không ép vào danh mục gần nhất nếu không chắc chắn.
+    Bộ phân loại sản phẩm y tế tuân thủ quy trình chuẩn hóa:
+    - Sử dụng ProductClassificationPipeline
+    - Không suy diễn kê đơn chỉ từ tên hoạt chất
+    - Đưa vào hàng chờ duyệt nếu thiếu căn cứ chính thức
     """
 
     def __init__(self, threshold: float | None = None):
@@ -187,62 +137,53 @@ class AICategoryClassifier:
         indications: str | None = None,
         source_category: str | None = None,
         is_rx: bool | None = None,
+        registration_number: str | None = None,
+        manufacturer: str | None = None,
     ) -> CategoryClassificationResult:
-        # Tổng hợp ngữ cảnh văn bản để phân tích
-        ing_text = " ".join([str(i.get("name", "")) for i in (ingredients or [])])
-        combined = _normalize(f"{name} {ing_text} {dosage_form or ''} {indications or ''} {source_category or ''}")
+        db = SessionLocal()
+        try:
+            pipeline = ProductClassificationPipeline(db)
+            # Tạo dummy CanonicalProduct để chạy qua pipeline
+            dummy_prod = CanonicalProduct(
+                id=0,
+                canonical_name=name,
+                registration_number=registration_number,
+                dosage_form=dosage_form,
+                manufacturer=manufacturer,
+                indications=indications,
+            )
+            proposal = pipeline.classify_product(dummy_prod)
 
-        best_match = None
-        best_score = 0.0
+            primary_cat = None
+            sub_cat = None
+            for c in proposal.suggested_categories:
+                if c.get("is_primary") and not primary_cat:
+                    primary_cat = c
+                elif not sub_cat:
+                    sub_cat = c
 
-        for rule in KEYWORD_RULES:
-            matched_keywords = [kw for kw in rule["keywords"] if kw in combined]
-            if matched_keywords:
-                # Tăng điểm nếu khớp nhiều từ khóa hoạt chất cụ thể
-                score = rule["confidence"]
-                if len(matched_keywords) > 1:
-                    score = min(0.99, score + 0.02 * (len(matched_keywords) - 1))
-                
-                # Cân nhắc cờ kê đơn (Rx)
-                if is_rx is True and rule["cat"] == "thuoc-ke-don":
-                    score = min(0.99, score + 0.02)
-                elif is_rx is False and rule["cat"] == "thuoc-khong-ke-don":
-                    score = min(0.99, score + 0.02)
+            cat_slug = primary_cat["slug"] if primary_cat else None
+            sub_slug = sub_cat["slug"] if sub_cat else None
 
-                if score > best_score:
-                    best_score = score
-                    best_match = rule
-
-        # Nếu tìm thấy luật phân loại với độ tin cậy >= threshold
-        if best_match and best_score >= self.threshold:
-            cat_slug = best_match["cat"]
-            sub_slug = best_match["sub"]
-            cat_info = VALID_CATEGORIES.get(cat_slug, {})
+            cat_info = VALID_CATEGORIES.get(cat_slug, {}) if cat_slug else {}
             cat_name = cat_info.get("name")
-            sub_name = cat_info.get("subcategories", {}).get(sub_slug)
+            sub_name = cat_info.get("subcategories", {}).get(sub_slug) if sub_slug else None
 
             return CategoryClassificationResult(
                 category_slug=cat_slug,
                 category_name=cat_name,
                 subcategory_slug=sub_slug,
                 subcategory_name=sub_name,
-                confidence=round(best_score, 2),
-                reasoning=best_match["reason"],
-                requires_review=False,
+                confidence=round(proposal.confidence, 2),
+                reasoning="; ".join(proposal.reasoning),
+                requires_review=proposal.requires_review,
+                product_type=proposal.suggested_product_type,
+                prescription_status=proposal.suggested_prescription_status,
+                missing_fields=proposal.missing_fields,
+                conflicts=proposal.conflicts,
             )
-
-        # TRƯỜNG HỢP KHÔNG ĐỦ CHẮC CHẮN HOẶC KHÔNG CÓ DANH MỤC PHÙ HỢP:
-        # Không ép vào danh mục gần nhất, đánh dấu cần Admin duyệt
-        return CategoryClassificationResult(
-            category_slug=None,
-            category_name=None,
-            subcategory_slug=None,
-            subcategory_name=None,
-            confidence=round(best_score, 2) if best_match else 0.0,
-            reasoning="Độ chắc chắn của AI dưới ngưỡng quy định (0.85) hoặc không có từ khóa y khoa phù hợp.",
-            requires_review=True,
-        )
+        finally:
+            db.close()
 
 
-# Singleton
 classifier = AICategoryClassifier()

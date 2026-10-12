@@ -20,6 +20,14 @@ def migrate():
             ("publish_mode", "VARCHAR(50) DEFAULT 'MANUAL_REVIEW'"),
             ("local_image_url", "VARCHAR(1000)"),
             ("local_thumbnail_url", "VARCHAR(1000)"),
+            ("product_type", "VARCHAR(50) DEFAULT 'OTHER'"),
+            ("prescription_status", "VARCHAR(50) DEFAULT 'UNKNOWN'"),
+            ("target_audience", "VARCHAR(100)"),
+            ("atc_code", "VARCHAR(50)"),
+            ("atc_name", "VARCHAR(255)"),
+            ("atc_level", "INTEGER"),
+            ("atc_source", "VARCHAR(100)"),
+            ("atc_verified_at", "DATETIME"),
         ]
         for name, defn in new_cols:
             if name not in cols:
@@ -31,6 +39,8 @@ def migrate():
         db.execute(text("CREATE INDEX IF NOT EXISTS idx_canonical_publish_status ON canonical_products(publish_status);"))
         db.execute(text("CREATE INDEX IF NOT EXISTS idx_canonical_updated_at ON canonical_products(updated_at);"))
         db.execute(text("CREATE INDEX IF NOT EXISTS idx_canonical_overall_score ON canonical_products(overall_score);"))
+        db.execute(text("CREATE INDEX IF NOT EXISTS idx_canonical_product_type ON canonical_products(product_type);"))
+        db.execute(text("CREATE INDEX IF NOT EXISTS idx_canonical_prescription_status ON canonical_products(prescription_status);"))
         db.execute(text("CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);"))
         db.execute(text("CREATE INDEX IF NOT EXISTS idx_orders_order_status ON orders(order_status);"))
         db.commit()

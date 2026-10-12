@@ -28,9 +28,9 @@ export default function ForgotPasswordPage() {
   const { sendPhoneOtp } = useAuth();
   const shouldReduceMotion = useReducedMotion();
 
-  const [identifier, setIdentifier] = useState<string>("0901234567");
+  const [identifier, setIdentifier] = useState<string>("");
   const [step, setStep] = useState<"input" | "otp">("input");
-  const [otpValues, setOtpValues] = useState<string[]>(["8", "4", "2", "6", "9", "1"]);
+  const [otpValues, setOtpValues] = useState<string[]>(["", "", "", "", "", ""]);
   const [countdown, setCountdown] = useState<number>(60);
   const [focusedField, setFocusedField] = useState<string | null>(null);
 
@@ -71,24 +71,41 @@ export default function ForgotPasswordPage() {
     return () => clearInterval(timer);
   }, [step, countdown]);
 
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
-    if (!identifier.trim()) {
+    const cleanId = identifier.trim();
+    if (!cleanId) {
       setErrorMessage("Vui lòng nhập số điện thoại hoặc email đã đăng ký.");
       return;
     }
 
     setIsSubmitting(true);
-    await sendPhoneOtp(identifier.trim());
-    setIsSubmitting(false);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/auth/password-reset/request`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identifier: cleanId }),
+      });
+      setIsSubmitting(false);
 
-    setStep("otp");
-    setCountdown(60);
+      if (res.ok) {
+        setStep("otp");
+        setCountdown(60);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setErrorMessage(data.detail || "Không thể gửi mã xác thực. Vui lòng kiểm tra lại thông tin.");
+      }
+    } catch (e) {
+      setIsSubmitting(false);
+      setErrorMessage("Không thể kết nối đến máy chủ. Vui lòng kiểm tra lại dịch vụ backend.");
+    }
   };
 
-  const handleVerifyOtp = (e: React.FormEvent) => {
+  const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
@@ -99,13 +116,28 @@ export default function ForgotPasswordPage() {
     }
 
     setIsSubmitting(true);
-    setTimeout(() => {
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/auth/password-reset/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identifier: identifier.trim(), otp: otpCode }),
+      });
       setIsSubmitting(false);
-      setIsSuccess(true);
-      setTimeout(() => {
-        router.push(`/reset-password?target=${encodeURIComponent(identifier.trim())}`);
-      }, 750);
-    }, 450);
+
+      if (res.ok) {
+        const data = await res.json();
+        setIsSuccess(true);
+        setTimeout(() => {
+          router.push(`/reset-password?token=${encodeURIComponent(data.reset_token)}`);
+        }, 750);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setErrorMessage(data.detail || "Mã OTP không chính xác hoặc đã hết hạn.");
+      }
+    } catch (e) {
+      setIsSubmitting(false);
+      setErrorMessage("Không thể kết nối đến máy chủ. Vui lòng kiểm tra lại dịch vụ backend.");
+    }
   };
 
   const containerVariants = {
