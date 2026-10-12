@@ -17,9 +17,8 @@ def auth_tokens(database):
     Sinh JWT token cho các role khác nhau:
     - Buyer A (UserRole.CUSTOMER)
     - Buyer B (UserRole.CUSTOMER)
-    - Data Reviewer (UserRole.DATA_REVIEWER)
+    - Staff (UserRole.WAREHOUSE_STAFF)
     - Admin (UserRole.ADMIN)
-    - Viewer (UserRole.VIEWER)
     """
     with SessionLocal() as db:
         # Buyer A
@@ -64,14 +63,14 @@ def auth_tokens(database):
             )
             db.add(admin)
 
-        # Reviewer
+        # Staff
         reviewer = db.scalar(select(User).where(User.email == "reviewer@pharmatrust.vn"))
         if not reviewer:
             reviewer = User(
                 email="reviewer@pharmatrust.vn",
                 password_hash=hash_password("Reviewer@123456"),
-                full_name="Kiểm Duyệt Dược",
-                role=UserRole.DATA_REVIEWER,
+                full_name="Nhân Viên Kho",
+                role=UserRole.WAREHOUSE_STAFF,
                 phone="0900000002",
                 is_active=True,
                 token_version=1,
@@ -92,7 +91,7 @@ def auth_tokens(database):
     token_a = create_access_token(subject=str(buyer_a_id), role="CUSTOMER", token_version=1)
     token_b = create_access_token(subject=str(buyer_b_id), role="CUSTOMER", token_version=1)
     token_admin = create_access_token(subject=str(admin_id), role="ADMIN", token_version=1)
-    token_rev = create_access_token(subject=str(reviewer_id), role="DATA_REVIEWER", token_version=1)
+    token_rev = create_access_token(subject=str(reviewer_id), role="WAREHOUSE_STAFF", token_version=1)
 
     return {
         "buyer_a_id": buyer_a_id,
@@ -244,10 +243,9 @@ def test_idor_buyer_a_cannot_view_buyer_b_payment_status(client: TestClient, aut
 # 3. RBAC & DATA REVIEWER PRIVILEGE ENFORCEMENT
 # ==============================================================================
 
-def test_data_reviewer_cannot_view_or_process_orders(client: TestClient, auth_tokens, sample_orders_a_and_b):
+def test_warehouse_staff_cannot_view_or_process_admin_orders(client: TestClient, auth_tokens, sample_orders_a_and_b):
     """
-    DATA_REVIEWER chỉ quản lý danh mục thuốc,
-    tuyệt đối KHÔNG được xem hoặc xử lý đơn hàng (User Decision #1).
+    WAREHOUSE_STAFF không được xem đơn hàng của khách khác hoặc truy cập trang quản trị admin.
     """
     order_a_code = sample_orders_a_and_b["order_a_code"]
 

@@ -39,27 +39,27 @@ def auth_headers(database):
             )
             db.add(admin)
 
-        # Data Reviewer
+        # Warehouse Manager (Cũ: Data Reviewer)
         reviewer = db.scalar(select(User).where(User.email == "reviewer@pharmatrust.vn"))
         if not reviewer:
             reviewer = User(
                 email="reviewer@pharmatrust.vn",
                 password_hash=hash_password("Reviewer@123456"),
-                full_name="Kiểm duyệt viên",
-                role=UserRole.DATA_REVIEWER,
+                full_name="Quản lý kho Hà Nội",
+                role=UserRole.WAREHOUSE_MANAGER,
                 is_active=True,
                 token_version=1,
             )
             db.add(reviewer)
 
-        # Viewer
+        # Warehouse Staff (Cũ: Viewer)
         viewer = db.scalar(select(User).where(User.email == "viewer@pharmatrust.vn"))
         if not viewer:
             viewer = User(
                 email="viewer@pharmatrust.vn",
                 password_hash=hash_password("Viewer@123456"),
-                full_name="Người xem",
-                role=UserRole.VIEWER,
+                full_name="Nhân viên kho Hà Nội",
+                role=UserRole.WAREHOUSE_STAFF,
                 is_active=True,
                 token_version=1,
             )
@@ -332,13 +332,13 @@ def test_viewer_role_cannot_edit_category(client: TestClient, auth_headers):
 
 
 # =====================================================================
-# 8. DATA_REVIEWER có thể duyệt phân loại nhưng không được xóa danh mục hệ thống
+# 8. Chỉ ADMIN có quyền duyệt phân loại y tế toàn hệ thống
 # =====================================================================
 def test_data_reviewer_permissions(client: TestClient, auth_headers):
-    """DATA_REVIEWER có thể duyệt phân loại sản phẩm."""
+    """Admin có quyền duyệt phân loại sản phẩm y tế toàn hệ thống."""
     with SessionLocal() as db:
         prod = CanonicalProduct(
-            canonical_name="Thuốc Paracetamol Cho Data Reviewer Duyệt",
+            canonical_name="Thuốc Paracetamol Cho Admin Duyệt",
             product_type="MEDICINE",
             prescription_status="OTC",
             is_demo=True,
@@ -348,16 +348,28 @@ def test_data_reviewer_permissions(client: TestClient, auth_headers):
         db.refresh(prod)
         pid = prod.id
 
+    # Admin duyệt thành công
     res = client.post(
+        f"/api/v1/admin/classification/{pid}/approve",
+        headers=auth_headers["admin"],
+        json={
+            "product_type": "MEDICINE",
+            "prescription_status": "OTC",
+            "note": "Duyệt bởi Admin toàn hệ thống",
+        },
+    )
+    assert res.status_code == 200
+
+    # Quản lý kho không được quyền duyệt danh mục toàn hệ thống -> 403
+    res_mgr = client.post(
         f"/api/v1/admin/classification/{pid}/approve",
         headers=auth_headers["reviewer"],
         json={
             "product_type": "MEDICINE",
             "prescription_status": "OTC",
-            "note": "Duyệt bởi Data Reviewer",
         },
     )
-    assert res.status_code == 200
+    assert res_mgr.status_code == 403
 
 
 # =====================================================================

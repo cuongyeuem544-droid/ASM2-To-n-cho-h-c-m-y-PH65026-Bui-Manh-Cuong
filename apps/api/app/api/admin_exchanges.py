@@ -65,7 +65,7 @@ def list_admin_exchanges(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
-    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
     Danh sách các đơn đổi hàng trong hệ thống.
@@ -119,7 +119,7 @@ def list_admin_exchanges(
 def get_admin_exchange_detail(
     exchange_code: str,
     db: Session = Depends(get_db),
-    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
     Chi tiết đơn đổi hàng và danh sách sản phẩm thay thế.
@@ -165,7 +165,7 @@ def get_admin_exchange_detail(
 def create_exchange_order(
     payload: CreateExchangePayload,
     db: Session = Depends(get_db),
-    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
     Khởi tạo đơn đổi hàng mới từ yêu cầu đổi/trả.
@@ -191,7 +191,7 @@ def confirm_exchange_payment(
     exchange_code: str,
     payload: ConfirmPaymentPayload,
     db: Session = Depends(get_db),
-    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
     Xác nhận khách hàng đã thanh toán xong khoản chênh lệch đổi hàng.
@@ -216,7 +216,7 @@ def dispatch_exchange(
     exchange_code: str,
     payload: DispatchExchangePayload,
     db: Session = Depends(get_db),
-    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
     Xuất kho và gửi kiện hàng đổi mới tới khách hàng.
@@ -240,7 +240,7 @@ def dispatch_exchange(
 def complete_exchange(
     exchange_code: str,
     db: Session = Depends(get_db),
-    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
     Hoàn tất đơn đổi hàng (Khách đã nhận kiện hàng mới thành công).

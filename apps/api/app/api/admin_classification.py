@@ -93,7 +93,7 @@ class BulkApproveRequest(BaseModel):
 
 @router.get("/categories/tree")
 def admin_get_category_tree(
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER, UserRole.VIEWER)),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ):
     """Lấy cây danh mục cấp 1 và cấp 2 kèm số lượng sản phẩm."""
@@ -104,7 +104,7 @@ def admin_get_category_tree(
 def admin_create_category(
     payload: CategoryCreateRequest,
     request: Request,
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ):
     """Tạo mới danh mục trong cây phân cấp."""
@@ -151,7 +151,7 @@ def admin_update_category(
     cat_id: int,
     payload: CategoryUpdateRequest,
     request: Request,
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ):
     """Cập nhật thông tin danh mục."""
@@ -175,7 +175,7 @@ def admin_update_category(
 def admin_reorder_categories(
     payload: ReorderRequest,
     request: Request,
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ):
     """Thay đổi thứ tự hiển thị của các danh mục."""
@@ -233,7 +233,7 @@ def admin_get_review_queue(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     status: str = Query("PENDING"),
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER, UserRole.VIEWER)),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ):
     """Xem danh sách hàng chờ phân loại sản phẩm y tế cần duyệt."""
@@ -283,7 +283,7 @@ def admin_approve_classification(
     product_id: int,
     payload: ClassificationApproveRequest,
     request: Request,
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ):
     """Phê duyệt kết quả phân loại sản phẩm y tế."""
@@ -370,7 +370,7 @@ def admin_reject_classification(
     product_id: int,
     payload: ClassificationRejectRequest,
     request: Request,
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ):
     """Từ chối đề xuất phân loại và yêu cầu bổ sung hồ sơ."""
@@ -411,7 +411,7 @@ def admin_reject_classification(
 def admin_bulk_approve_classification(
     payload: BulkApproveRequest,
     request: Request,
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ):
     """Phân loại và phê duyệt hàng loạt cho các sản phẩm cùng nhóm pháp lý."""
@@ -472,7 +472,7 @@ def admin_bulk_approve_classification(
 @router.get("/classification/history/{product_id}")
 def admin_get_classification_history(
     product_id: int,
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER, UserRole.VIEWER)),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ):
     """Xem nhật ký kiểm tra và thay đổi phân loại của một sản phẩm."""

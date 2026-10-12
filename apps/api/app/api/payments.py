@@ -288,7 +288,7 @@ def get_order_payment_status(
     """
     Kiểm tra trạng thái thanh toán hiện tại của đơn hàng, kèm toàn bộ lịch sử giao dịch.
     Bắt buộc JWT. Khách hàng chỉ xem được trạng thái đơn của chính mình (chống IDOR).
-    ADMIN và VIEWER được xem.
+    ADMIN được xem.
     """
     clean_code = order_code.strip()
     order = db.scalar(select(Order).where(Order.order_code == clean_code))
@@ -298,7 +298,7 @@ def get_order_payment_status(
     if current_user.role == UserRole.CUSTOMER:
         if order.user_id != current_user.id:
             raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập trạng thái đơn hàng này.")
-    elif current_user.role not in [UserRole.ADMIN, UserRole.VIEWER]:
+    elif current_user.role != UserRole.ADMIN:
         raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập thông tin đơn hàng này.")
 
     return PaymentIntentService.get_order_payment_summary(
@@ -329,7 +329,7 @@ def get_transaction_status(
         order = db.get(Order, trans.order_id)
         if not order or order.user_id != current_user.id:
             raise HTTPException(status_code=403, detail="Bạn không có quyền xem giao dịch này.")
-    elif current_user.role not in [UserRole.ADMIN, UserRole.VIEWER]:
+    elif current_user.role != UserRole.ADMIN:
         raise HTTPException(status_code=403, detail="Bạn không có quyền xem giao dịch này.")
 
     return {

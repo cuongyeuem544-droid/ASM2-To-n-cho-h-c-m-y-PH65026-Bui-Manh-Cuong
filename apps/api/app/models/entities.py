@@ -44,7 +44,7 @@ class User(TimestampMixin, Base):
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     full_name: Mapped[str] = mapped_column(String(255))
-    role: Mapped[UserRole] = mapped_column(enum_column(UserRole), default=UserRole.VIEWER)
+    role: Mapped[UserRole] = mapped_column(enum_column(UserRole), default=UserRole.CUSTOMER)
     loyalty_points: Mapped[int] = mapped_column(Integer, default=50)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     token_version: Mapped[int] = mapped_column(Integer, default=1)

@@ -200,10 +200,10 @@ def get_campaign_by_slug(
 def admin_list_campaigns(
     status_filter: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    current_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
-    [ADMIN / DATA_REVIEWER] Xem toàn bộ chiến dịch bệnh theo mùa (kể cả PAUSED, ENDED).
+    [ADMIN] Xem toàn bộ chiến dịch bệnh theo mùa (kể cả PAUSED, ENDED).
     """
     stmt = select(SeasonalCampaign)
     if status_filter:

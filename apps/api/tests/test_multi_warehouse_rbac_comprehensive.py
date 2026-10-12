@@ -370,3 +370,58 @@ def test_transfer_failure_auto_cancellation_and_refund(database):
         assert refund_record.amount == Decimal("350000")
         assert refund_record.status == "SUCCEEDED"
         assert "vỡ hỏng" in refund_record.reason
+
+
+def test_anti_idor_defense_cross_warehouse_access_rejected(client, manager_hcm_headers):
+    """
+    Quy định 8: Chống IDOR tuyệt đối.
+    Quản lý kho HCM truyền tham số warehouse_id=2 (Kho Hà Nội) phải bị từ chối 403 Forbidden.
+    """
+    # 1. Truy cập /warehouse-portal/me với warehouse_id khác
+    res1 = client.get("/api/v1/warehouse-portal/me?warehouse_id=2", headers=manager_hcm_headers)
+    assert res1.status_code == 403
+    assert "IDOR" in res1.json()["detail"] or "Vi phạm phân quyền" in res1.json()["detail"]
+
+    # 2. Truy cập /warehouse-portal/orders với warehouse_id khác
+    res2 = client.get("/api/v1/warehouse-portal/orders?warehouse_id=2", headers=manager_hcm_headers)
+    assert res2.status_code == 403
+
+    # 3. Truy cập /warehouse-portal/stock với warehouse_id khác
+    res3 = client.get("/api/v1/warehouse-portal/stock?warehouse_id=2", headers=manager_hcm_headers)
+    assert res3.status_code == 403
+
+
+def test_stock_adjustment_requires_mandatory_reason(client, manager_hcm_headers):
+    """
+    Quy định 4: Điều chỉnh tồn kho bắt buộc phải nhập lý do (tối thiểu 5 ký tự).
+    """
+    # Gửi lý do rỗng -> 422 hoặc 400
+    res_empty = client.post(
+        "/api/v1/warehouse-portal/adjustments",
+        headers=manager_hcm_headers,
+        json={"reason": "   ", "items": []},
+    )
+    assert res_empty.status_code in (400, 422)
+
+    # Gửi lý do quá ngắn (< 5 ký tự) -> 422
+    res_short = client.post(
+        "/api/v1/warehouse-portal/adjustments",
+        headers=manager_hcm_headers,
+        json={"reason": "abc", "items": []},
+    )
+    assert res_short.status_code in (400, 422)
+
+
+def test_no_legacy_roles_remain_in_database(database):
+    """
+    Quy định 2 & 10: Hai quyền cũ (DATA_REVIEWER, VIEWER) đã được loại bỏ hoàn toàn.
+    Không còn bất kỳ tài khoản nào mang vai trò cũ trong cơ sở dữ liệu.
+    """
+    import sqlite3
+    conn = sqlite3.connect("pharmatrust.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT count(*) FROM users WHERE role IN ('DATA_REVIEWER', 'VIEWER')")
+    count = cursor.fetchone()[0]
+    conn.close()
+    assert count == 0, f"Còn {count} tài khoản mang vai trò cũ chưa được chuyển đổi!"
+

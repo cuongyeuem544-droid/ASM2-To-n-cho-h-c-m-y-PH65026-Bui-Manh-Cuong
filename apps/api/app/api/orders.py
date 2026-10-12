@@ -594,7 +594,7 @@ def get_order_by_code(
     """
     Tra cứu thông tin tiến độ đơn hàng.
     Bắt buộc JWT. Khách hàng chỉ xem được đơn hàng của chính mình (chống IDOR).
-    ADMIN và VIEWER được xem. DATA_REVIEWER tuyệt đối không có quyền xem đơn hàng.
+    ADMIN được xem.
     """
     clean_code = order_code.strip()
     order = db.scalar(
@@ -608,10 +608,10 @@ def get_order_by_code(
     if current_user.role == UserRole.CUSTOMER:
         if order.user_id != current_user.id:
             raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập thông tin đơn hàng này.")
-    elif current_user.role not in [UserRole.ADMIN, UserRole.VIEWER]:
+    elif current_user.role != UserRole.ADMIN:
         raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập thông tin đơn hàng này.")
 
-    is_admin = current_user.role in [UserRole.ADMIN, UserRole.VIEWER]
+    is_admin = current_user.role == UserRole.ADMIN
     masked_phone = (
         order.customer_phone
         if is_admin
@@ -670,7 +670,7 @@ def list_orders(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
-    admin: User = Depends(require_roles(UserRole.ADMIN, UserRole.VIEWER)),
+    admin: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
     Danh sách đơn hàng dành cho Admin & Viewer quản lý/theo dõi.
@@ -721,7 +721,7 @@ def list_orders(
 def get_admin_order_detail(
     order_id: int,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_roles(UserRole.ADMIN, UserRole.VIEWER)),
+    admin: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
     Chi tiết đơn hàng cho Admin & Viewer.

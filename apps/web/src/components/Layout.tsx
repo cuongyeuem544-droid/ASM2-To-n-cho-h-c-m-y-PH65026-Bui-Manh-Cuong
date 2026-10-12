@@ -41,11 +41,9 @@ import { api } from '../services/api'
 
 const ROLE_NAMES: Record<string, string> = {
   ADMIN: 'Quản trị viên',
-  DATA_REVIEWER: 'Kiểm duyệt viên',
-  VIEWER: 'Nhân viên tra cứu',
-  CUSTOMER: 'Khách hàng',
   WAREHOUSE_MANAGER: 'Quản lý kho',
   WAREHOUSE_STAFF: 'Nhân viên kho',
+  CUSTOMER: 'Khách hàng',
 }
 
 interface NavItem {
@@ -135,7 +133,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const prevCountRef = useRef<number>(0)
 
   useEffect(() => {
-    if (!user || (user.role !== 'ADMIN' && user.role !== 'DATA_REVIEWER')) return
+    if (!user || user.role !== 'ADMIN') return
 
     const fetchStats = async () => {
       try {
@@ -330,7 +328,7 @@ export function Layout({ children }: { children: ReactNode }) {
 
           <div className="header-right">
             {/* Notification Bell for Returns / Alerts */}
-            {(user?.role === 'ADMIN' || user?.role === 'DATA_REVIEWER') && (
+            {user?.role === 'ADMIN' && (
               <div className="admin-notif-container">
                 <button
                   type="button"

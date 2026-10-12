@@ -3,11 +3,9 @@ from enum import StrEnum
 
 class UserRole(StrEnum):
     ADMIN = "ADMIN"
-    DATA_REVIEWER = "DATA_REVIEWER"
-    VIEWER = "VIEWER"
-    CUSTOMER = "CUSTOMER"
     WAREHOUSE_MANAGER = "WAREHOUSE_MANAGER"
     WAREHOUSE_STAFF = "WAREHOUSE_STAFF"
+    CUSTOMER = "CUSTOMER"
 
 
 class WarehouseRole(StrEnum):

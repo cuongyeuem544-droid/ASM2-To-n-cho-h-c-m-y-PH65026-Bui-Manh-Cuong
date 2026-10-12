@@ -34,7 +34,7 @@ ALLOWED_MIME_TYPES = {
 
 @router.get("/template")
 def download_import_template(
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
     Tải về tệp Excel mẫu chuẩn (.xlsx) để nhập danh mục thuốc, số lô và hạn dùng.
@@ -57,7 +57,7 @@ async def preview_file(
     batch_number: Optional[str] = Form(None),
     expiry_date: Optional[str] = Form(None),
     initial_quantity: Optional[int] = Form(100),
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ):
     """
@@ -95,7 +95,7 @@ async def upload_file(
     is_demo: bool = Form(False),
     force_update: bool = Form(True),
     auto_approve: bool = Form(True),
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ):
     """

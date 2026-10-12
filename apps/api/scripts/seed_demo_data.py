@@ -84,8 +84,8 @@ def seed_demo_data(db: Session, force: bool = False):
     print("[1/7] Seeding Users...")
     users_data = [
         ("admin@pharmatrust.vn", "Admin@123456", "Quản Trị Viên Hệ Thống", UserRole.ADMIN, "0901234561"),
-        ("reviewer@pharmatrust.vn", "Reviewer@123456", "Dược Sĩ Kiểm Duyệt Dữ Liệu", UserRole.DATA_REVIEWER, "0901234562"),
-        ("viewer@pharmatrust.vn", "Viewer@123456", "Nhân Viên Giám Sát Xem Báo Cáo", UserRole.VIEWER, "0901234563"),
+        ("reviewer@pharmatrust.vn", "Reviewer@123456", "Quản Lý Kho Hà Nội (Cũ: Dược Sĩ)", UserRole.WAREHOUSE_MANAGER, "0901234562"),
+        ("viewer@pharmatrust.vn", "Viewer@123456", "Nhân Viên Kho Hà Nội (Cũ: Tra Cứu)", UserRole.WAREHOUSE_STAFF, "0901234563"),
         ("buyer@pharmatrust.vn", "Buyer@123456", "Khách Hàng Mẫu Nguyễn Văn An", UserRole.CUSTOMER, "0901234567"),
     ]
 

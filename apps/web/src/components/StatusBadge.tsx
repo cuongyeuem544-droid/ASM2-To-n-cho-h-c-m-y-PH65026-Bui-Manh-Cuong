@@ -87,11 +87,9 @@ const labels: Record<string, string> = {
 
   // Roles
   ADMIN: 'Quản trị viên',
-  DATA_REVIEWER: 'Kiểm duyệt viên',
-  VIEWER: 'Nhân viên tra cứu',
-  CUSTOMER: 'Khách hàng',
   WAREHOUSE_MANAGER: 'Quản lý kho',
   WAREHOUSE_STAFF: 'Nhân viên kho',
+  CUSTOMER: 'Khách hàng',
 
   // Fulfillment State Machine
   ALLOCATED: 'Đã phân bổ kho',

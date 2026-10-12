@@ -183,9 +183,9 @@ class AdministrativeDataService:
         c = cls._communes_map.get(code_str)
         if c:
             return c
-        # Legacy Compatibility Layer: Xử lý mã 5 chữ số trước sắp xếp 2025
-        if code_str.isdigit() and len(code_str) == 5:
-            p_code = "01" if code_str.startswith("0") else ("79" if code_str.startswith("26") or code_str.startswith("27") else "")
+        # Legacy Compatibility Layer: Xử lý mã 5 hoặc 6 chữ số trước sắp xếp 2025
+        if code_str.isdigit() and len(code_str) in (5, 6):
+            p_code = "01" if (code_str.startswith("01") or (len(code_str) == 5 and code_str.startswith("0"))) else ("79" if (code_str.startswith("79") or code_str.startswith("26") or code_str.startswith("27")) else "")
             if p_code:
                 return {
                     "code": code_str,

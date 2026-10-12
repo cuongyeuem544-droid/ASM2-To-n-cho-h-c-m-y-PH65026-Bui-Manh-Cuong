@@ -69,7 +69,7 @@ def _rows(db: Session, include_demo: bool) -> list[dict]:
 def export_products(
     format: str = Query("csv", pattern="^(csv|xlsx|json)$"),
     include_demo: bool = True,
-    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    _: User = Depends(require_roles(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ):
     rows = _rows(db, include_demo)

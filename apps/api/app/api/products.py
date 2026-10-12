@@ -239,7 +239,7 @@ def get_product(product_id: int, _: User = Depends(get_current_user), db: Sessio
 def recalculate(
     product_id: int,
     request: Request,
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ):
     product = db.scalar(_product_query().where(CanonicalProduct.id == product_id))
@@ -275,7 +275,7 @@ def decide_candidate_match(
     candidate_id: int,
     payload: CandidateMatchRequest,
     request: Request,
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ):
     candidate = db.get(ProductCandidate, candidate_id)
@@ -301,7 +301,7 @@ def decide_candidate_match(
 def approve_candidate(
     candidate_id: int,
     request: Request,
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ):
     from app.models import Ingredient, Warehouse
@@ -418,7 +418,7 @@ def approve_candidate(
 @router.post("/candidates/approve-all")
 def approve_all_candidates(
     request: Request,
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ):
     from app.models import Ingredient, Warehouse
@@ -537,7 +537,7 @@ def approve_all_candidates(
 def reject_candidate(
     candidate_id: int,
     request: Request,
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ):
     candidate = db.get(ProductCandidate, candidate_id)
@@ -567,7 +567,7 @@ def resolve_conflict(
     conflict_id: int,
     payload: ConflictResolveRequest,
     request: Request,
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ):
     from datetime import UTC, datetime
@@ -591,7 +591,7 @@ def create_review(
     product_id: int,
     payload: ReviewCreate,
     request: Request,
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ):
     product = db.get(CanonicalProduct, product_id)
@@ -619,7 +619,7 @@ class UpdatePricingRequest(BaseModel):
 def publish_product(
     product_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     product = db.get(CanonicalProduct, product_id)
     if not product:
@@ -634,7 +634,7 @@ def publish_product(
 def unpublish_product(
     product_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     product = db.get(CanonicalProduct, product_id)
     if not product:
@@ -650,7 +650,7 @@ def update_product_pricing(
     product_id: int,
     payload: UpdatePricingRequest,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     product = db.get(CanonicalProduct, product_id)
     if not product:

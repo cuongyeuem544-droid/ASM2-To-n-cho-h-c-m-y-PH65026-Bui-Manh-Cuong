@@ -77,7 +77,7 @@ const RX_STATUSES = [
 
 export function ClassificationQueuePage() {
   const { user } = useAuth()
-  const canEdit = user?.role === 'ADMIN' || user?.role === 'DATA_REVIEWER'
+  const canEdit = user?.role === 'ADMIN'
 
   const [items, setItems] = useState<ReviewItem[]>([])
   const [total, setTotal] = useState(0)

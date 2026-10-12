@@ -49,6 +49,6 @@ class UserCreate(BaseModel):
     password: str = Field(min_length=8, max_length=128)
     full_name: str = Field(min_length=2, max_length=255)
     phone: str | None = None
-    role: UserRole = UserRole.VIEWER
+    role: UserRole = UserRole.CUSTOMER
     warehouse_id: int | None = None
 

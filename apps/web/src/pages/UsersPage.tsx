@@ -292,8 +292,6 @@ export function UsersPage() {
           <option value="WAREHOUSE_MANAGER">Quản lý kho</option>
           <option value="WAREHOUSE_STAFF">Nhân viên kho</option>
           <option value="CUSTOMER">Khách hàng ({totalCustomers})</option>
-          <option value="DATA_REVIEWER">Kiểm duyệt viên</option>
-          <option value="VIEWER">Nhân viên tra cứu</option>
         </select>
 
         {warehouses.length > 0 && (
@@ -616,8 +614,7 @@ export function UsersPage() {
                     >
                       <option value="WAREHOUSE_MANAGER">Quản lý kho</option>
                       <option value="WAREHOUSE_STAFF">Nhân viên kho</option>
-                      <option value="DATA_REVIEWER">Kiểm duyệt viên Dữ liệu</option>
-                      <option value="VIEWER">Nhân viên tra cứu</option>
+                      <option value="CUSTOMER">Khách hàng</option>
                       <option value="ADMIN">Quản trị viên toàn hệ thống</option>
                     </select>
                   )}

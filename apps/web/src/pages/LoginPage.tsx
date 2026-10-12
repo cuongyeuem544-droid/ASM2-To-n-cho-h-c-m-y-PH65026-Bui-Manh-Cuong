@@ -11,7 +11,11 @@ export function LoginPage() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
-  if (user) return <Navigate to="/" replace />
+  if (user) {
+    if (user.role === 'WAREHOUSE_MANAGER') return <Navigate to="/warehouse/overview" replace />
+    if (user.role === 'WAREHOUSE_STAFF') return <Navigate to="/staff/today" replace />
+    return <Navigate to="/" replace />
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault()
@@ -214,13 +218,13 @@ export function LoginPage() {
               <button
                 type="button"
                 onClick={() => {
-                  setEmail('reviewer@pharmatrust.vn')
-                  setPassword('Reviewer@123456')
+                  setEmail('viewer@pharmatrust.vn')
+                  setPassword('Viewer@123456')
                   setError('')
                 }}
                 style={{ padding: '6px 8px', borderRadius: '8px', border: '1px solid #fde68a', background: '#fffbeb', color: '#b45309', fontSize: '11px', fontWeight: 600, cursor: 'pointer', textAlign: 'center' }}
               >
-                🔬 Dược Sĩ
+                📋 NV Kho HN
               </button>
             </div>
           </div>

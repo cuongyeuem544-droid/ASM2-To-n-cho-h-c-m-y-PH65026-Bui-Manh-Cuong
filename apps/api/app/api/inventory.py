@@ -479,7 +479,7 @@ def update_batch_status(
     payload: BatchStatusUpdateRequest,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     batch = db.get(InventoryBatch, batch_id)
     if not batch:
@@ -594,7 +594,7 @@ def create_stock_receipt(
     payload: ReceiptCreateRequest,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     wh = db.get(Warehouse, payload.warehouse_id)
     if not wh:
@@ -765,7 +765,7 @@ def create_stock_transfer(
     payload: TransferCreateRequest,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     if payload.from_warehouse_id == payload.to_warehouse_id:
         raise HTTPException(status_code=400, detail="Kho xuất và kho nhập không được trùng nhau")
