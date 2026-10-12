@@ -44,6 +44,8 @@ const ROLE_NAMES: Record<string, string> = {
   DATA_REVIEWER: 'Kiểm duyệt viên',
   VIEWER: 'Nhân viên tra cứu',
   CUSTOMER: 'Khách hàng',
+  WAREHOUSE_MANAGER: 'Quản lý kho',
+  WAREHOUSE_STAFF: 'Nhân viên kho',
 }
 
 interface NavItem {
@@ -283,6 +285,11 @@ export function Layout({ children }: { children: ReactNode }) {
           <div className="user-info">
             <strong title={user?.full_name}>{user?.full_name}</strong>
             <span>{ROLE_NAMES[user?.role || ''] || user?.role}</span>
+            {user?.warehouse_name && (
+              <span className="text-[11px] text-emerald-400 font-medium block truncate max-w-[140px]" title={user.warehouse_name}>
+                📍 {user.warehouse_name}
+              </span>
+            )}
           </div>
           <button
             type="button"
@@ -313,6 +320,12 @@ export function Layout({ children }: { children: ReactNode }) {
             </div>
             {renderHealthIndicator()}
             <LiveClock />
+            {user?.warehouse_name && (
+              <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium" title={user.warehouse_name}>
+                <Building2 size={13} />
+                <span className="truncate max-w-[200px]">Đang quản lý: {user.warehouse_name}</span>
+              </div>
+            )}
           </div>
 
           <div className="header-right">

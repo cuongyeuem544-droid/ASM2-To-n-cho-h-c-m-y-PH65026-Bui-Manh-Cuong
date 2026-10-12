@@ -38,11 +38,19 @@ class Warehouse(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_central: Mapped[bool] = mapped_column(Boolean, default=False)
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    province_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    ward_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    place_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    service_radius_km: Mapped[float] = mapped_column(Float, default=30.0)
+    timezone: Mapped[str] = mapped_column(String(50), default="Asia/Ho_Chi_Minh")
+    max_orders_per_day: Mapped[int] = mapped_column(Integer, default=500)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     locations: Mapped[list["WarehouseLocation"]] = relationship(back_populates="warehouse", cascade="all, delete-orphan")
     batch_stocks: Mapped[list["WarehouseBatchStock"]] = relationship(back_populates="warehouse", cascade="all, delete-orphan")
+    memberships: Mapped[list["UserWarehouseMembership"]] = relationship(back_populates="warehouse", cascade="all, delete-orphan")
 
 
 class WarehouseLocation(Base):
@@ -273,6 +281,7 @@ class StockTransfer(Base):
     transfer_code: Mapped[str] = mapped_column(String(50), unique=True, index=True)
     from_warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id", ondelete="RESTRICT"), index=True)
     to_warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id", ondelete="RESTRICT"), index=True)
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id", ondelete="SET NULL"), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(50), default="DRAFT", index=True)  # DRAFT, IN_TRANSIT, COMPLETED, CANCELLED
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
@@ -438,3 +447,19 @@ class SeasonalCampaign(Base):
     status: Mapped[str] = mapped_column(String(50), default="ACTIVE", index=True)  # ACTIVE, PAUSED, ENDED
     banner_image_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class UserWarehouseMembership(Base):
+    __tablename__ = "user_warehouse_memberships"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id", ondelete="CASCADE"), index=True)
+    role: Mapped[str] = mapped_column(String(50), default="WAREHOUSE_MANAGER")  # WAREHOUSE_MANAGER, WAREHOUSE_STAFF
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    assigned_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    user: Mapped["User"] = relationship("User", foreign_keys=[user_id])
+    warehouse: Mapped["Warehouse"] = relationship("Warehouse", back_populates="memberships", foreign_keys=[warehouse_id])

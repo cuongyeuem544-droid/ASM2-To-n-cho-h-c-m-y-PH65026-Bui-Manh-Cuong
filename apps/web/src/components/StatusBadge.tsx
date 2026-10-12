@@ -90,6 +90,16 @@ const labels: Record<string, string> = {
   DATA_REVIEWER: 'Kiểm duyệt viên',
   VIEWER: 'Nhân viên tra cứu',
   CUSTOMER: 'Khách hàng',
+  WAREHOUSE_MANAGER: 'Quản lý kho',
+  WAREHOUSE_STAFF: 'Nhân viên kho',
+
+  // Fulfillment State Machine
+  ALLOCATED: 'Đã phân bổ kho',
+  WAITING_INTERNAL_TRANSFER: 'Chờ điều chuyển kho',
+  TRANSFER_IN_TRANSIT: 'Đang luân chuyển kho',
+  CONSOLIDATED: 'Đã gom hàng tại kho',
+  PICKING: 'Đang soạn hàng',
+  PACKED: 'Đã đóng gói',
 }
 
 const toneMap: Record<string, BadgeTone> = {
@@ -106,6 +116,7 @@ const toneMap: Record<string, BadgeTone> = {
   AUTO_PUBLISH_VALID: 'success',
   GOOD: 'success',
   NORMAL: 'success',
+  CONSOLIDATED: 'success',
 
   // Warning (Amber)
   REVIEW_REQUIRED: 'warning',
@@ -119,6 +130,8 @@ const toneMap: Record<string, BadgeTone> = {
   NEAR_EXPIRY: 'warning',
   MANUAL_REVIEW: 'warning',
   DRAFT: 'warning',
+  WAREHOUSE_MANAGER: 'warning',
+  WAITING_INTERNAL_TRANSFER: 'warning',
 
   // Danger (Red)
   BLOCKED: 'danger',
@@ -146,6 +159,10 @@ const toneMap: Record<string, BadgeTone> = {
   MATCHED: 'info',
   PRESCRIPTION: 'info',
   OTC: 'info',
+  WAREHOUSE_STAFF: 'info',
+  TRANSFER_IN_TRANSIT: 'info',
+  PICKING: 'info',
+  PACKED: 'info',
 
   // Neutral (Slate/Gray)
   INSUFFICIENT_EVIDENCE: 'neutral',

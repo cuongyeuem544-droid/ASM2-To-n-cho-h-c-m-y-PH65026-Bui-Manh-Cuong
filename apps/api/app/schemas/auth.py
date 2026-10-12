@@ -32,6 +32,8 @@ class UserOut(ORMModel):
     loyalty_points: int = 50
     is_active: bool
     last_login_at: datetime | None
+    warehouse_id: int | None = None
+    warehouse_name: str | None = None
 
 
 class TokenPair(BaseModel):
@@ -44,7 +46,9 @@ class TokenPair(BaseModel):
 
 class UserCreate(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=10, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
     full_name: str = Field(min_length=2, max_length=255)
+    phone: str | None = None
     role: UserRole = UserRole.VIEWER
+    warehouse_id: int | None = None
 

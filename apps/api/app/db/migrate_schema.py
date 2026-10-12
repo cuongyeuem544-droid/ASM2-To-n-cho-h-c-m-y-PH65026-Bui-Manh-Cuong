@@ -35,6 +35,40 @@ def migrate():
                 db.execute(text(f"ALTER TABLE canonical_products ADD COLUMN {name} {defn}"))
         db.commit()
 
+        # Multi-Warehouse Columns
+        wh_cols = [c[1] for c in db.execute(text("PRAGMA table_info(warehouses)")).fetchall()]
+        wh_new_cols = [
+            ("email", "VARCHAR(255)"),
+            ("province_code", "VARCHAR(50)"),
+            ("ward_code", "VARCHAR(50)"),
+            ("place_id", "VARCHAR(255)"),
+            ("service_radius_km", "FLOAT DEFAULT 30.0"),
+            ("timezone", "VARCHAR(50) DEFAULT 'Asia/Ho_Chi_Minh'"),
+            ("max_orders_per_day", "INTEGER DEFAULT 500"),
+        ]
+        for name, defn in wh_new_cols:
+            if name not in wh_cols:
+                db.execute(text(f"ALTER TABLE warehouses ADD COLUMN {name} {defn}"))
+
+        order_cols = [c[1] for c in db.execute(text("PRAGMA table_info(orders)")).fetchall()]
+        order_new_cols = [
+            ("assigned_warehouse_id", "INTEGER"),
+            ("assignment_method", "VARCHAR(50)"),
+            ("assignment_distance_km", "FLOAT"),
+            ("fulfillment_status", "VARCHAR(50) DEFAULT 'PENDING_ALLOCATION'"),
+            ("estimated_ready_at", "DATETIME"),
+            ("assigned_at", "DATETIME"),
+            ("accepted_at", "DATETIME"),
+        ]
+        for name, defn in order_new_cols:
+            if name not in order_cols:
+                db.execute(text(f"ALTER TABLE orders ADD COLUMN {name} {defn}"))
+
+        transfer_cols = [c[1] for c in db.execute(text("PRAGMA table_info(stock_transfers)")).fetchall()]
+        if "order_id" not in transfer_cols:
+            db.execute(text("ALTER TABLE stock_transfers ADD COLUMN order_id INTEGER"))
+        db.commit()
+
         # 3. Tạo chỉ mục tối ưu hóa tốc độ truy vấn
         db.execute(text("CREATE INDEX IF NOT EXISTS idx_canonical_publish_status ON canonical_products(publish_status);"))
         db.execute(text("CREATE INDEX IF NOT EXISTS idx_canonical_updated_at ON canonical_products(updated_at);"))
@@ -43,6 +77,8 @@ def migrate():
         db.execute(text("CREATE INDEX IF NOT EXISTS idx_canonical_prescription_status ON canonical_products(prescription_status);"))
         db.execute(text("CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);"))
         db.execute(text("CREATE INDEX IF NOT EXISTS idx_orders_order_status ON orders(order_status);"))
+        db.execute(text("CREATE INDEX IF NOT EXISTS idx_orders_assigned_warehouse_id ON orders(assigned_warehouse_id);"))
+        db.execute(text("CREATE INDEX IF NOT EXISTS idx_orders_fulfillment_status ON orders(fulfillment_status);"))
         db.commit()
 
         # 4. Khởi tạo và nạp dữ liệu vào bảng tìm kiếm toàn văn FTS5

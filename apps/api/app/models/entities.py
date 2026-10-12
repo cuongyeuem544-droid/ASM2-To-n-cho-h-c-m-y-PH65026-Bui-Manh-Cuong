@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Optional
 
 from sqlalchemy import Boolean, Date, DateTime, Enum, Float, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -49,6 +49,22 @@ class User(TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     token_version: Mapped[int] = mapped_column(Integer, default=1)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    warehouse_memberships: Mapped[list["UserWarehouseMembership"]] = relationship("UserWarehouseMembership", back_populates="user", cascade="all, delete-orphan", foreign_keys="UserWarehouseMembership.user_id")
+
+    @property
+    def warehouse_id(self) -> int | None:
+        for m in getattr(self, "warehouse_memberships", []):
+            if m.is_active:
+                return m.warehouse_id
+        return None
+
+    @property
+    def warehouse_name(self) -> str | None:
+        for m in getattr(self, "warehouse_memberships", []):
+            if m.is_active and getattr(m, "warehouse", None):
+                return m.warehouse.name
+        return None
 
 
 class DataSource(TimestampMixin, Base):
@@ -440,7 +456,17 @@ class Order(TimestampMixin, Base):
     discount_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.0"))
     discount_breakdown: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
+    # Multi-Warehouse Routing & Fulfillment State Machine
+    assigned_warehouse_id: Mapped[int | None] = mapped_column(ForeignKey("warehouses.id", ondelete="SET NULL"), nullable=True, index=True)
+    assignment_method: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    assignment_distance_km: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fulfillment_status: Mapped[str] = mapped_column(String(50), default="PENDING_ALLOCATION", index=True)
+    estimated_ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     items: Mapped[list["OrderItem"]] = relationship(back_populates="order", cascade="all, delete-orphan")
+    assigned_warehouse: Mapped[Optional["Warehouse"]] = relationship("Warehouse", foreign_keys=[assigned_warehouse_id])
 
 
 class OrderItem(Base):

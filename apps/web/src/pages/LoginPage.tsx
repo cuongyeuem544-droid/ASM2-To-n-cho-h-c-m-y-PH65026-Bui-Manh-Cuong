@@ -5,27 +5,13 @@ import { useAuth } from '../services/auth'
 
 export function LoginPage() {
   const { user, login } = useAuth()
-  const [email, setEmail] = useState('admin@pharmatrust.vn')
-  const [password, setPassword] = useState('Admin@123456')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
   if (user) return <Navigate to="/" replace />
-
-  async function quickAdminLogin() {
-    setEmail('admin@pharmatrust.vn')
-    setPassword('Admin@123456')
-    setError('')
-    setBusy(true)
-    try {
-      await login('admin@pharmatrust.vn', 'Admin@123456')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Không thể đăng nhập')
-    } finally {
-      setBusy(false)
-    }
-  }
 
   async function submit(event: FormEvent) {
     event.preventDefault()
@@ -171,40 +157,72 @@ export function LoginPage() {
             <span>{busy ? 'Đang xác thực thông tin…' : 'Đăng nhập Quản trị viên'}</span>
             <ArrowRight size={17} />
           </button>
-          
-          <button
-            type="button"
-            className="secondary-button"
-            style={{
-              width: '100%',
-              marginTop: '10px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '6px',
-              cursor: 'pointer',
-              padding: '11px 16px',
-              fontSize: '12px',
-            }}
-            disabled={busy}
-            onClick={quickAdminLogin}
-          >
-            <Sparkles size={15} style={{ color: '#0284c7' }} />
-            <span>1-Click: Điền & Đăng nhập nhanh Admin</span>
-          </button>
 
-          <div
-            className="demo-hint"
-            style={{ cursor: 'pointer' }}
-            onClick={() => {
-              setEmail('admin@pharmatrust.vn')
-              setPassword('Admin@123456')
-            }}
-            title="Click để tự động điền tài khoản demo"
-          >
-            <strong>Tài khoản Quản trị viên mặc định</strong>
-            <code>admin@pharmatrust.vn</code>
-            <code>Admin@123456</code>
+          {/* Quick Demo Fill Buttons */}
+          <div style={{ marginTop: '20px', padding: '12px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Chọn vai trò Demo:
+              </span>
+              <span style={{ fontSize: '10px', color: '#0284c7', fontFamily: 'monospace', fontWeight: 700 }}>DEMO MODE</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '6px' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setEmail('admin@pharmatrust.vn')
+                  setPassword('Admin@123456')
+                  setError('')
+                }}
+                style={{ padding: '6px 8px', borderRadius: '8px', border: '1px solid #c7d2fe', background: '#eef2ff', color: '#4338ca', fontSize: '11px', fontWeight: 600, cursor: 'pointer', textAlign: 'center' }}
+              >
+                🛡️ Admin
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEmail('manager.hcm@pharmatrust.vn')
+                  setPassword('Warehouse@2026')
+                  setError('')
+                }}
+                style={{ padding: '6px 8px', borderRadius: '8px', border: '1px solid #a7f3d0', background: '#ecfdf5', color: '#047857', fontSize: '11px', fontWeight: 600, cursor: 'pointer', textAlign: 'center' }}
+              >
+                📦 QL Kho HCM
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEmail('staff.hcm@pharmatrust.vn')
+                  setPassword('Staff@2026')
+                  setError('')
+                }}
+                style={{ padding: '6px 8px', borderRadius: '8px', border: '1px solid #99f6e4', background: '#f0fdfa', color: '#0f766e', fontSize: '11px', fontWeight: 600, cursor: 'pointer', textAlign: 'center' }}
+              >
+                📋 NV Kho HCM
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEmail('manager.hn@pharmatrust.vn')
+                  setPassword('Warehouse@2026')
+                  setError('')
+                }}
+                style={{ padding: '6px 8px', borderRadius: '8px', border: '1px solid #bae6fd', background: '#f0f9ff', color: '#0369a1', fontSize: '11px', fontWeight: 600, cursor: 'pointer', textAlign: 'center' }}
+              >
+                📦 QL Kho HN
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEmail('reviewer@pharmatrust.vn')
+                  setPassword('Reviewer@123456')
+                  setError('')
+                }}
+                style={{ padding: '6px 8px', borderRadius: '8px', border: '1px solid #fde68a', background: '#fffbeb', color: '#b45309', fontSize: '11px', fontWeight: 600, cursor: 'pointer', textAlign: 'center' }}
+              >
+                🔬 Dược Sĩ
+              </button>
+            </div>
           </div>
 
           <div style={{ marginTop: '20px', textAlign: 'center' }}>

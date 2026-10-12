@@ -654,7 +654,7 @@ function LoginContent() {
                   </span>
                   <span className="text-[10px] text-sky-600 font-mono">DEMO MODE</span>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   <button
                     type="button"
                     onClick={() => {
@@ -667,6 +667,32 @@ function LoginContent() {
                     title="Đăng nhập tài khoản Quản trị viên (Chuyển tới Admin Portal)"
                   >
                     <span className="block group-hover:scale-105 transition-transform">🛡️ Admin</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIdentifier("manager.hcm@pharmatrust.vn");
+                      setPassword("Warehouse@2026");
+                      setUseOtpMode(false);
+                      setErrorMessage(null);
+                    }}
+                    className="p-2.5 rounded-xl border border-emerald-200/80 bg-emerald-50/80 hover:bg-emerald-100/90 hover:border-emerald-300 text-emerald-700 text-[11px] font-semibold transition-all text-center group cursor-pointer shadow-xs"
+                    title="Quản lý Kho TP. Hồ Chí Minh"
+                  >
+                    <span className="block group-hover:scale-105 transition-transform">📦 QL Kho HCM</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIdentifier("staff.hcm@pharmatrust.vn");
+                      setPassword("Staff@2026");
+                      setUseOtpMode(false);
+                      setErrorMessage(null);
+                    }}
+                    className="p-2.5 rounded-xl border border-teal-200/80 bg-teal-50/80 hover:bg-teal-100/90 hover:border-teal-300 text-teal-700 text-[11px] font-semibold transition-all text-center group cursor-pointer shadow-xs"
+                    title="Nhân viên Soạn hàng Kho HCM"
+                  >
+                    <span className="block group-hover:scale-105 transition-transform">📋 NV Kho HCM</span>
                   </button>
                   <button
                     type="button"

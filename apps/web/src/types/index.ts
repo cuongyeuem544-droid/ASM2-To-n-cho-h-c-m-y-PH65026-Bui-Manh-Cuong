@@ -1,4 +1,4 @@
-export type UserRole = 'ADMIN' | 'DATA_REVIEWER' | 'VIEWER' | 'CUSTOMER'
+export type UserRole = 'ADMIN' | 'DATA_REVIEWER' | 'VIEWER' | 'CUSTOMER' | 'WAREHOUSE_MANAGER' | 'WAREHOUSE_STAFF'
 
 export interface User {
   id: number
@@ -8,6 +8,8 @@ export interface User {
   role: UserRole
   loyalty_points?: number
   is_active: boolean
+  warehouse_id?: number | null
+  warehouse_name?: string | null
   created_at?: string
   last_login_at?: string | null
 }

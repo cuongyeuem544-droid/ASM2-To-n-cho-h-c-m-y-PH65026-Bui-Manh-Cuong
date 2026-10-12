@@ -80,15 +80,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (res.ok) {
         const data = await res.json();
         const role = data.user?.role || "CUSTOMER";
-        const isAdmin = role === "ADMIN";
+        const isStaffOrAdmin = ["ADMIN", "DATA_REVIEWER", "WAREHOUSE_MANAGER", "WAREHOUSE_STAFF"].includes(role);
         const authUser: AuthUser = {
           id: data.user?.id || `usr_${cleanPhone}`,
           fullName: data.user?.full_name || `Khách hàng ${cleanPhone.slice(-4)}`,
           phone: data.user?.phone || cleanPhone,
           email: data.user?.email || `${cleanPhone}@customer.pharmatrust.vn`,
-          role: isAdmin ? "Quản trị viên" : role === "DATA_REVIEWER" ? "Kiểm duyệt viên" : "Hội viên Thân thiết",
-          isAdmin,
-          points: data.user?.loyalty_points ?? 50,
+          role: role === "ADMIN"
+            ? "Quản trị viên"
+            : role === "WAREHOUSE_MANAGER"
+            ? "Quản lý kho"
+            : role === "WAREHOUSE_STAFF"
+            ? "Nhân viên kho"
+            : role === "DATA_REVIEWER"
+            ? "Kiểm duyệt viên"
+            : "Hội viên Thân thiết",
+          isAdmin: isStaffOrAdmin,
+          points: data.user?.loyalty_points ?? (isStaffOrAdmin ? 9999 : 50),
           createdAt: data.user?.created_at?.split("T")[0] || new Date().toISOString().split("T")[0],
         };
         if (data.access_token) {
@@ -134,21 +142,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (res.ok) {
         const data = await res.json();
         const role = data.user?.role || "CUSTOMER";
-        const isAdmin = role === "ADMIN";
+        const isStaffOrAdmin = ["ADMIN", "DATA_REVIEWER", "WAREHOUSE_MANAGER", "WAREHOUSE_STAFF"].includes(role);
         const authUser: AuthUser = {
           id: data.user?.id || Date.now(),
-          fullName: data.user?.full_name || (isAdmin ? "Quản trị viên" : cleanId),
+          fullName: data.user?.full_name || (isStaffOrAdmin ? "Cán bộ quản trị" : cleanId),
           phone: data.user?.phone || (cleanId.includes("@") ? "" : cleanId),
           email: data.user?.email || (cleanId.includes("@") ? cleanId : ""),
-          role: isAdmin
+          role: role === "ADMIN"
             ? "Quản trị viên"
+            : role === "WAREHOUSE_MANAGER"
+            ? "Quản lý kho"
+            : role === "WAREHOUSE_STAFF"
+            ? "Nhân viên kho"
             : role === "DATA_REVIEWER"
             ? "Kiểm duyệt viên"
             : role === "VIEWER"
             ? "Người xem"
             : "Hội viên Thân thiết",
-          isAdmin,
-          points: data.user?.loyalty_points ?? (isAdmin ? 9999 : 50),
+          isAdmin: isStaffOrAdmin,
+          points: data.user?.loyalty_points ?? (isStaffOrAdmin ? 9999 : 50),
           createdAt: data.user?.created_at?.split("T")[0] || new Date().toISOString().split("T")[0],
         };
 

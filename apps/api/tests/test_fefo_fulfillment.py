@@ -207,11 +207,11 @@ class TestFefoFulfillmentSuite(unittest.TestCase):
             initial_quantity=100,
             status="ACTIVE",
         )
-        # Tạo Lô 2: Còn hạn 30 ngày (cận hạn nhất) -> Phải xuất trước
+        # Tạo Lô 2: Còn hạn 200 ngày (đạt chuẩn FEFO >= 180 ngày, cận hạn nhất) -> Phải xuất trước
         b_near = InventoryBatch(
             sku_id=sku.id,
             batch_number=f"LOT-8802-NEAR-{ts}",
-            expiry_date=today + timedelta(days=30),
+            expiry_date=today + timedelta(days=200),
             initial_quantity=5,
             status="ACTIVE",
         )

@@ -60,3 +60,53 @@ def get_optional_current_user(
         return None
     return db.scalar(select(User).where(User.id == user_id, User.is_active.is_(True)))
 
+
+def get_user_warehouse_membership(user: User, db: Session):
+    from app.models.inventory import UserWarehouseMembership
+    return db.scalar(
+        select(UserWarehouseMembership)
+        .where(UserWarehouseMembership.user_id == user.id, UserWarehouseMembership.is_active.is_(True))
+    )
+
+
+def require_warehouse_manager(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> tuple[User, int | None]:
+    """
+    Cho phép ADMIN (toàn quyền) hoặc WAREHOUSE_MANAGER có membership hợp lệ.
+    Trả về (user, warehouse_id). Nếu ADMIN, warehouse_id = None (toàn quyền).
+    """
+    if user.role == UserRole.ADMIN:
+        return user, None
+    if user.role == UserRole.WAREHOUSE_MANAGER:
+        membership = get_user_warehouse_membership(user, db)
+        if not membership:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tài khoản Quản lý kho chưa được gán vào kho hàng cụ thể")
+        return user, membership.warehouse_id
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Chỉ Quản Lý Kho hoặc Quản Trị Viên mới có quyền thực hiện")
+
+
+def require_warehouse_staff_or_manager(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> tuple[User, int | None]:
+    """
+    Cho phép ADMIN, WAREHOUSE_MANAGER, hoặc WAREHOUSE_STAFF.
+    """
+    if user.role == UserRole.ADMIN:
+        return user, None
+    if user.role in (UserRole.WAREHOUSE_MANAGER, UserRole.WAREHOUSE_STAFF):
+        membership = get_user_warehouse_membership(user, db)
+        if not membership:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tài khoản kho chưa được gán vào kho hàng cụ thể")
+        return user, membership.warehouse_id
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Bạn không có quyền truy cập nghiệp vụ kho hàng")
+
+
+def check_warehouse_permission(user: User, warehouse_id: int, db: Session) -> bool:
+    if user.role == UserRole.ADMIN:
+        return True
+    membership = get_user_warehouse_membership(user, db)
+    return bool(membership and membership.warehouse_id == warehouse_id)
+

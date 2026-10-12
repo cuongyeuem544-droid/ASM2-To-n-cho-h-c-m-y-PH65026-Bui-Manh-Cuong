@@ -30,6 +30,10 @@ def database():
         db.commit()
         seed_demo_products(db)
         db.commit()
+        from app.services.warehouse_seeder import seed_warehouses_and_managers, seed_distributed_inventory
+        seed_warehouses_and_managers(db)
+        seed_distributed_inventory(db)
+        db.commit()
     yield
     Base.metadata.drop_all(engine)
     engine.dispose()
@@ -61,6 +65,26 @@ def viewer_headers(client):
     response = client.post(
         "/api/v1/auth/login",
         json={"email": "viewer@pharmatrust.vn", "password": "Viewer@123456"},
+    )
+    assert response.status_code == 200
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+@pytest.fixture
+def manager_hcm_headers(client):
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"email": "manager_hcm@pharmatrust.vn", "password": "Warehouse@2026!"},
+    )
+    assert response.status_code == 200
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+@pytest.fixture
+def manager_hn_headers(client):
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"email": "manager_hn@pharmatrust.vn", "password": "Warehouse@2026!"},
     )
     assert response.status_code == 200
     return {"Authorization": f"Bearer {response.json()['access_token']}"}

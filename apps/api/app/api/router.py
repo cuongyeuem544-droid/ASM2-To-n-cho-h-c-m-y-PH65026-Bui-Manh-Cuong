@@ -23,6 +23,7 @@ from app.api import (
     reviews,
     sources,
     storefront,
+    warehouse_portal,
 )
 
 
@@ -58,5 +59,6 @@ api_router.include_router(admin_refunds.router)
 api_router.include_router(admin_exchanges.router)
 api_router.include_router(admin_classification.router)
 api_router.include_router(me.me_router)
+api_router.include_router(warehouse_portal.router)
 
 

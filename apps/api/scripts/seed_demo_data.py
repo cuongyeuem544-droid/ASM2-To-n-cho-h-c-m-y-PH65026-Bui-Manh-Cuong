@@ -670,6 +670,15 @@ def seed_demo_data(db: Session, force: bool = False):
     except Exception as e:
         print(f"  - FTS warning: {e}")
 
+    # 8. SEED NATIONWIDE WAREHOUSES & DISTRIBUTED STOCK (Multi-warehouse RBAC)
+    print("[8/8] Seeding 20+ Nationwide Warehouses & Distributed Inventory...")
+    try:
+        from app.services.warehouse_seeder import seed_warehouses_and_managers, seed_distributed_inventory
+        seed_warehouses_and_managers(db)
+        seed_distributed_inventory(db)
+    except Exception as e:
+        print(f"  - Warehouse seeder warning: {e}")
+
     db.commit()
     print("==================================================")
     print(" HOAN TAT KHOI TAO DU LIEU DEMO THANH CONG!")
