@@ -7,19 +7,26 @@ import {
   X,
   History,
   FileText,
+  ShieldAlert,
+  Check,
 } from 'lucide-react'
 import { api } from '../../services/api'
+import { useAuth } from '../../services/auth'
 
 interface AdjustmentItem {
   id: number
   adjustment_code: string
   reason: string
   status: string
+  is_large_adjustment?: boolean
+  total_quantity_variance?: number
+  total_amount_variance?: number
   created_at: string | null
   items_count: number
 }
 
 export function WarehouseAdjustmentsPage() {
+  const { user } = useAuth()
   const [adjustments, setAdjustments] = useState<AdjustmentItem[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -82,6 +89,32 @@ export function WarehouseAdjustmentsPage() {
     }
   }
 
+  const handleApprove = async (id: number) => {
+    if (!window.confirm('Bạn có chắc chắn muốn phê duyệt phiếu điều chỉnh tồn kho lớn này?')) return
+    try {
+      await api(`/warehouse-portal/adjustments/${id}/admin-approve`, { method: 'POST' })
+      alert('Đã phê duyệt và áp dụng số lượng tồn kho thành công!')
+      fetchAdjustments()
+    } catch (err: any) {
+      alert(err.message || 'Không thể phê duyệt')
+    }
+  }
+
+  const handleReject = async (id: number) => {
+    const reasonPrompt = window.prompt('Nhập lý do từ chối phiếu điều chỉnh:')
+    if (!reasonPrompt) return
+    try {
+      await api(`/warehouse-portal/adjustments/${id}/admin-reject`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: reasonPrompt }),
+      })
+      alert('Đã từ chối phiếu điều chỉnh!')
+      fetchAdjustments()
+    } catch (err: any) {
+      alert(err.message || 'Không thể từ chối')
+    }
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '1400px', margin: '0 auto' }}>
       {/* Header */}
@@ -107,7 +140,7 @@ export function WarehouseAdjustmentsPage() {
             Kiểm Kê & Điều Chỉnh Tồn Kho
           </h1>
           <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#64748b' }}>
-            Cân đối số lượng thực tế với phần mềm, bắt buộc nhập lý do chi tiết giải trình
+            Cân đối số lượng thực tế với phần mềm. Biến động lớn (&ge;50 sp hoặc &ge;10M VNĐ) cần Admin duyệt.
           </p>
         </div>
 
@@ -153,7 +186,7 @@ export function WarehouseAdjustmentsPage() {
                 <th style={{ padding: '14px 18px' }}>Mã Phiếu Kiểm Kê</th>
                 <th style={{ padding: '14px 18px' }}>Lý Do Bắt Buộc (Giải Trình)</th>
                 <th style={{ padding: '14px 18px' }}>Số Lô Cân Đối</th>
-                <th style={{ padding: '14px 18px' }}>Trạng Thái</th>
+                <th style={{ padding: '14px 18px' }}>Trạng Thái & Phê Duyệt</th>
                 <th style={{ padding: '14px 18px' }}>Thời Gian Ghi Nhận</th>
               </tr>
             </thead>
@@ -202,18 +235,85 @@ export function WarehouseAdjustmentsPage() {
                     </td>
 
                     <td style={{ padding: '14px 18px' }}>
-                      <span
-                        style={{
-                          padding: '4px 10px',
-                          borderRadius: '9999px',
-                          fontSize: '11px',
-                          fontWeight: 800,
-                          background: '#fffbeb',
-                          color: '#b45309',
-                        }}
-                      >
-                        {a.status}
-                      </span>
+                      {a.status === 'CONFIRMED' ? (
+                        <span
+                          style={{
+                            padding: '4px 10px',
+                            borderRadius: '9999px',
+                            fontSize: '11px',
+                            fontWeight: 800,
+                            background: '#dcfce7',
+                            color: '#166534',
+                          }}
+                        >
+                          ✓ Đã xác nhận & Cập nhật tồn
+                        </span>
+                      ) : a.status === 'PENDING_ADMIN_APPROVAL' ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <span
+                            style={{
+                              padding: '4px 10px',
+                              borderRadius: '9999px',
+                              fontSize: '11px',
+                              fontWeight: 800,
+                              background: '#fffbeb',
+                              color: '#b45309',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                          >
+                            ⚠️ Chờ Admin duyệt ({a.total_quantity_variance} sp)
+                          </span>
+                          {user?.role === 'ADMIN' && (
+                            <div style={{ display: 'flex', gap: '4px' }}>
+                              <button
+                                onClick={() => handleApprove(a.id)}
+                                style={{
+                                  background: '#059669',
+                                  color: 'white',
+                                  border: 'none',
+                                  padding: '3px 8px',
+                                  borderRadius: '6px',
+                                  fontSize: '11px',
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                Duyệt
+                              </button>
+                              <button
+                                onClick={() => handleReject(a.id)}
+                                style={{
+                                  background: '#dc2626',
+                                  color: 'white',
+                                  border: 'none',
+                                  padding: '3px 8px',
+                                  borderRadius: '6px',
+                                  fontSize: '11px',
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                Từ chối
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span
+                          style={{
+                            padding: '4px 10px',
+                            borderRadius: '9999px',
+                            fontSize: '11px',
+                            fontWeight: 800,
+                            background: '#fee2e2',
+                            color: '#991b1b',
+                          }}
+                        >
+                          ✕ {a.status}
+                        </span>
+                      )}
                     </td>
 
                     <td style={{ padding: '14px 18px', color: '#64748b', fontSize: '12px' }}>
@@ -272,6 +372,20 @@ export function WarehouseAdjustmentsPage() {
               >
                 <X size={20} />
               </button>
+            </div>
+
+            <div
+              style={{
+                background: '#fffbeb',
+                border: '1px solid #fde68a',
+                borderRadius: '10px',
+                padding: '10px 14px',
+                fontSize: '12px',
+                color: '#92400e',
+                lineHeight: '1.5',
+              }}
+            >
+              ℹ️ <strong>Quy tắc giám sát tồn kho (Rule 2):</strong> Nếu số lượng chênh lệch &ge; 50 sản phẩm hoặc giá trị biến động &ge; 10.000.000 VNĐ, phiếu sẽ tự động chuyển sang trạng thái <strong>"Chờ Admin phê duyệt"</strong> trước khi áp dụng tồn kho.
             </div>
 
             {formError && (

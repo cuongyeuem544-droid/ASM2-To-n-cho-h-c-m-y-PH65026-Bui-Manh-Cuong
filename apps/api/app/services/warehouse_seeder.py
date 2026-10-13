@@ -490,6 +490,7 @@ def seed_warehouses_and_managers(db: Session) -> dict[str, int]:
                 email=acc["email"],
                 full_name=acc["full_name"],
                 role=acc["role"],
+                warehouse_id=wh_id,
                 password_hash=hash_password(pwd),
                 is_active=True,
             )
@@ -497,6 +498,7 @@ def seed_warehouses_and_managers(db: Session) -> dict[str, int]:
             db.flush()
         else:
             user.role = acc["role"]
+            user.warehouse_id = wh_id
             user.password_hash = hash_password(pwd)
             user.is_active = True
             db.flush()

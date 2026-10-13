@@ -74,8 +74,13 @@ def viewer_headers(client):
 def manager_hcm_headers(client):
     response = client.post(
         "/api/v1/auth/login",
-        json={"email": "manager_hcm@pharmatrust.vn", "password": "Warehouse@2026!"},
+        json={"email": "manager_hcm@pharmatrust.vn", "password": "Warehouse@2026"},
     )
+    if response.status_code != 200:
+        response = client.post(
+            "/api/v1/auth/login",
+            json={"email": "manager_hcm@pharmatrust.vn", "password": "Warehouse@2026!"},
+        )
     assert response.status_code == 200
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
@@ -84,8 +89,13 @@ def manager_hcm_headers(client):
 def manager_hn_headers(client):
     response = client.post(
         "/api/v1/auth/login",
-        json={"email": "manager_hn@pharmatrust.vn", "password": "Warehouse@2026!"},
+        json={"email": "manager_hn@pharmatrust.vn", "password": "Warehouse@2026"},
     )
+    if response.status_code != 200:
+        response = client.post(
+            "/api/v1/auth/login",
+            json={"email": "manager_hn@pharmatrust.vn", "password": "Warehouse@2026!"},
+        )
     assert response.status_code == 200
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 

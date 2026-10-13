@@ -92,7 +92,7 @@ export function WarehouseOrdersPage() {
 
   // Pick Details Modal
   const [selectedOrder, setSelectedOrder] = useState<PickDetailResponse | null>(null)
-  const [loadingDetail, setLoadingDetail] = useState(false)
+  const [loadingDetailId, setLoadingDetailId] = useState<number | null>(null)
   const [updatingId, setUpdatingId] = useState<number | null>(null)
 
   const fetchOrders = () => {
@@ -126,9 +126,9 @@ export function WarehouseOrdersPage() {
   const handleUpdateStatus = async (orderId: number, newStatus: string) => {
     setUpdatingId(orderId)
     try {
-      await api(`/warehouse-portal/orders/${orderId}/status`, {
+      await api(`/warehouse-portal/orders/${orderId}/fulfillment`, {
         method: 'PATCH',
-        body: JSON.stringify({ fulfillment_status: newStatus }),
+        body: JSON.stringify({ fulfillment_status: newStatus, status: newStatus }),
       })
       fetchOrders()
       if (selectedOrder && selectedOrder.order_id === orderId) {
@@ -142,14 +142,14 @@ export function WarehouseOrdersPage() {
   }
 
   const handleViewPickDetails = async (orderId: number) => {
-    setLoadingDetail(true)
+    setLoadingDetailId(orderId)
     try {
       const res = await api<PickDetailResponse>(`/warehouse-portal/orders/${orderId}/pick-details`)
       setSelectedOrder(res)
     } catch (err: any) {
       alert(err?.message || 'Không thể tải chi tiết đơn hàng')
     } finally {
-      setLoadingDetail(false)
+      setLoadingDetailId(null)
     }
   }
 
@@ -392,22 +392,23 @@ export function WarehouseOrdersPage() {
                         <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
                           <button
                             type="button"
+                            disabled={loadingDetailId === o.id}
                             onClick={() => handleViewPickDetails(o.id)}
                             style={{
                               padding: '6px 11px',
                               borderRadius: '8px',
                               border: '1px solid #cbd5e1',
-                              background: 'white',
+                              background: loadingDetailId === o.id ? '#f1f5f9' : 'white',
                               color: '#0284c7',
                               fontSize: '12px',
                               fontWeight: 700,
-                              cursor: 'pointer',
+                              cursor: loadingDetailId === o.id ? 'not-allowed' : 'pointer',
                               display: 'inline-flex',
                               alignItems: 'center',
                               gap: '4px',
                             }}
                           >
-                            <Eye size={13} /> Phiếu Soạn
+                            <Eye size={13} /> {loadingDetailId === o.id ? 'Đang mở…' : 'Phiếu Soạn'}
                           </button>
 
                           {o.fulfillment_status === 'ALLOCATED' && (
@@ -684,6 +685,61 @@ export function WarehouseOrdersPage() {
                 >
                   Xác nhận đã đóng gói (PACKED)
                 </button>
+              )}
+
+              {selectedOrder.fulfillment_status === 'PACKED' && (
+                <button
+                  type="button"
+                  onClick={() => handleUpdateStatus(selectedOrder.order_id, 'SHIPPED')}
+                  style={{
+                    padding: '9px 20px',
+                    borderRadius: '10px',
+                    border: 'none',
+                    background: '#2563eb',
+                    color: 'white',
+                    fontSize: '13px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Bàn giao vận chuyển (SHIPPED)
+                </button>
+              )}
+
+              {selectedOrder.fulfillment_status === 'SHIPPED' && (
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '8px 16px',
+                    borderRadius: '10px',
+                    background: '#eff6ff',
+                    color: '#1d4ed8',
+                    fontWeight: 800,
+                    fontSize: '13px',
+                  }}
+                >
+                  <Truck size={16} /> Đã bàn giao đơn vị vận chuyển
+                </div>
+              )}
+
+              {selectedOrder.fulfillment_status === 'DELIVERED' && (
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '8px 16px',
+                    borderRadius: '10px',
+                    background: '#ecfdf5',
+                    color: '#047857',
+                    fontWeight: 800,
+                    fontSize: '13px',
+                  }}
+                >
+                  <CheckCircle2 size={16} /> Đơn hàng đã giao thành công
+                </div>
               )}
             </div>
           </div>

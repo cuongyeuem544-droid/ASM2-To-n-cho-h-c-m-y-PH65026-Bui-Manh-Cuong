@@ -11,6 +11,14 @@ import {
   TrendingUp,
   Clock,
   CheckCircle2,
+  Calendar,
+  FileSpreadsheet,
+  ShieldAlert,
+  Bell,
+  PackageCheck,
+  XCircle,
+  Truck,
+  RotateCcw,
 } from 'lucide-react'
 import { api } from '../../services/api'
 import { useNavigate } from 'react-router-dom'
@@ -23,14 +31,23 @@ interface OverviewData {
     address: string
     province: string
   }
+  time_range: string
   kpi: {
+    total_assigned_orders: number
+    total_skus: number
     total_batches: number
     total_available_quantity: number
     total_on_hand_quantity: number
+    total_reserved_quantity: number
+    low_stock_count: number
     near_expiry_batches: number
+    expired_batches: number
+    quarantined_batches: number
+    pending_receipts_count: number
     pending_fulfillment_count: number
     staff_count: number
     inbound_transfers: number
+    unread_alerts_count: number
     order_status_counts: Record<string, number>
     fulfillment_counts: Record<string, number>
   }
@@ -40,18 +57,32 @@ export function WarehouseOverviewPage() {
   const navigate = useNavigate()
   const [data, setData] = useState<OverviewData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [timeRange, setTimeRange] = useState<'today' | '7days' | '30days' | 'custom'>('30days')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
 
-  useEffect(() => {
-    api<OverviewData>('/warehouse-portal/me')
+  const fetchOverview = () => {
+    setLoading(true)
+    const params = new URLSearchParams({ time_range: timeRange })
+    if (timeRange === 'custom') {
+      if (fromDate) params.set('from_date', fromDate)
+      if (toDate) params.set('to_date', toDate)
+    }
+
+    api<OverviewData>(`/warehouse-portal/me?${params.toString()}`)
       .then((res) => setData(res))
       .catch((err) => console.error(err))
       .finally(() => setLoading(false))
-  }, [])
+  }
 
-  if (loading) {
+  useEffect(() => {
+    fetchOverview()
+  }, [timeRange, fromDate, toDate])
+
+  if (loading && !data) {
     return (
       <div style={{ padding: '40px', textAlign: 'center', color: '#64748b', fontWeight: 600, fontSize: '15px' }}>
-        Đang tải dữ liệu tổng quan kho…
+        Đang tải dữ liệu tổng quan chi nhánh kho…
       </div>
     )
   }
@@ -104,14 +135,14 @@ export function WarehouseOverviewPage() {
           </p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           <button
-            onClick={() => navigate('/warehouse/orders')}
+            onClick={() => navigate('/warehouse/products')}
             style={{
               background: 'white',
               color: '#065f46',
               border: 'none',
-              padding: '10px 18px',
+              padding: '10px 16px',
               borderRadius: '12px',
               fontWeight: 800,
               fontSize: '13px',
@@ -122,16 +153,16 @@ export function WarehouseOverviewPage() {
               gap: '6px',
             }}
           >
-            <ShoppingBag size={16} /> Xử lý đơn ({kpi?.pending_fulfillment_count ?? 0})
+            <Boxes size={16} /> Thuốc trong kho ({kpi?.total_skus ?? 0})
           </button>
 
           <button
-            onClick={() => navigate('/warehouse/receipts')}
+            onClick={() => navigate('/warehouse/imports')}
             style={{
-              background: 'rgba(255, 255, 255, 0.15)',
+              background: 'rgba(255, 255, 255, 0.2)',
               color: 'white',
-              border: '1px solid rgba(255, 255, 255, 0.3)',
-              padding: '10px 18px',
+              border: '1px solid rgba(255, 255, 255, 0.4)',
+              padding: '10px 16px',
               borderRadius: '12px',
               fontWeight: 700,
               fontSize: '13px',
@@ -141,12 +172,96 @@ export function WarehouseOverviewPage() {
               gap: '6px',
             }}
           >
-            <ArrowDownToLine size={16} /> + Nhập kho mới
+            <FileSpreadsheet size={16} /> Nhập File CSV/Excel
+          </button>
+
+          <button
+            onClick={() => navigate('/warehouse/alerts')}
+            style={{
+              background: (kpi?.unread_alerts_count ?? 0) > 0 ? '#ef4444' : 'rgba(255, 255, 255, 0.2)',
+              color: 'white',
+              border: 'none',
+              padding: '10px 16px',
+              borderRadius: '12px',
+              fontWeight: 800,
+              fontSize: '13px',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <Bell size={16} /> Cảnh báo ({kpi?.unread_alerts_count ?? 0})
           </button>
         </div>
       </div>
 
-      {/* KPI Cards Grid */}
+      {/* Time Range Selector Bar */}
+      <div
+        style={{
+          background: 'white',
+          borderRadius: '14px',
+          border: '1px solid #e2e8f0',
+          padding: '14px 20px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '12px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Calendar size={16} color="#059669" />
+          <span style={{ fontSize: '13px', fontWeight: 800, color: '#0f172a' }}>Kỳ thống kê dữ liệu:</span>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          {[
+            { id: 'today', label: 'Hôm nay' },
+            { id: '7days', label: '7 ngày' },
+            { id: '30days', label: '30 ngày' },
+            { id: 'custom', label: 'Tùy chọn' },
+          ].map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTimeRange(t.id as any)}
+              style={{
+                padding: '6px 14px',
+                borderRadius: '8px',
+                fontSize: '12.5px',
+                fontWeight: 700,
+                border: 'none',
+                cursor: 'pointer',
+                background: timeRange === t.id ? '#059669' : '#f1f5f9',
+                color: timeRange === t.id ? 'white' : '#475569',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
+
+          {timeRange === 'custom' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '8px' }}>
+              <input
+                type="date"
+                value={fromDate}
+                onChange={(e) => setFromDate(e.target.value)}
+                style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }}
+              />
+              <span style={{ fontSize: '12px', color: '#64748b' }}>đến</span>
+              <input
+                type="date"
+                value={toDate}
+                onChange={(e) => setToDate(e.target.value)}
+                style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 4 Primary Hero KPI Cards */}
       <div
         style={{
           display: 'grid',
@@ -154,73 +269,65 @@ export function WarehouseOverviewPage() {
           gap: '16px',
         }}
       >
-        {/* Card 1: Tồn khả dụng */}
-        <div
-          style={{
-            background: 'white',
-            borderRadius: '14px',
-            border: '1px solid #e2e8f0',
-            padding: '20px',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
-          }}
-        >
+        {/* Card 1: Tổng đơn giao cho kho */}
+        <div style={{ background: 'white', borderRadius: '14px', border: '1px solid #e2e8f0', padding: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
             <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b' }}>
-              Tồn khả dụng
+              Đơn hàng giao cho kho
+            </span>
+            <div style={{ padding: '8px', borderRadius: '10px', background: '#eff6ff', color: '#2563eb' }}>
+              <ShoppingBag size={20} />
+            </div>
+          </div>
+          <div style={{ fontSize: '26px', fontWeight: 900, color: '#0f172a' }}>
+            {(kpi?.total_assigned_orders ?? 0).toLocaleString()} <span style={{ fontSize: '12px', color: '#94a3b8' }}>đơn</span>
+          </div>
+          <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+            Trong kỳ được chọn ({kpi?.pending_fulfillment_count ?? 0} đang chờ xử lý)
+          </div>
+        </div>
+
+        {/* Card 2: Tổng loại thuốc trong kho */}
+        <div style={{ background: 'white', borderRadius: '14px', border: '1px solid #e2e8f0', padding: '20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+            <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b' }}>
+              Loại thuốc trong kho
             </span>
             <div style={{ padding: '8px', borderRadius: '10px', background: '#ecfdf5', color: '#059669' }}>
               <Boxes size={20} />
             </div>
           </div>
           <div style={{ fontSize: '26px', fontWeight: 900, color: '#0f172a' }}>
-            {(kpi?.total_available_quantity ?? 0).toLocaleString()}{' '}
-            <span style={{ fontSize: '12px', fontWeight: 600, color: '#94a3b8' }}>đơn vị</span>
+            {(kpi?.total_skus ?? 0).toLocaleString()} <span style={{ fontSize: '12px', color: '#94a3b8' }}>loại SKU</span>
           </div>
-          <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
-            Tổng tồn vật lý: {(kpi?.total_on_hand_quantity ?? kpi?.total_available_quantity ?? 0).toLocaleString()}
+          <div style={{ fontSize: '11px', color: '#059669', marginTop: '4px' }}>
+            Phân bổ trên {(kpi?.total_batches ?? 0).toLocaleString()} lô thuốc
           </div>
         </div>
 
-        {/* Card 2: Đơn cần soạn */}
-        <div
-          style={{
-            background: 'white',
-            borderRadius: '14px',
-            border: '1px solid #e2e8f0',
-            padding: '20px',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
-          }}
-        >
+        {/* Card 3: Tồn khả dụng & Tồn thực tế */}
+        <div style={{ background: 'white', borderRadius: '14px', border: '1px solid #e2e8f0', padding: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
             <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b' }}>
-              Đơn cần soạn gấp
+              Tồn kho khả dụng (Bán)
             </span>
-            <div style={{ padding: '8px', borderRadius: '10px', background: '#fffbeb', color: '#d97706' }}>
-              <Clock size={20} />
+            <div style={{ padding: '8px', borderRadius: '10px', background: '#ecfdf5', color: '#059669' }}>
+              <PackageCheck size={20} />
             </div>
           </div>
-          <div style={{ fontSize: '26px', fontWeight: 900, color: '#d97706' }}>
-            {kpi?.pending_fulfillment_count ?? 0}{' '}
-            <span style={{ fontSize: '12px', fontWeight: 600, color: '#94a3b8' }}>đơn</span>
+          <div style={{ fontSize: '26px', fontWeight: 900, color: '#059669' }}>
+            {(kpi?.total_available_quantity ?? 0).toLocaleString()} <span style={{ fontSize: '12px', color: '#94a3b8' }}>đơn vị</span>
           </div>
           <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
-            Chờ soạn, gom hàng hoặc đóng gói
+            Tồn vật lý: {(kpi?.total_on_hand_quantity ?? 0).toLocaleString()} • Giữ: {(kpi?.total_reserved_quantity ?? 0).toLocaleString()}
           </div>
         </div>
 
-        {/* Card 3: Cận hạn */}
-        <div
-          style={{
-            background: 'white',
-            borderRadius: '14px',
-            border: '1px solid #e2e8f0',
-            padding: '20px',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
-          }}
-        >
+        {/* Card 4: Cảnh báo cận hạn & Hết hạn */}
+        <div style={{ background: 'white', borderRadius: '14px', border: '1px solid #e2e8f0', padding: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
             <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b' }}>
-              Cảnh báo cận hạn
+              Lô cận hạn & Hết hạn
             </span>
             <div
               style={{
@@ -241,42 +348,52 @@ export function WarehouseOverviewPage() {
             }}
           >
             {kpi?.near_expiry_batches ?? 0}{' '}
-            <span style={{ fontSize: '12px', fontWeight: 600, color: '#94a3b8' }}>lô</span>
+            <span style={{ fontSize: '12px', fontWeight: 600, color: '#94a3b8' }}>lô cận</span>
           </div>
           <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
-            Hạn dùng &lt; 180 ngày (chặn xuất FEFO)
-          </div>
-        </div>
-
-        {/* Card 4: Nhân viên */}
-        <div
-          style={{
-            background: 'white',
-            borderRadius: '14px',
-            border: '1px solid #e2e8f0',
-            padding: '20px',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-            <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b' }}>
-              Nhân viên kho
-            </span>
-            <div style={{ padding: '8px', borderRadius: '10px', background: '#eff6ff', color: '#2563eb' }}>
-              <Users size={20} />
-            </div>
-          </div>
-          <div style={{ fontSize: '26px', fontWeight: 900, color: '#0f172a' }}>
-            {kpi?.staff_count ?? 0}{' '}
-            <span style={{ fontSize: '12px', fontWeight: 600, color: '#94a3b8' }}>nhân sự</span>
-          </div>
-          <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
-            Thuộc quyền quản lý của bạn
+            Đã hết hạn: {kpi?.expired_batches ?? 0} • Cách ly: {kpi?.quarantined_batches ?? 0}
           </div>
         </div>
       </div>
 
-      {/* Breakdown Grids */}
+      {/* Secondary Operational Metrics Grid */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gap: '14px',
+        }}
+      >
+        <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '14px 18px' }}>
+          <div style={{ fontSize: '11px', fontWeight: 700, color: '#64748b' }}>THUỐC SẮP HẾT HÀNG</div>
+          <div style={{ fontSize: '20px', fontWeight: 900, color: (kpi?.low_stock_count ?? 0) > 0 ? '#ea580c' : '#0f172a', marginTop: '2px' }}>
+            {kpi?.low_stock_count ?? 0} <span style={{ fontSize: '11px', color: '#94a3b8' }}>loại thuốc</span>
+          </div>
+        </div>
+
+        <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '14px 18px' }}>
+          <div style={{ fontSize: '11px', fontWeight: 700, color: '#64748b' }}>PHIẾU NHẬP CHỜ XỬ LÝ</div>
+          <div style={{ fontSize: '20px', fontWeight: 900, color: '#0f172a', marginTop: '2px' }}>
+            {kpi?.pending_receipts_count ?? 0} <span style={{ fontSize: '11px', color: '#94a3b8' }}>phiếu GSP</span>
+          </div>
+        </div>
+
+        <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '14px 18px' }}>
+          <div style={{ fontSize: '11px', fontWeight: 700, color: '#64748b' }}>ĐIỀU CHUYỂN ĐẾN KHO</div>
+          <div style={{ fontSize: '20px', fontWeight: 900, color: '#0f172a', marginTop: '2px' }}>
+            {kpi?.inbound_transfers ?? 0} <span style={{ fontSize: '11px', color: '#94a3b8' }}>chuyến hàng</span>
+          </div>
+        </div>
+
+        <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '14px 18px' }}>
+          <div style={{ fontSize: '11px', fontWeight: 700, color: '#64748b' }}>NHÂN SỰ THUỘC KHO</div>
+          <div style={{ fontSize: '20px', fontWeight: 900, color: '#0f172a', marginTop: '2px' }}>
+            {kpi?.staff_count ?? 0} <span style={{ fontSize: '11px', color: '#94a3b8' }}>nhân viên</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Detailed Funnel & Shortcuts */}
       <div
         style={{
           display: 'grid',
@@ -305,7 +422,7 @@ export function WarehouseOverviewPage() {
               gap: '8px',
             }}
           >
-            <TrendingUp size={18} style={{ color: '#059669' }} /> Tiến độ xử lý đơn hàng tại kho
+            <TrendingUp size={18} style={{ color: '#059669' }} /> Quy trình thực hiện đơn tại kho ({data.time_range})
           </h2>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -313,9 +430,9 @@ export function WarehouseOverviewPage() {
               { key: 'ALLOCATED', label: 'Đã phân bổ kho (Chờ soạn)', count: kpi?.fulfillment_counts?.ALLOCATED ?? 0, bg: '#3b82f6' },
               { key: 'WAITING_INTERNAL_TRANSFER', label: 'Chờ điều chuyển gom hàng', count: kpi?.fulfillment_counts?.WAITING_INTERNAL_TRANSFER ?? 0, bg: '#8b5cf6' },
               { key: 'CONSOLIDATED', label: 'Đã gom đủ hàng tại kho', count: kpi?.fulfillment_counts?.CONSOLIDATED ?? 0, bg: '#6366f1' },
-              { key: 'PICKING', label: 'Đang soạn hàng tại quầy', count: kpi?.fulfillment_counts?.PICKING ?? 0, bg: '#f59e0b' },
-              { key: 'PACKED', label: 'Đã đóng gói xong (Chờ gửi)', count: kpi?.fulfillment_counts?.PACKED ?? 0, bg: '#0d9488' },
-              { key: 'SHIPPED', label: 'Đã bàn giao bưu tá vận chuyển', count: kpi?.fulfillment_counts?.SHIPPED ?? 0, bg: '#0284c7' },
+              { key: 'PICKING', label: 'Đang lấy hàng tại quầy / kệ', count: kpi?.fulfillment_counts?.PICKING ?? 0, bg: '#f59e0b' },
+              { key: 'PACKED', label: 'Đã đóng gói xong (Chờ vận chuyển)', count: kpi?.fulfillment_counts?.PACKED ?? 0, bg: '#0d9488' },
+              { key: 'SHIPPED', label: 'Đã bàn giao cho bưu tá', count: kpi?.fulfillment_counts?.SHIPPED ?? 0, bg: '#0284c7' },
               { key: 'DELIVERED', label: 'Đã giao thành công cho khách', count: kpi?.fulfillment_counts?.DELIVERED ?? 0, bg: '#10b981' },
             ].map((st) => (
               <div
@@ -346,6 +463,27 @@ export function WarehouseOverviewPage() {
               </div>
             ))}
           </div>
+
+          {/* Customer Order State Summary */}
+          <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid #e2e8f0' }}>
+            <div style={{ fontSize: '12px', fontWeight: 700, color: '#64748b', marginBottom: '8px' }}>
+              Trạng thái đơn chung:
+            </div>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '6px', background: '#f1f5f9', color: '#475569' }}>
+                Chờ duyệt: <strong>{kpi?.order_status_counts?.PENDING ?? 0}</strong>
+              </span>
+              <span style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '6px', background: '#ecfdf5', color: '#065f46' }}>
+                Hoàn thành: <strong>{kpi?.order_status_counts?.COMPLETED ?? 0}</strong>
+              </span>
+              <span style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '6px', background: '#fee2e2', color: '#991b1b' }}>
+                Hủy: <strong>{kpi?.order_status_counts?.CANCELLED ?? 0}</strong>
+              </span>
+              <span style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '6px', background: '#fff7ed', color: '#c2410c' }}>
+                Đổi/Trả: <strong>{kpi?.order_status_counts?.RETURNED ?? 0}</strong>
+              </span>
+            </div>
+          </div>
         </div>
 
         {/* Quick Operational Shortcuts */}
@@ -373,12 +511,12 @@ export function WarehouseOverviewPage() {
                 gap: '8px',
               }}
             >
-              <CheckCircle2 size={18} style={{ color: '#059669' }} /> Lối tắt thao tác nhanh
+              <CheckCircle2 size={18} style={{ color: '#059669' }} /> Lối tắt vận hành chi nhánh kho
             </h2>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
               <div
-                onClick={() => navigate('/warehouse/receipts')}
+                onClick={() => navigate('/warehouse/products')}
                 style={{
                   padding: '16px',
                   borderRadius: '12px',
@@ -388,13 +526,13 @@ export function WarehouseOverviewPage() {
                   transition: 'all 0.15s ease',
                 }}
               >
-                <ArrowDownToLine size={22} style={{ color: '#059669', marginBottom: '8px' }} />
-                <div style={{ fontSize: '13px', fontWeight: 800, color: '#0f172a' }}>Nhập kho GSP</div>
-                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>Nhập thuốc theo lô & HSD</div>
+                <Boxes size={22} style={{ color: '#059669', marginBottom: '8px' }} />
+                <div style={{ fontSize: '13px', fontWeight: 800, color: '#0f172a' }}>Thuốc trong kho</div>
+                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>Hồ sơ 5 mục & định mức</div>
               </div>
 
               <div
-                onClick={() => navigate('/warehouse/transfers')}
+                onClick={() => navigate('/warehouse/imports')}
                 style={{
                   padding: '16px',
                   borderRadius: '12px',
@@ -404,9 +542,25 @@ export function WarehouseOverviewPage() {
                   transition: 'all 0.15s ease',
                 }}
               >
-                <ArrowLeftRight size={22} style={{ color: '#0284c7', marginBottom: '8px' }} />
-                <div style={{ fontSize: '13px', fontWeight: 800, color: '#0f172a' }}>Điều chuyển kho</div>
-                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>Yêu cầu luân chuyển hàng</div>
+                <FileSpreadsheet size={22} style={{ color: '#2563eb', marginBottom: '8px' }} />
+                <div style={{ fontSize: '13px', fontWeight: 800, color: '#0f172a' }}>Nhập file tồn kho</div>
+                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>File CSV / Excel chuẩn 14 cột</div>
+              </div>
+
+              <div
+                onClick={() => navigate('/warehouse/alerts')}
+                style={{
+                  padding: '16px',
+                  borderRadius: '12px',
+                  border: '1px solid #e2e8f0',
+                  background: '#f8fafc',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <AlertTriangle size={22} style={{ color: '#dc2626', marginBottom: '8px' }} />
+                <div style={{ fontSize: '13px', fontWeight: 800, color: '#0f172a' }}>Cảnh báo bất thường</div>
+                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>Cận hạn & tồn kho bất thường</div>
               </div>
 
               <div
@@ -422,23 +576,7 @@ export function WarehouseOverviewPage() {
               >
                 <ClipboardCheck size={22} style={{ color: '#d97706', marginBottom: '8px' }} />
                 <div style={{ fontSize: '13px', fontWeight: 800, color: '#0f172a' }}>Kiểm kê & Điều chỉnh</div>
-                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>Cân đối tồn kho có lý do</div>
-              </div>
-
-              <div
-                onClick={() => navigate('/warehouse/staff')}
-                style={{
-                  padding: '16px',
-                  borderRadius: '12px',
-                  border: '1px solid #e2e8f0',
-                  background: '#f8fafc',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                <Users size={22} style={{ color: '#7c3aed', marginBottom: '8px' }} />
-                <div style={{ fontSize: '13px', fontWeight: 800, color: '#0f172a' }}>Tạo tài khoản NV</div>
-                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>Thêm nhân viên kho mới</div>
+                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>Biến động lớn chờ Admin duyệt</div>
               </div>
             </div>
           </div>
@@ -455,8 +593,7 @@ export function WarehouseOverviewPage() {
               lineHeight: 1.5,
             }}
           >
-            🔒 <b>Phân quyền GSP/GDP:</b> Bạn đang đăng nhập với vai trò Quản lý kho trực thuộc{' '}
-            <b>{warehouse.name}</b>. Dữ liệu các kho khác hoàn toàn được bảo vệ và cô lập theo chính sách Anti-IDOR.
+            🔒 <b>Bảo vệ dữ liệu chi nhánh kho (RBAC):</b> Bạn đang quản trị chi nhánh <b>{warehouse.name}</b>. Các truy vấn chỉ trích xuất dữ liệu gắn chặt với warehouse_id của bạn, không nhận warehouse_id tự do từ client.
           </div>
         </div>
       </div>

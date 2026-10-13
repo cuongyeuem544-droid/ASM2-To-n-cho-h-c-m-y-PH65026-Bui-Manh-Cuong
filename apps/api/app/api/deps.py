@@ -47,6 +47,9 @@ def require_roles(*roles: UserRole) -> Callable:
     return dependency
 
 
+require_admin = require_roles(UserRole.ADMIN)
+
+
 def get_optional_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: Session = Depends(get_db),
@@ -59,6 +62,44 @@ def get_optional_current_user(
     except (jwt.PyJWTError, KeyError, ValueError):
         return None
     return db.scalar(select(User).where(User.id == user_id, User.is_active.is_(True)))
+
+
+def strict_optional_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> User | None:
+    """
+    Dependency cho phép khách vãng lai hoặc người dùng đăng nhập:
+    - Nếu KHÔNG gửi Authorization header: trả về None (khách vãng lai).
+    - Nếu CÓ gửi Authorization header nhưng token sai/hết hạn: trả HTTP 401 UNAUTHORIZED (không âm thầm coi là khách vãng lai).
+    - Nếu token hợp lệ: trả về đối tượng User.
+    """
+    if not credentials or not credentials.credentials:
+        return None
+    try:
+        payload = decode_token(credentials.credentials, "access")
+        user_id = int(payload["sub"])
+    except (jwt.PyJWTError, KeyError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token không hợp lệ hoặc đã hết hạn. Vui lòng đăng nhập lại.",
+        ) from None
+
+    user = db.scalar(select(User).where(User.id == user_id, User.is_active.is_(True)))
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Tài khoản không còn hoạt động hoặc đã bị khóa.",
+        )
+
+    token_ver = payload.get("token_version")
+    if token_ver is not None and getattr(user, "token_version", 1) != token_ver:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Phiên đăng nhập đã bị thu hồi do thay đổi mật khẩu. Vui lòng đăng nhập lại.",
+        )
+
+    return user
 
 
 def get_user_warehouse_membership(user: User, db: Session):

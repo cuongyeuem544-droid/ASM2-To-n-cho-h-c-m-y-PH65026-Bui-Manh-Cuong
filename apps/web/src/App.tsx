@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import { Layout } from './components/Layout'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { ForceChangePasswordModal } from './components/ForceChangePasswordModal'
 import { useAuth } from './services/auth'
 
 // Admin Pages
@@ -38,6 +39,15 @@ const WarehouseManagerLayout = lazy(() =>
 )
 const WarehouseOverviewPage = lazy(() =>
   import('./pages/warehouse/WarehouseOverviewPage').then(module => ({ default: module.WarehouseOverviewPage }))
+)
+const WarehouseProductsPage = lazy(() =>
+  import('./pages/warehouse/WarehouseProductsPage').then(module => ({ default: module.WarehouseProductsPage }))
+)
+const WarehouseImportsPage = lazy(() =>
+  import('./pages/warehouse/WarehouseImportsPage').then(module => ({ default: module.WarehouseImportsPage }))
+)
+const WarehouseAlertsPage = lazy(() =>
+  import('./pages/warehouse/WarehouseAlertsPage').then(module => ({ default: module.WarehouseAlertsPage }))
 )
 const WarehouseOrdersPage = lazy(() =>
   import('./pages/warehouse/WarehouseOrdersPage').then(module => ({ default: module.WarehouseOrdersPage }))
@@ -136,6 +146,7 @@ function AdminOnly({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <ErrorBoundary>
+      <ForceChangePasswordModal />
       <Suspense fallback={<div className="full-loading">Đang tải giao diện…</div>}>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
@@ -172,12 +183,15 @@ export default function App() {
           <Route path="/warehouse" element={<WarehouseManagerGuard />}>
             <Route index element={<Navigate to="/warehouse/overview" replace />} />
             <Route path="overview" element={<WarehouseOverviewPage />} />
+            <Route path="products" element={<WarehouseProductsPage />} />
             <Route path="orders" element={<WarehouseOrdersPage />} />
+            <Route path="imports" element={<WarehouseImportsPage />} />
             <Route path="receipts" element={<WarehouseReceiptsPage />} />
             <Route path="batches" element={<WarehouseBatchesPage />} />
             <Route path="stock" element={<WarehouseStockPage />} />
             <Route path="inventory-check" element={<WarehouseAdjustmentsPage />} />
             <Route path="transfers" element={<WarehouseTransfersPage />} />
+            <Route path="alerts" element={<WarehouseAlertsPage />} />
             <Route path="staff" element={<WarehouseStaffPage />} />
             <Route path="audit" element={<WarehouseAuditPage />} />
             <Route path="reviews" element={<WarehouseReviewsPage />} />

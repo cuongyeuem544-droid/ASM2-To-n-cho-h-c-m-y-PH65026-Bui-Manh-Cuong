@@ -50,20 +50,35 @@ class User(TimestampMixin, Base):
     token_version: Mapped[int] = mapped_column(Integer, default=1)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    warehouse_memberships: Mapped[list["UserWarehouseMembership"]] = relationship("UserWarehouseMembership", back_populates="user", cascade="all, delete-orphan", foreign_keys="UserWarehouseMembership.user_id")
+    warehouse_id: Mapped[int | None] = mapped_column(ForeignKey("warehouses.id"), nullable=True, index=True)
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
+    password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
-    @property
-    def warehouse_id(self) -> int | None:
-        for m in getattr(self, "warehouse_memberships", []):
-            if m.is_active:
-                return m.warehouse_id
-        return None
+    warehouse_memberships: Mapped[list["UserWarehouseMembership"]] = relationship(
+        "UserWarehouseMembership",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        foreign_keys="UserWarehouseMembership.user_id",
+    )
+    warehouse: Mapped["Warehouse | None"] = relationship("Warehouse", foreign_keys=[warehouse_id])
+    created_by: Mapped["User | None"] = relationship("User", remote_side=[id], foreign_keys=[created_by_user_id])
 
     @property
     def warehouse_name(self) -> str | None:
+        if getattr(self, "warehouse", None):
+            return self.warehouse.name
         for m in getattr(self, "warehouse_memberships", []):
             if m.is_active and getattr(m, "warehouse", None):
                 return m.warehouse.name
+        return None
+
+    @property
+    def created_by_name(self) -> str | None:
+        if getattr(self, "created_by", None):
+            return self.created_by.full_name
         return None
 
 

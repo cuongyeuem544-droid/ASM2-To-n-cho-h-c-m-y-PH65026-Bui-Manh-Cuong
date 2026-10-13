@@ -17,6 +17,8 @@ import {
   Users,
   X,
   ExternalLink,
+  FileSpreadsheet,
+  AlertTriangle,
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
@@ -40,17 +42,21 @@ interface WarehouseInfo {
     total_available_quantity: number
     pending_fulfillment_count: number
     staff_count: number
+    unread_alerts_count?: number
   }
 }
 
 const navItems = [
   { to: '/warehouse/overview', label: 'Tổng quan kho', icon: LayoutDashboard },
+  { to: '/warehouse/products', label: 'Thuốc trong kho', icon: Boxes },
   { to: '/warehouse/orders', label: 'Đơn hàng kho', icon: ShoppingBag },
+  { to: '/warehouse/imports', label: 'Nhập file tồn kho', icon: FileSpreadsheet },
   { to: '/warehouse/receipts', label: 'Nhập kho (GSP)', icon: ArrowDownToLine },
   { to: '/warehouse/batches', label: 'Lô thuốc & HSD', icon: Layers },
   { to: '/warehouse/stock', label: 'Tồn kho thuốc', icon: Boxes },
   { to: '/warehouse/inventory-check', label: 'Kiểm kê kho', icon: ClipboardCheck },
   { to: '/warehouse/transfers', label: 'Điều chuyển kho', icon: ArrowLeftRight },
+  { to: '/warehouse/alerts', label: 'Cảnh báo kho', icon: AlertTriangle, isAlert: true },
   { to: '/warehouse/staff', label: 'Quản lý nhân viên', icon: Users },
   { to: '/warehouse/audit', label: 'Nhật ký kho', icon: History },
   { to: '/warehouse/reviews', label: 'Đánh giá & Phản hồi', icon: MessageSquare },
@@ -195,7 +201,7 @@ export function WarehouseManagerLayout() {
                 style={({ isActive }) => ({
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '10px',
+                  justifyContent: 'space-between',
                   padding: '9px 12px',
                   borderRadius: '10px',
                   fontSize: '13px',
@@ -208,8 +214,25 @@ export function WarehouseManagerLayout() {
                   transition: 'all 0.15s ease',
                 })}
               >
-                <Icon size={17} />
-                <span>{item.label}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <Icon size={17} />
+                  <span>{item.label}</span>
+                </div>
+                {item.isAlert && (warehouseInfo?.kpi?.unread_alerts_count ?? 0) > 0 && (
+                  <span
+                    style={{
+                      background: '#ef4444',
+                      color: 'white',
+                      fontSize: '10.5px',
+                      fontWeight: 800,
+                      padding: '1px 6px',
+                      borderRadius: '9999px',
+                      lineHeight: '1.4',
+                    }}
+                  >
+                    {warehouseInfo?.kpi?.unread_alerts_count}
+                  </span>
+                )}
               </NavLink>
             )
           })}

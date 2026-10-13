@@ -55,6 +55,8 @@ from app.models.inventory import (
     Warehouse,
     WarehouseBatchStock,
     WarehouseLocation,
+    WarehouseImportJob,
+    WarehouseAlert,
 )
 from app.models.returns import (
     ExchangeItem,

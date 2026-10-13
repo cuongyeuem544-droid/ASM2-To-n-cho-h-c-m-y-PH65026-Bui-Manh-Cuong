@@ -571,6 +571,9 @@ export default function CartPage() {
 
       const data = await res.json();
       if (!res.ok) {
+        if (res.status === 401) {
+          throw new Error("Phiên đăng nhập đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại để tích điểm và lưu lịch sử đơn hàng, hoặc đăng xuất để đặt hàng với tư cách khách vãng lai.");
+        }
         let msg = "Không thể khởi tạo đơn hàng. Vui lòng thử lại.";
         if (typeof data.detail === "string") {
           msg = data.detail;

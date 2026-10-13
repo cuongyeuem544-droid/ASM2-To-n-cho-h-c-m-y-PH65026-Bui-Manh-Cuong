@@ -3,12 +3,18 @@ import random
 from decimal import Decimal
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, or_, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.api.deps import get_current_user, get_optional_current_user, require_roles
+from app.api.deps import (
+    get_current_user,
+    get_optional_current_user,
+    require_admin,
+    require_roles,
+    strict_optional_current_user,
+)
 from app.db.session import get_db
 from app.services.audit import write_audit
 from app.services.pricing_service import PricingService
@@ -314,7 +320,7 @@ def checkout_order(
     payload: CheckoutRequest,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: Optional[User] = Depends(strict_optional_current_user),
 ):
     """
     Tạo đơn hàng mới từ Storefront Web Khách Hàng.
@@ -331,6 +337,13 @@ def checkout_order(
             .where(Order.idempotency_key == clean_idem)
         )
         if existing_order:
+            # Xác minh quyền sở hữu Idempotency Key (chống chiếm đoạt hoặc xung đột đơn tài khoản khác)
+            req_user_id = current_user.id if current_user else None
+            if existing_order.user_id != req_user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Idempotency key xung đột với đơn hàng của tài khoản khác.",
+                )
             return {
                 "status": "SUCCESS",
                 "message": f"Đơn hàng của bạn đã được ghi nhận thành công trước đó (Mã đơn: {existing_order.order_code}).",
@@ -585,6 +598,159 @@ def checkout_order(
     }
 
 
+class GuestOrderLookupRequest(BaseModel):
+    order_code: str = Field(..., min_length=4, max_length=50, description="Mã đơn hàng cần tra cứu")
+    customer_phone: str = Field(..., min_length=9, max_length=20, description="Số điện thoại nhận hàng của đơn")
+
+
+@store_order_router.get("/me")
+def get_my_orders(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=50),
+    limit: Optional[int] = Query(None, ge=1, le=50),
+    offset: Optional[int] = Query(None, ge=0),
+    status: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Lấy lịch sử đơn hàng của người dùng hiện tại (xác thực nghiêm ngặt bằng JWT access token).
+    - Lấy user_id trực tiếp từ access token.
+    - Truy vấn: Order.user_id == current_user.id.
+    - Không nhận user_id, số điện thoại hoặc email từ query parameters để chống IDOR.
+    - Sắp xếp đơn mới nhất trước (created_at.desc(), id.desc()).
+    - Phân trang page/page_size hoặc offset/limit, trả tổng số đơn.
+    - Eager load Order.items để tránh N+1 query.
+    """
+    eff_limit = limit if limit is not None else page_size
+    eff_offset = offset if offset is not None else (page - 1) * eff_limit
+
+    stmt = (
+        select(Order)
+        .options(selectinload(Order.items))
+        .where(Order.user_id == current_user.id)
+    )
+    if status and status.strip() and status.strip().upper() != "ALL":
+        stmt = stmt.where(Order.order_status == status.strip().upper())
+
+    total = db.scalar(
+        select(func.count(Order.id)).where(Order.user_id == current_user.id)
+    ) or 0
+
+    orders = db.scalars(
+        stmt.order_by(desc(Order.id)).offset(eff_offset).limit(eff_limit)
+    ).all()
+
+    items_data = [
+        {
+            "id": o.id,
+            "order_code": o.order_code,
+            "customer_name": o.customer_name,
+            "customer_phone": o.customer_phone,
+            "shipping_address": o.shipping_address,
+            "shipping_city": o.shipping_city,
+            "payment_method": o.payment_method,
+            "payment_status": o.payment_status,
+            "order_status": o.order_status,
+            "total_amount": float(o.total_amount),
+            "shipping_fee": float(o.shipping_fee or 0),
+            "discount_amount": float(o.discount_amount or 0),
+            "voucher_code": o.voucher_code,
+            "items_count": len(o.items),
+            "created_at": o.created_at.isoformat() if o.created_at else None,
+            "items": [
+                {
+                    "product_id": it.product_id,
+                    "product_name": it.product_name,
+                    "product_sku": it.product_sku,
+                    "price": float(it.price),
+                    "quantity": it.quantity,
+                    "subtotal": float(it.subtotal),
+                }
+                for it in o.items
+            ],
+            "fulfillments": _serialize_fulfillments(db, o.id),
+        }
+        for o in orders
+    ]
+
+    return {
+        "items": items_data,
+        "orders": items_data,
+        "total": total,
+        "page": page,
+        "page_size": eff_limit,
+    }
+
+
+@store_order_router.post("/guest-lookup")
+def guest_order_lookup(
+    payload: GuestOrderLookupRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Tra cứu đơn hàng dành cho Khách vãng lai.
+    Yêu cầu đồng thời cả order_code và customer_phone khớp tuyệt đối.
+    Nếu không khớp -> trả 404 (chống brute-force / dò quét).
+    """
+    clean_code = payload.order_code.strip()
+    req_phone_digits = "".join(filter(str.isdigit, payload.customer_phone.strip()))
+
+    order = db.scalar(
+        select(Order)
+        .options(selectinload(Order.items))
+        .where(Order.order_code == clean_code)
+    )
+
+    if not order:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Không tìm thấy đơn hàng phù hợp với thông tin đã cung cấp.",
+        )
+
+    order_phone_digits = "".join(filter(str.isdigit, order.customer_phone or ""))
+    if not req_phone_digits or req_phone_digits != order_phone_digits:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Không tìm thấy đơn hàng phù hợp với thông tin đã cung cấp.",
+        )
+
+    masked_phone = (
+        order.customer_phone[:3] + "****" + order.customer_phone[-3:]
+        if len(order.customer_phone) >= 7
+        else order.customer_phone
+    )
+
+    return {
+        "id": order.id,
+        "order_code": order.order_code,
+        "customer_name": order.customer_name,
+        "customer_phone": masked_phone,
+        "shipping_address": order.shipping_address,
+        "shipping_city": order.shipping_city,
+        "payment_method": order.payment_method,
+        "payment_status": order.payment_status,
+        "order_status": order.order_status,
+        "total_amount": float(order.total_amount),
+        "shipping_fee": float(order.shipping_fee or 0),
+        "discount_amount": float(order.discount_amount or 0),
+        "voucher_code": order.voucher_code,
+        "created_at": order.created_at.isoformat() if order.created_at else None,
+        "items": [
+            {
+                "product_id": it.product_id,
+                "product_name": it.product_name,
+                "product_sku": it.product_sku,
+                "price": float(it.price),
+                "quantity": it.quantity,
+                "subtotal": float(it.subtotal),
+            }
+            for it in order.items
+        ],
+        "fulfillments": _serialize_fulfillments(db, order.id),
+    }
+
+
 @store_order_router.get("/{order_code}")
 def get_order_by_code(
     order_code: str,
@@ -647,17 +813,56 @@ def get_order_by_code(
     }
 
 
-@store_order_router.get("/customer/{phone}")
-def get_customer_orders(phone: str):
+@store_order_router.get("/customer/{phone}", deprecated=True)
+def get_customer_orders(
+    phone: str,
+    current_user: Optional[User] = Depends(get_optional_current_user),
+    db: Session = Depends(get_db),
+):
     """
-    [ĐÃ VÔ HIỆU HÓA - BẢO MẬT PII]
-    Không sử dụng số điện thoại như bằng chứng quyền sở hữu đơn hàng.
-    Vui lòng đăng nhập và sử dụng GET /api/v1/me/orders.
+    [DEPRECATED - BẢO MẬT PII]
+    Endpoint này đã bị ngưng phục vụ công khai để tránh rò rỉ thông tin cá nhân.
+    Chỉ Quản trị viên (ADMIN) mới có quyền truy cập phục vụ hỗ trợ khách hàng.
+    Khách hàng vui lòng sử dụng GET /api/v1/store/orders/me hoặc POST /api/v1/store/orders/guest-lookup.
     """
-    raise HTTPException(
-        status_code=403,
-        detail="Tra cứu đơn hàng bằng số điện thoại đã bị vô hiệu hóa vì lý do bảo mật. Vui lòng đăng nhập và truy cập GET /api/v1/me/orders.",
-    )
+    if not current_user or current_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=403,
+            detail="Tra cứu đơn hàng bằng số điện thoại đã bị vô hiệu hóa vì lý do bảo mật. Vui lòng đăng nhập và truy cập GET /api/v1/store/orders/me.",
+        )
+
+    clean_phone = phone.strip()
+    orders = db.scalars(
+        select(Order)
+        .options(selectinload(Order.items))
+        .where(Order.customer_phone == clean_phone)
+        .order_by(desc(Order.id))
+    ).all()
+    return [
+        {
+            "id": o.id,
+            "order_code": o.order_code,
+            "customer_name": o.customer_name,
+            "customer_phone": o.customer_phone,
+            "shipping_address": o.shipping_address,
+            "payment_method": o.payment_method,
+            "payment_status": o.payment_status,
+            "order_status": o.order_status,
+            "total_amount": float(o.total_amount),
+            "items_count": len(o.items),
+            "created_at": o.created_at.isoformat() if o.created_at else None,
+            "items": [
+                {
+                    "product_name": it.product_name,
+                    "quantity": it.quantity,
+                    "price": float(it.price),
+                    "subtotal": float(it.subtotal),
+                }
+                for it in o.items
+            ],
+        }
+        for o in orders
+    ]
 
 
 # ==========================================

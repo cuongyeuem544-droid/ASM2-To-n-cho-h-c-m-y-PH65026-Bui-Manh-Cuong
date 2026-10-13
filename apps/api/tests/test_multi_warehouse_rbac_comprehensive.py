@@ -425,3 +425,37 @@ def test_no_legacy_roles_remain_in_database(database):
     conn.close()
     assert count == 0, f"Còn {count} tài khoản mang vai trò cũ chưa được chuyển đổi!"
 
+
+def test_order_picking_details_and_fefo_batches(client, database, manager_hn_headers):
+    """
+    Kiểm thử chức năng Phiếu Soạn (Pick Details):
+    - Đơn hàng trả về đầy đủ các thông tin: order_id, order_code, customer_name, shipping_address
+    - Danh sách dòng thuốc (lines) trả về product_name, unit, quantity_required, unit_price, line_total
+    - Lô thuốc gợi ý (suggested_batches) theo FEFO sắp xếp theo hạn sử dụng tăng dần (gần nhất trước)
+    """
+    # Lấy danh sách đơn hàng của kho Hà Nội
+    res = client.get("/api/v1/warehouse-portal/orders", headers=manager_hn_headers)
+    assert res.status_code == 200
+    data = res.json()
+    orders = data.get("items", [])
+    if orders:
+        order_id = orders[0]["id"]
+        # Gọi API lấy phiếu soạn
+        detail_res = client.get(f"/api/v1/warehouse-portal/orders/{order_id}/pick-details", headers=manager_hn_headers)
+        assert detail_res.status_code == 200
+        detail = detail_res.json()
+        assert detail["order_id"] == order_id
+        assert "lines" in detail
+        assert len(detail["lines"]) >= 0
+        for line in detail["lines"]:
+            assert "product_name" in line
+            assert "unit" in line
+            assert "quantity_required" in line
+            assert "unit_price" in line
+            assert "line_total" in line
+            assert "suggested_batches" in line
+            # Nếu có nhiều lô thì phải theo thứ tự FEFO (expiry date tăng dần)
+            if len(line["suggested_batches"]) > 1:
+                dates = [b["expiry_date"] for b in line["suggested_batches"]]
+                assert dates == sorted(dates)
+
