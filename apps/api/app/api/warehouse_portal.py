@@ -2131,8 +2131,8 @@ async def preview_import_file(
         reg_num = r.get("registration_number", "").strip().upper()
         sku_code = r.get("sku_code", "").strip()
         batch_num = r.get("batch_number", "").strip()
-        mfg_date_str = r.get("manufacturing_date", "").strip()
-        exp_date_str = r.get("expiry_date", "").strip()
+        mfg_date_str = r.get("manufacturing_date", "").strip().split(" ")[0].split("T")[0]
+        exp_date_str = r.get("expiry_date", "").strip().split(" ")[0].split("T")[0]
         qty_str = r.get("quantity", "").strip()
         uom_str = r.get("uom", "").strip() or "Hộp"
         cost_str = r.get("unit_cost", "").strip() or "0"
@@ -2162,9 +2162,10 @@ async def preview_import_file(
 
         if not batch_num:
             row_info["errors"].append("Số lô thuốc không được để trống")
-        if batch_num in seen_batches:
+        elif batch_num in seen_batches:
             row_info["warnings"].append(f"Số lô {batch_num} xuất hiện nhiều lần trong file")
-        seen_batches.add(batch_num)
+        if batch_num:
+            seen_batches.add(batch_num)
 
         try:
             qty = int(qty_str)
@@ -2333,8 +2334,8 @@ def commit_import_job(
         if not sku:
             continue
 
-        exp_d = date.fromisoformat(r["expiry_date"])
-        mfg_d = date.fromisoformat(r["manufacturing_date"]) if r.get("manufacturing_date") else None
+        exp_d = date.fromisoformat(r["expiry_date"].split(" ")[0].split("T")[0])
+        mfg_d = date.fromisoformat(r["manufacturing_date"].split(" ")[0].split("T")[0]) if r.get("manufacturing_date") else None
         qty = int(r["quantity"])
         unit_cost = Decimal(str(r["unit_cost"]))
         line_total = Decimal(qty) * unit_cost

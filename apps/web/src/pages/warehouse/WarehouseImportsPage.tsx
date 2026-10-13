@@ -13,7 +13,7 @@ import {
   FileCheck,
   RefreshCw,
 } from 'lucide-react'
-import { api } from '../../services/api'
+import { api, tokenStore, API_URL } from '../../services/api'
 import { WarehouseImportPreview, WarehouseImportHistoryItem } from '../../types'
 
 export function WarehouseImportsPage() {
@@ -49,12 +49,20 @@ export function WarehouseImportsPage() {
 
   const handleDownloadTemplate = async () => {
     try {
-      const response = await fetch('/api/v1/warehouse-portal/imports/template', {
+      const token = tokenStore.get() || ''
+      const response = await fetch(`${API_URL}/warehouse-portal/imports/template`, {
         headers: {
-          Authorization: `Bearer ${localStorage.getItem('access_token') || ''}`,
+          Authorization: `Bearer ${token}`,
         },
       })
-      if (!response.ok) throw new Error('Không thể tải file mẫu')
+      if (!response.ok) {
+        let msg = 'Không thể tải file mẫu'
+        try {
+          const errData = await response.json()
+          msg = errData.detail || msg
+        } catch {}
+        throw new Error(msg)
+      }
       const blob = await response.blob()
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -89,18 +97,10 @@ export function WarehouseImportsPage() {
     formData.append('file', file)
 
     try {
-      const response = await fetch('/api/v1/warehouse-portal/imports/preview', {
+      const data = await api<WarehouseImportPreview>('/warehouse-portal/imports/preview', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('access_token') || ''}`,
-        },
         body: formData,
       })
-
-      const data = await response.json()
-      if (!response.ok) {
-        throw new Error(data.detail || 'Không thể đọc và kiểm tra file')
-      }
 
       setPreviewData(data)
       setStep(2)

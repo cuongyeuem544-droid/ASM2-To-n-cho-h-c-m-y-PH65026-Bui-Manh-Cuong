@@ -11,15 +11,20 @@ export class ApiError extends Error {
 }
 
 export const tokenStore = {
-  get: () => localStorage.getItem('pharmatrust_access_token'),
-  getRefresh: () => localStorage.getItem('pharmatrust_refresh_token'),
+  get: () => localStorage.getItem('pharmatrust_access_token') || localStorage.getItem('access_token'),
+  getRefresh: () => localStorage.getItem('pharmatrust_refresh_token') || localStorage.getItem('refresh_token'),
   set: (access: string, refresh: string) => {
     localStorage.setItem('pharmatrust_access_token', access)
     localStorage.setItem('pharmatrust_refresh_token', refresh)
+    // Synchronize legacy key for backwards compatibility
+    localStorage.setItem('access_token', access)
+    localStorage.setItem('refresh_token', refresh)
   },
   clear: () => {
     localStorage.removeItem('pharmatrust_access_token')
     localStorage.removeItem('pharmatrust_refresh_token')
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('refresh_token')
   },
 }
 

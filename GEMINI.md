@@ -108,6 +108,29 @@ Tài liệu này được hệ thống tự động ghi nhớ và tuân thủ tu
   4. Frontend phải hiển thị 4 trạng thái giao diện rõ ràng (`loading`, `success-empty`, `success-data`, `error` kèm nút "Thử lại"). Tuyệt đối không nuốt lỗi mạng/401/500 thành mảng rỗng `[]`.
   5. Đối với đơn hàng cũ chưa có `user_id`, cung cấp script `link_legacy_orders.py` với cờ an toàn `--dry-run` trước khi `--commit`.
 
+### 🔴 Lỗi 9: Xung đột vòng đời Leaflet Map khi unmount/zoom transition (`_leaflet_pos` is undefined)
+- **Triệu chứng**: Khi vào trang `/cart` (Giỏ hàng & Thanh toán), trình duyệt báo `Unhandled Runtime Error: TypeError: Cannot read properties of undefined (reading '_leaflet_pos')` tại `getPosition -> _getMapPanePos -> _getNewPixelOrigin -> _move -> _onZoomTransitionEnd`.
+- **Nguyên nhân**:
+  1. Khi bản đồ Leaflet đang thực hiện zoom/pan animation (kích hoạt bởi `fitBounds`, `panTo`, hoặc đổi địa chỉ), Leaflet tạo một timer ngầm `setTimeout(this._onZoomTransitionEnd, 250)`.
+  2. Khi component unmount (hoặc người dùng đổi form địa chỉ/chọn địa chỉ đã lưu), React chạy cleanup `map.remove()`. Phương thức này xóa DOM và hủy `this._mapPane` (`delete this._mapPane`).
+  3. Leaflet không tự hủy timer `setTimeout` trong `map.remove()`. Khi timer kết thúc, `_onZoomTransitionEnd` gọi `_getMapPanePos()` truy cập `getPosition(this._mapPane)` (lúc này là `undefined`), gây crash.
+  4. Hai `useEffect` trong component bản đồ chạy song song: một effect gọi `panTo({ animate: true })`, một effect gọi `fitBounds()`, tạo ra các animation đè lên nhau.
+- **Quy tắc phòng ngừa**:
+  1. Luôn phòng thủ vòng đời bản đồ Leaflet bằng monkey-patch an toàn trên map instance: `_getMapPanePos` trả về `Point(0, 0)` và `_onZoomTransitionEnd` return sớm nếu `!this._mapPane`.
+  2. Trong hàm cleanup của `useEffect`, luôn thiết lập `(map as any)._animatingZoom = false`, gọi `map.stop()`, `map.off()` trước khi gọi `map.remove()`.
+  3. Hợp nhất luồng điều phối viewport, không gọi các animation zoom/pan xung đột trong các `useEffect` riêng biệt. Dùng `{ animate: false }` khi cập nhật viewport phản ứng tự động theo props.
+
+### 🔴 Lỗi 10: Lỗi 401 "Bạn chưa đăng nhập" khi tải file nhập kho (Warehouse Imports) do lệch key token
+- **Triệu chứng**: Người dùng đã đăng nhập tài khoản Quản lý kho, nhưng khi chọn file `.xlsx`/`.csv` và bấm "Kiểm Tra Dữ Liệu & Xem Trước" thì hiển thị khung cảnh báo đỏ "Bạn chưa đăng nhập".
+- **Nguyên nhân**:
+  1. Frontend toàn hệ thống lưu JWT token dưới key `pharmatrust_access_token` (quản lý bởi `tokenStore` trong `services/api.ts`).
+  2. Trang `WarehouseImportsPage.tsx` khi gọi upload preview (`/warehouse-portal/imports/preview`) và tải template lại dùng hàm raw `fetch` tự viết và đọc sai key `localStorage.getItem('access_token')`. Key này trả về `null` dẫn đến header `Authorization: Bearer ` bị rỗng.
+  3. Backend FastAPI kiểm tra token bị rỗng nên ném ngoại lệ HTTP 401 Unauthorized với thông điệp `"Bạn chưa đăng nhập"`.
+- **Quy tắc phòng ngừa**:
+  1. Tuyệt đối không dùng raw `fetch` tự chèn header Authorization phân tán ở từng trang. Luôn dùng hàm API client tập trung `api<T>()` đã tích hợp sẵn tự động chèn token, retry và xử lý lỗi.
+  2. Bổ sung cơ chế fallback hai chiều trong `tokenStore`: đọc cả `pharmatrust_access_token` lẫn `access_token` để tương thích ngược 100%.
+  3. Khi cần tải file blob (như file mẫu), đọc token thông qua `tokenStore.get()` và dùng biến URL gốc `API_URL` thay vì relative path cứng.
+
 ---
 
 ## 3. CHECKLIST KIỂM TRA MỖI KHI XỬ LÝ LỖI
