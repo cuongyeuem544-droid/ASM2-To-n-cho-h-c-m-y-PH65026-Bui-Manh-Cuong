@@ -131,6 +131,16 @@ Tài liệu này được hệ thống tự động ghi nhớ và tuân thủ tu
   2. Bổ sung cơ chế fallback hai chiều trong `tokenStore`: đọc cả `pharmatrust_access_token` lẫn `access_token` để tương thích ngược 100%.
   3. Khi cần tải file blob (như file mẫu), đọc token thông qua `tokenStore.get()` và dùng biến URL gốc `API_URL` thay vì relative path cứng.
 
+### 🔴 Lỗi 11: Lỗi runtime ErrorBoundary "Cannot read properties of undefined (reading 'toLocaleString')" do thiếu bọc phòng thủ số tiền/số lượng
+- **Triệu chứng**: Giao diện React bị crash, bung màn hình ErrorBoundary: `"Đã xảy ra sự cố hiển thị - Trang vừa gặp lỗi hiển thị dữ liệu tạm thời..."` với lỗi chi tiết `Cannot read properties of undefined (reading 'toLocaleString')`. Xảy ra khi mở modal chi tiết kho, xem đơn hàng, xem ca hoàn trả hoặc chuyển tab.
+- **Nguyên nhân**:
+  1. Frontend gọi trực tiếp `.toLocaleString('vi-VN')` trên các trường số liệu trả về từ API (như `kpi.pending_refund_amount`, `rf.amount`, `it.unit_price`, `it.subtotal`, `selectedCase.refund_info.estimated_refund_amount`, v.v.).
+  2. Khi API backend trả về `null` hoặc `undefined` (do bản ghi chưa có dữ liệu hoàn tiền, hoặc khác biệt schema như `proposed_refund` vs `refund_info`), JavaScript quăng ngoại lệ `TypeError` làm crash toàn bộ cây component React bên trong `ErrorBoundary`.
+- **Quy tắc phòng ngừa**:
+  1. Tuyệt đối không gọi `.toLocaleString()` trần trên bất kỳ biến nào có thể là `undefined` hoặc `null`. Luôn bọc giá trị mặc định bằng nullish coalescing: `(val ?? 0).toLocaleString('vi-VN')` hoặc `(obj?.field ?? 0).toLocaleString('vi-VN')`.
+  2. Tại Backend API, luôn serialize đầy đủ các trường tính toán (`subtotal`, `unit_price`, `estimated_refund_amount`) và cung cấp alias tương thích (`refund_info` song song với `proposed_refund`).
+  3. Kiểm tra toàn diện tất cả các trang quản lý và build kiểm thử `npm run build` trước khi nghiệm thu.
+
 ---
 
 ## 3. CHECKLIST KIỂM TRA MỖI KHI XỬ LÝ LỖI

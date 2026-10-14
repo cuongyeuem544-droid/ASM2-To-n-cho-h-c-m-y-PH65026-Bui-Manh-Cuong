@@ -238,7 +238,7 @@ export function ReceiptsPage() {
                     </span>
                   </td>
                   <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 700, color: '#0f172a' }}>
-                    {rec.total_amount.toLocaleString('vi-VN')} đ
+                    {(rec.total_amount ?? 0).toLocaleString('vi-VN')} đ
                   </td>
                   <td style={{ padding: '12px 14px', color: '#64748b' }}>
                     {rec.received_date?.slice(0, 16).replace('T', ' ')}
@@ -569,7 +569,7 @@ export function ReceiptsPage() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', background: '#f8fafc', padding: '12px', borderRadius: '10px', marginBottom: '16px' }}>
               <div>Kho tiếp nhận: <strong>{viewingReceipt.warehouse_name}</strong></div>
               <div>Nhà cung cấp: <strong>{viewingReceipt.supplier_name}</strong></div>
-              <div>Tổng tiền hàng: <strong>{viewingReceipt.total_amount.toLocaleString('vi-VN')} đ</strong></div>
+              <div>Tổng tiền hàng: <strong>{(viewingReceipt.total_amount ?? 0).toLocaleString('vi-VN')} đ</strong></div>
               <div>Thời gian: <strong>{viewingReceipt.received_date?.slice(0, 16)}</strong></div>
             </div>
 
@@ -591,8 +591,8 @@ export function ReceiptsPage() {
                       <td style={{ padding: '8px', fontFamily: 'monospace', fontWeight: 700 }}>{it.batch_number}</td>
                       <td style={{ padding: '8px' }}>{it.expiry_date}</td>
                       <td style={{ padding: '8px', textAlign: 'right', fontWeight: 600 }}>{it.quantity}</td>
-                      <td style={{ padding: '8px', textAlign: 'right' }}>{it.purchase_unit_price.toLocaleString()} đ</td>
-                      <td style={{ padding: '8px', textAlign: 'right', fontWeight: 700 }}>{it.line_total.toLocaleString()} đ</td>
+                      <td style={{ padding: '8px', textAlign: 'right' }}>{(it.purchase_unit_price ?? 0).toLocaleString()} đ</td>
+                      <td style={{ padding: '8px', textAlign: 'right', fontWeight: 700 }}>{(it.line_total ?? 0).toLocaleString()} đ</td>
                     </tr>
                   ))}
                 </tbody>

@@ -339,12 +339,16 @@ class OrderFulfillment(Base):
     carrier_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tracking_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
     shipping_fee: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.0"))
+    assigned_staff_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    picked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    packed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     shipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     items: Mapped[list["FulfillmentItem"]] = relationship(back_populates="fulfillment", cascade="all, delete-orphan")
     warehouse: Mapped[Warehouse] = relationship()
+    assigned_staff: Mapped[Optional["User"]] = relationship("User", foreign_keys=[assigned_staff_id])
 
 
 class FulfillmentItem(Base):

@@ -216,7 +216,7 @@ export function WarehouseReceiptsPage() {
                     </td>
 
                     <td style={{ padding: '14px 18px', fontWeight: 800, color: '#0f172a' }}>
-                      {r.total_amount.toLocaleString('vi-VN')} đ
+                      {(r.total_amount ?? 0).toLocaleString('vi-VN')} đ
                     </td>
 
                     <td style={{ padding: '14px 18px' }}>

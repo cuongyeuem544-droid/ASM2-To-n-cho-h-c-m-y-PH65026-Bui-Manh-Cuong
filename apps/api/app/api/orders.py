@@ -866,8 +866,78 @@ def get_customer_orders(
 
 
 # ==========================================
-# 2. ADMIN QUẢN LÝ ĐƠN HÀNG
+# 2. ADMIN QUẢN LÝ ĐƠN HÀNG TOÀN HỆ THỐNG
 # ==========================================
+@admin_order_router.get("/overview")
+def get_admin_orders_overview(
+    time_range: str = Query("today", description="today, 7d, 30d, custom, all"),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    province: Optional[str] = Query(None),
+    warehouse_id: Optional[int] = Query(None),
+    status: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_roles(UserRole.ADMIN)),
+):
+    """
+    Dashboard KPI Đơn hàng Toàn Hệ thống cho Admin Tổng:
+    - Đếm Order duy nhất (Số đơn khách hàng).
+    - Đếm Fulfillment (Lượt xử lý kho).
+    - Không đếm trùng lặp.
+    """
+    from app.services.warehouse_order_metrics_service import WarehouseOrderMetricsService
+    return WarehouseOrderMetricsService.get_system_orders_overview(
+        db=db,
+        time_range=time_range,
+        start_date=start_date,
+        end_date=end_date,
+        province=province,
+        warehouse_id=warehouse_id,
+        status_filter=status,
+    )
+
+
+@admin_order_router.get("/by-warehouse")
+def get_admin_orders_by_warehouse(
+    time_range: str = Query("today", description="today, 7d, 30d, custom, all"),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    province: Optional[str] = Query(None),
+    warehouse_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_roles(UserRole.ADMIN)),
+):
+    """
+    Bảng tổng quan theo từng kho: Mã kho, Quản lý kho, Tổng fulfillments,
+    tiến độ xử lý (Mới, Lấy hàng, Đóng gói, Giao, Hủy), đơn hoàn, SLA, hàng cần xuất.
+    """
+    from app.services.warehouse_order_metrics_service import WarehouseOrderMetricsService
+    return WarehouseOrderMetricsService.get_warehouses_overview_table(
+        db=db,
+        time_range=time_range,
+        start_date=start_date,
+        end_date=end_date,
+        province=province,
+        warehouse_id=warehouse_id,
+    )
+
+
+@admin_order_router.get("/warehouses/{warehouse_id}")
+def get_admin_warehouse_details(
+    warehouse_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_roles(UserRole.ADMIN)),
+):
+    """
+    Chi tiết một kho cụ thể: Đơn hàng, Ca hoàn, Hoàn tiền, Tồn kho, Hiệu suất nhân viên, Nhật ký.
+    """
+    from app.services.warehouse_order_metrics_service import WarehouseOrderMetricsService
+    return WarehouseOrderMetricsService.get_warehouse_details_tab(
+        db=db,
+        warehouse_id=warehouse_id,
+    )
+
+
 @admin_order_router.get("")
 def list_orders(
     status: Optional[str] = None,

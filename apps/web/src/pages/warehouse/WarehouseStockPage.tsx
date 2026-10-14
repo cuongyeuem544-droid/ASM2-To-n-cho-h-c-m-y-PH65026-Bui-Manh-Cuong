@@ -239,15 +239,15 @@ export function WarehouseStockPage() {
                     </td>
 
                     <td style={{ padding: '14px 18px', fontWeight: 800, color: '#0f172a' }}>
-                      {item.total_on_hand.toLocaleString('vi-VN')}
+                      {(item.total_on_hand ?? 0).toLocaleString('vi-VN')}
                     </td>
 
                     <td style={{ padding: '14px 18px', fontWeight: 700, color: '#d97706' }}>
-                      {item.total_reserved.toLocaleString('vi-VN')}
+                      {(item.total_reserved ?? 0).toLocaleString('vi-VN')}
                     </td>
 
                     <td style={{ padding: '14px 18px', fontWeight: 900, color: '#047857', fontSize: '14px' }}>
-                      {item.total_available.toLocaleString('vi-VN')}
+                      {(item.total_available ?? 0).toLocaleString('vi-VN')}
                     </td>
                   </tr>
                 ))

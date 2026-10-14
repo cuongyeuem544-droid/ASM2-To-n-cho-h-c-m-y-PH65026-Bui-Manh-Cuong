@@ -350,7 +350,7 @@ export function WarehouseOrdersPage() {
                       </td>
 
                       <td style={{ padding: '14px 18px', fontWeight: 800, color: '#0f172a' }}>
-                        {o.total_amount.toLocaleString('vi-VN')} đ
+                        {(o.total_amount ?? 0).toLocaleString('vi-VN')} đ
                       </td>
 
                       <td style={{ padding: '14px 18px' }}>

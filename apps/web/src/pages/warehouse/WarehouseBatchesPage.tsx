@@ -298,11 +298,11 @@ export function WarehouseBatchesPage() {
                       </td>
 
                       <td style={{ padding: '14px 18px', fontWeight: 800, color: '#0f172a' }}>
-                        {b.quantity_on_hand.toLocaleString('vi-VN')}
+                        {(b.quantity_on_hand ?? 0).toLocaleString('vi-VN')}
                       </td>
 
                       <td style={{ padding: '14px 18px', fontWeight: 900, color: '#047857' }}>
-                        {b.quantity_available.toLocaleString('vi-VN')}
+                        {(b.quantity_available ?? 0).toLocaleString('vi-VN')}
                       </td>
 
                       <td style={{ padding: '14px 18px', textAlign: 'center' }}>

@@ -357,13 +357,13 @@ export function WarehousesPage() {
                 <div>
                   <div style={{ fontSize: '11px', color: '#64748b' }}>Tổng tồn thực tế (On-hand)</div>
                   <div style={{ fontSize: '16px', fontWeight: 800, color: '#0f172a' }}>
-                    {wh.total_on_hand.toLocaleString()} <span style={{ fontSize: '11px', fontWeight: 500 }}>đơn vị</span>
+                    {(wh.total_on_hand ?? 0).toLocaleString()} <span style={{ fontSize: '11px', fontWeight: 500 }}>đơn vị</span>
                   </div>
                 </div>
                 <div>
                   <div style={{ fontSize: '11px', color: '#64748b' }}>Tồn khả dụng bán (Available)</div>
                   <div style={{ fontSize: '16px', fontWeight: 800, color: '#16a34a' }}>
-                    {wh.total_available.toLocaleString()} <span style={{ fontSize: '11px', fontWeight: 500 }}>đơn vị</span>
+                    {(wh.total_available ?? 0).toLocaleString()} <span style={{ fontSize: '11px', fontWeight: 500 }}>đơn vị</span>
                   </div>
                 </div>
               </div>
@@ -727,7 +727,7 @@ export function WarehousesPage() {
 
                     <div style={{ background: '#f0fdf4', padding: '12px 14px', borderRadius: '10px', border: '1px solid #bbf7d0' }}>
                       <span style={{ fontSize: '11.5px', color: '#166534', fontWeight: 700, display: 'block' }}>TỒN THỰC TẾ (ON-HAND)</span>
-                      <strong style={{ fontSize: '22px', color: '#16a34a' }}>{detailData.stats.total_on_hand.toLocaleString('vi-VN')}</strong>
+                      <strong style={{ fontSize: '22px', color: '#16a34a' }}>{(detailData.stats?.total_on_hand ?? 0).toLocaleString('vi-VN')}</strong>
                       <span style={{ fontSize: '11px', color: '#22c55e', display: 'block', marginTop: '2px' }}>đơn vị thuốc</span>
                     </div>
 
@@ -991,10 +991,10 @@ export function WarehousesPage() {
                                 </code>
                               </td>
                               <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 700, color: '#0f172a' }}>
-                                {st.quantity_on_hand.toLocaleString('vi-VN')} {st.uom}
+                                {(st.quantity_on_hand ?? 0).toLocaleString('vi-VN')} {st.uom}
                               </td>
                               <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 700, color: '#16a34a' }}>
-                                {st.quantity_available.toLocaleString('vi-VN')}
+                                {(st.quantity_available ?? 0).toLocaleString('vi-VN')}
                               </td>
                               <td style={{ padding: '8px 12px', textAlign: 'center' }}>
                                 <span

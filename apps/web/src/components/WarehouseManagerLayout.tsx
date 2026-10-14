@@ -19,6 +19,7 @@ import {
   ExternalLink,
   FileSpreadsheet,
   AlertTriangle,
+  RotateCcw,
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
@@ -50,6 +51,7 @@ const navItems = [
   { to: '/warehouse/overview', label: 'Tổng quan kho', icon: LayoutDashboard },
   { to: '/warehouse/products', label: 'Thuốc trong kho', icon: Boxes },
   { to: '/warehouse/orders', label: 'Đơn hàng kho', icon: ShoppingBag },
+  { to: '/warehouse/returns', label: 'Đổi trả & Hoàn tiền', icon: RotateCcw },
   { to: '/warehouse/imports', label: 'Nhập file tồn kho', icon: FileSpreadsheet },
   { to: '/warehouse/receipts', label: 'Nhập kho (GSP)', icon: ArrowDownToLine },
   { to: '/warehouse/batches', label: 'Lô thuốc & HSD', icon: Layers },

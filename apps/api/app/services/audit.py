@@ -13,7 +13,14 @@ def write_audit(
     request: Request | None = None,
     before: dict | None = None,
     after: dict | None = None,
+    details: str | None = None,
 ) -> AuditLog:
+    if details:
+        if after is None:
+            after = {"details": details}
+        elif isinstance(after, dict):
+            after["details"] = details
+
     log = AuditLog(
         user_id=user.id if user else None,
         action=action,

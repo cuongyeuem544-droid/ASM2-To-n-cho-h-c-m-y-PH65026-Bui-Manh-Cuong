@@ -52,6 +52,9 @@ const WarehouseAlertsPage = lazy(() =>
 const WarehouseOrdersPage = lazy(() =>
   import('./pages/warehouse/WarehouseOrdersPage').then(module => ({ default: module.WarehouseOrdersPage }))
 )
+const WarehouseReturnsPage = lazy(() =>
+  import('./pages/warehouse/WarehouseReturnsPage').then(module => ({ default: module.WarehouseReturnsPage }))
+)
 const WarehouseReceiptsPage = lazy(() =>
   import('./pages/warehouse/WarehouseReceiptsPage').then(module => ({ default: module.WarehouseReceiptsPage }))
 )
@@ -101,6 +104,9 @@ const StaffStockPage = lazy(() =>
 )
 const StaffHistoryPage = lazy(() =>
   import('./pages/staff/StaffHistoryPage').then(module => ({ default: module.StaffHistoryPage }))
+)
+const StaffReturnsPage = lazy(() =>
+  import('./pages/staff/StaffReturnsPage').then(module => ({ default: module.StaffReturnsPage }))
 )
 
 function ProtectedAdminLayout() {
@@ -185,6 +191,7 @@ export default function App() {
             <Route path="overview" element={<WarehouseOverviewPage />} />
             <Route path="products" element={<WarehouseProductsPage />} />
             <Route path="orders" element={<WarehouseOrdersPage />} />
+            <Route path="returns" element={<WarehouseReturnsPage />} />
             <Route path="imports" element={<WarehouseImportsPage />} />
             <Route path="receipts" element={<WarehouseReceiptsPage />} />
             <Route path="batches" element={<WarehouseBatchesPage />} />
@@ -207,6 +214,7 @@ export default function App() {
             <Route path="transfers" element={<StaffTransfersPage />} />
             <Route path="stock" element={<StaffStockPage />} />
             <Route path="history" element={<StaffHistoryPage />} />
+            <Route path="returns" element={<StaffReturnsPage />} />
           </Route>
 
           <Route path="*" element={<NotFoundPage />} />

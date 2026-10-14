@@ -14,7 +14,7 @@ API Quản trị Quy trình Đổi / Trả Hàng (Admin & Staff After-Sales Mana
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, List, Optional
 
@@ -26,22 +26,39 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user, require_roles
 from app.db.session import get_db
 from app.models.entities import Order, User
+from app.models.inventory import UserWarehouseMembership, Warehouse
 from app.models.enums import UserRole
 from app.models.returns import (
     ItemCondition,
+    Refund,
+    RefundStatus,
     RestockDestination,
+    ReturnInspection,
     ReturnItem,
     ReturnRequest,
     ReturnRequestType,
     ReturnStatus,
+    WarehouseReturnCase,
 )
 from app.services.refund_calculation_service import RefundCalculationService
 from app.services.return_service import ReturnService
+from app.services.warehouse_return_service import WarehouseReturnService
 
 router = APIRouter(prefix="/admin/returns", tags=["Admin Returns Management"])
 
 
 # --- Schemas ---
+
+class AdminOverridePayload(BaseModel):
+    new_status: str
+    override_reason: str = Field(..., min_length=5, description="Lý do can thiệp khẩn cấp bắt buộc")
+    notes: Optional[str] = None
+
+
+class AdminReassignPayload(BaseModel):
+    new_warehouse_id: int
+    case_code: Optional[str] = None
+    reason: str = Field(..., min_length=5, description="Lý do điều chuyển kho bắt buộc")
 
 class ReviewPayload(BaseModel):
     status: str = Field(..., description="REVIEWING hoặc NEEDS_CUSTOMER_INFO")
@@ -80,6 +97,175 @@ class InspectionPayload(BaseModel):
 
 
 # --- Endpoints ---
+
+@router.get("/overview")
+def get_admin_returns_overview(
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_roles(UserRole.ADMIN)),
+):
+    """
+    Dashboard đơn hoàn toàn hệ thống:
+    - Tổng yêu cầu hoàn
+    - Chờ kho tiếp nhận, Đang vận chuyển, Đang kiểm tra, Chờ quản lý duyệt, Đã duyệt, Từ chối,
+      Hoàn tiền thành công/thất bại, Quá hạn SLA, Tổng tiền hoàn.
+    """
+    now = datetime.now(UTC)
+    all_cases = db.scalars(select(WarehouseReturnCase)).all()
+    all_requests = db.scalars(select(ReturnRequest)).all()
+
+    total_returns = len(all_requests)
+    waiting_receive = 0
+    in_transit = 0
+    inspecting = 0
+    waiting_approval = 0
+    approved = 0
+    rejected = 0
+    refund_pending = 0
+    refund_processing = 0
+    refund_succeeded = 0
+    refund_failed = 0
+    overdue = 0
+
+    for c in all_cases:
+        st = c.status
+        if st in [ReturnStatus.REQUESTED.value, ReturnStatus.ASSIGNED_TO_WAREHOUSE.value, ReturnStatus.WAITING_CUSTOMER_SHIPMENT.value]:
+            waiting_receive += 1
+        elif st in [ReturnStatus.IN_TRANSIT.value, ReturnStatus.RETURN_IN_TRANSIT.value]:
+            in_transit += 1
+        elif st in [ReturnStatus.RECEIVED.value, ReturnStatus.INSPECTING.value]:
+            inspecting += 1
+        elif st == ReturnStatus.WAITING_MANAGER_APPROVAL.value:
+            waiting_approval += 1
+        elif st == ReturnStatus.APPROVED.value:
+            approved += 1
+        elif st == ReturnStatus.REJECTED.value:
+            rejected += 1
+        elif st == ReturnStatus.REFUND_PENDING.value:
+            refund_pending += 1
+        elif st == ReturnStatus.REFUND_PROCESSING.value:
+            refund_processing += 1
+        elif st in [ReturnStatus.REFUNDED.value, ReturnStatus.RESTOCKED.value, ReturnStatus.QUARANTINED.value, ReturnStatus.DISPOSED.value, ReturnStatus.CLOSED.value]:
+            refund_succeeded += 1
+        elif st == ReturnStatus.REFUND_FAILED.value:
+            refund_failed += 1
+
+        if st not in [ReturnStatus.CLOSED.value, ReturnStatus.REJECTED.value] and c.created_at:
+            c_tz = c.created_at.replace(tzinfo=UTC if c.created_at.tzinfo is None else c.created_at.tzinfo)
+            if (now - c_tz).total_seconds() > 172800:
+                overdue += 1
+
+    total_refunded_amount = db.scalar(
+        select(func.sum(Refund.amount)).where(Refund.status == RefundStatus.SUCCEEDED.value)
+    ) or Decimal("0.0")
+
+    total_pending_refund_amount = db.scalar(
+        select(func.sum(Refund.amount)).where(
+            Refund.status.in_([RefundStatus.PENDING.value, RefundStatus.APPROVED.value, RefundStatus.PROCESSING.value])
+        )
+    ) or Decimal("0.0")
+
+    return {
+        "total_returns": total_returns,
+        "waiting_warehouse_receive": waiting_receive,
+        "in_transit": in_transit,
+        "inspecting": inspecting,
+        "waiting_manager_approval": waiting_approval,
+        "approved": approved,
+        "rejected": rejected,
+        "refund_pending": refund_pending,
+        "refund_processing": refund_processing,
+        "refund_succeeded": refund_succeeded,
+        "refund_failed": refund_failed,
+        "overdue": overdue,
+        "total_refunded_amount": float(total_refunded_amount),
+        "total_pending_refund_amount": float(total_pending_refund_amount),
+    }
+
+
+@router.get("/by-warehouse")
+def get_admin_returns_by_warehouse(
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_roles(UserRole.ADMIN)),
+):
+    """
+    Bảng theo dõi ca hoàn theo từng kho:
+    - Tên kho, Quản lý kho, Tổng đơn hoàn, Đang kiểm tra, Chờ duyệt, Đã duyệt, Đã từ chối,
+      Hoàn thành, Hoàn thất bại, Số tiền đã hoàn, Thời gian xử lý TB, Đơn quá SLA.
+    """
+    now = datetime.now(UTC)
+    warehouses = db.scalars(select(Warehouse).order_by(Warehouse.id.asc())).all()
+
+    result = []
+    for wh in warehouses:
+        cases = db.scalars(
+            select(WarehouseReturnCase).where(WarehouseReturnCase.warehouse_id == wh.id)
+        ).all()
+
+        total_cases = len(cases)
+        inspecting = 0
+        waiting_approval = 0
+        approved = 0
+        rejected = 0
+        completed = 0
+        failed = 0
+        overdue_sla = 0
+        total_time_seconds = 0
+        completed_count = 0
+
+        for c in cases:
+            st = c.status
+            if st in [ReturnStatus.RECEIVED.value, ReturnStatus.INSPECTING.value]:
+                inspecting += 1
+            elif st == ReturnStatus.WAITING_MANAGER_APPROVAL.value:
+                waiting_approval += 1
+            elif st in [ReturnStatus.APPROVED.value, ReturnStatus.REFUND_PENDING.value, ReturnStatus.REFUND_PROCESSING.value]:
+                approved += 1
+            elif st == ReturnStatus.REJECTED.value:
+                rejected += 1
+            elif st in [ReturnStatus.REFUNDED.value, ReturnStatus.RESTOCKED.value, ReturnStatus.QUARANTINED.value, ReturnStatus.DISPOSED.value, ReturnStatus.CLOSED.value]:
+                completed += 1
+                if c.created_at and (c.closed_at or c.refund_processed_at):
+                    fin = c.closed_at or c.refund_processed_at
+                    c_tz = c.created_at.replace(tzinfo=UTC if c.created_at.tzinfo is None else c.created_at.tzinfo)
+                    f_tz = fin.replace(tzinfo=UTC if fin.tzinfo is None else fin.tzinfo)
+                    total_time_seconds += (f_tz - c_tz).total_seconds()
+                    completed_count += 1
+            elif st == ReturnStatus.REFUND_FAILED.value:
+                failed += 1
+
+            if st not in [ReturnStatus.CLOSED.value, ReturnStatus.REJECTED.value] and c.created_at:
+                c_tz = c.created_at.replace(tzinfo=UTC if c.created_at.tzinfo is None else c.created_at.tzinfo)
+                if (now - c_tz).total_seconds() > 172800:
+                    overdue_sla += 1
+
+        avg_hours = round(total_time_seconds / (completed_count * 3600), 1) if completed_count > 0 else 0.0
+
+        refunded_amount = db.scalar(
+            select(func.sum(Refund.amount)).where(
+                Refund.warehouse_id == wh.id,
+                Refund.status == RefundStatus.SUCCEEDED.value,
+            )
+        ) or Decimal("0.0")
+
+        result.append({
+            "warehouse_id": wh.id,
+            "warehouse_code": wh.code,
+            "warehouse_name": wh.name,
+            "province": wh.province or "N/A",
+            "total_cases": total_cases,
+            "inspecting": inspecting,
+            "waiting_approval": waiting_approval,
+            "approved": approved,
+            "rejected": rejected,
+            "completed": completed,
+            "failed": failed,
+            "refunded_amount": float(refunded_amount),
+            "avg_resolution_hours": avg_hours,
+            "overdue_sla": overdue_sla,
+        })
+
+    return result
+
 
 @router.get("")
 def list_admin_returns(
@@ -178,6 +364,8 @@ def get_admin_return_detail(
             "accepted_quantity": it.accepted_quantity,
             "rejected_quantity": it.rejected_quantity,
             "restock_quantity": it.restock_quantity,
+            "unit_price": float(it.unit_price_at_purchase or Decimal("0.0")),
+            "subtotal": float(it.net_paid_amount or ((it.unit_price_at_purchase or Decimal("0.0")) * it.requested_quantity)),
             "inspected_condition": it.inspected_condition,
             "restock_destination": it.restock_destination,
             "inspection_notes": it.inspection_notes,
@@ -258,6 +446,60 @@ def get_admin_return_detail(
         reason_code=ret.reason_code,
     )
 
+    # Ca hoàn chi nhánh kho
+    cases_data = [
+        {
+            "id": c.id,
+            "case_code": c.case_code,
+            "warehouse_id": c.warehouse_id,
+            "warehouse_code": c.warehouse.code if c.warehouse else "",
+            "warehouse_name": c.warehouse.name if c.warehouse else "",
+            "status": c.status,
+            "carrier_name": c.carrier_name,
+            "tracking_code": c.tracking_code,
+            "assigned_staff": c.assigned_staff.full_name if c.assigned_staff else None,
+            "manager_note": c.manager_note,
+            "rejection_reason": c.rejection_reason,
+            "disposition": c.disposition,
+            "disposition_note": c.disposition_note,
+            "inspected_at": c.inspected_at.isoformat() if c.inspected_at else None,
+            "approved_at": c.approved_at.isoformat() if c.approved_at else None,
+            "refund_processed_at": c.refund_processed_at.isoformat() if c.refund_processed_at else None,
+            "items": [
+                {
+                    "id": it.id,
+                    "product_id": it.product_id,
+                    "product_name": it.product_name,
+                    "requested_quantity": it.requested_quantity,
+                    "accepted_quantity": it.accepted_quantity,
+                    "rejected_quantity": it.rejected_quantity,
+                    "approved_refund_amount": float(it.approved_refund_amount),
+                    "condition": it.condition,
+                }
+                for it in c.items
+            ],
+            "inspections": [
+                {
+                    "id": insp.id,
+                    "return_item_id": insp.return_item_id,
+                    "received_quantity": insp.received_quantity,
+                    "accepted_quantity": insp.accepted_quantity,
+                    "rejected_quantity": insp.rejected_quantity,
+                    "package_condition": insp.package_condition,
+                    "seal_intact": insp.seal_intact,
+                    "batch_matched": insp.batch_matched,
+                    "expiry_matched": insp.expiry_matched,
+                    "suggested_action": insp.suggested_action,
+                    "inspector_name": insp.inspector.full_name if insp.inspector else None,
+                    "inspection_note": insp.inspection_note,
+                    "inspected_at": insp.inspected_at.isoformat() if insp.inspected_at else None,
+                }
+                for insp in c.inspections
+            ],
+        }
+        for c in ret.warehouse_cases
+    ]
+
     return {
         "id": ret.id,
         "return_code": ret.return_code,
@@ -284,6 +526,7 @@ def get_admin_return_detail(
         "received_at": ret.received_at.isoformat() if ret.received_at else None,
         "inspected_at": ret.inspected_at.isoformat() if ret.inspected_at else None,
         "items": items_data,
+        "warehouse_cases": cases_data,
         "timeline": timeline,
         "evidences": evidences,
         "refunds": refunds_data,
@@ -503,4 +746,56 @@ def get_return_notifications_stats(
             }
             for r in recent_pending
         ],
+    }
+
+
+@router.post("/{return_code}/override")
+def admin_override_return(
+    return_code: str,
+    payload: AdminOverridePayload,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_roles(UserRole.ADMIN)),
+):
+    """
+    Admin can thiệp khẩn cấp (ADMIN_OVERRIDE). Bắt buộc nhập lý do, ghi Audit Log đầy đủ.
+    """
+    ret = WarehouseReturnService.admin_override(
+        db=db,
+        return_code=return_code,
+        admin_user=admin_user,
+        new_status=payload.new_status,
+        reason=payload.override_reason,
+        notes=payload.notes,
+    )
+    return {
+        "success": True,
+        "return_code": ret.return_code,
+        "status": ret.status,
+        "message": f"Admin Override thành công. Trạng thái mới: {ret.status}.",
+    }
+
+
+@router.post("/{return_code}/reassign")
+def admin_reassign_return(
+    return_code: str,
+    payload: AdminReassignPayload,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_roles(UserRole.ADMIN)),
+):
+    """
+    Admin điều phối ca hoàn sang chi nhánh kho khác khi có sự cố.
+    """
+    case_ident = payload.case_code or return_code
+    wcase = WarehouseReturnService.admin_reassign_warehouse(
+        db=db,
+        case_code=case_ident,
+        new_warehouse_id=payload.new_warehouse_id,
+        admin_user=admin_user,
+        reason=payload.reason,
+    )
+    return {
+        "success": True,
+        "case_code": wcase.case_code,
+        "warehouse_id": wcase.warehouse_id,
+        "message": f"Đã điều chuyển ca hoàn {wcase.case_code} sang kho ID {wcase.warehouse_id}.",
     }

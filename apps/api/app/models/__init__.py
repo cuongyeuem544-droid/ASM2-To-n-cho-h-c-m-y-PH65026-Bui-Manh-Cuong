@@ -76,6 +76,8 @@ from app.models.returns import (
     ReturnRequestType,
     ReturnStatus,
     ReturnStatusHistory,
+    WarehouseReturnCase,
+    ReturnInspection,
 )
 from app.models.security_and_promotions import (
     PasswordResetToken,
@@ -156,4 +158,6 @@ __all__ = [
     "Warehouse",
     "WarehouseBatchStock",
     "WarehouseLocation",
+    "WarehouseReturnCase",
+    "ReturnInspection",
 ]

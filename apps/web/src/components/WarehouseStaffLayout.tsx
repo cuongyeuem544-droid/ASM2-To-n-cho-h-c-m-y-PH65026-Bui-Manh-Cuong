@@ -10,6 +10,7 @@ import {
   Search,
   ExternalLink,
   Barcode,
+  RotateCcw,
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
@@ -34,6 +35,7 @@ const staffNavItems = [
   { to: '/staff/transfers', label: '5. Điều chuyển nhận', icon: ArrowLeftRight },
   { to: '/staff/stock', label: '6. Tra cứu tồn kho (Xem)', icon: Boxes },
   { to: '/staff/history', label: '7. Lịch sử của tôi', icon: History },
+  { to: '/staff/returns', label: '8. Hàng đổi trả (Kiểm hàng)', icon: RotateCcw },
 ]
 
 export function WarehouseStaffLayout() {

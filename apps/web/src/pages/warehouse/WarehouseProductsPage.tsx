@@ -339,23 +339,23 @@ export function WarehouseProductsPage() {
                     </td>
 
                     <td style={{ padding: '14px 18px', textAlign: 'center', fontWeight: 800, color: '#0f172a' }}>
-                      {p.total_on_hand.toLocaleString()}
+                      {(p.total_on_hand ?? 0).toLocaleString()}
                     </td>
 
                     <td style={{ padding: '14px 18px', textAlign: 'center' }}>
                       <span
                         style={{
                           fontWeight: 900,
-                          color: p.total_available <= 10 ? '#dc2626' : '#059669',
+                          color: (p.total_available ?? 0) <= 10 ? '#dc2626' : '#059669',
                           fontSize: '14px',
                         }}
                       >
-                        {p.total_available.toLocaleString()}
+                        {(p.total_available ?? 0).toLocaleString()}
                       </span>
                     </td>
 
                     <td style={{ padding: '14px 18px', textAlign: 'center', color: '#64748b', fontWeight: 700 }}>
-                      {p.total_reserved.toLocaleString()}
+                      {(p.total_reserved ?? 0).toLocaleString()}
                     </td>
 
                     <td style={{ padding: '14px 18px' }}>
@@ -680,7 +680,7 @@ export function WarehouseProductsPage() {
                         <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px' }}>
                           <div style={{ fontSize: '11px', fontWeight: 700, color: '#64748b' }}>TỒN VẬT LÝ</div>
                           <div style={{ fontSize: '22px', fontWeight: 900, color: '#0f172a', marginTop: '4px' }}>
-                            {detailData.stock_levels.total_on_hand.toLocaleString()}
+                            {(detailData.stock_levels?.total_on_hand ?? 0).toLocaleString()}
                           </div>
                           <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>{detailData.general_info.uom}</div>
                         </div>
@@ -688,7 +688,7 @@ export function WarehouseProductsPage() {
                         <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '12px', padding: '16px' }}>
                           <div style={{ fontSize: '11px', fontWeight: 700, color: '#059669' }}>KHẢ DỤNG (BÁN ĐƯỢC)</div>
                           <div style={{ fontSize: '22px', fontWeight: 900, color: '#059669', marginTop: '4px' }}>
-                            {detailData.stock_levels.total_available.toLocaleString()}
+                            {(detailData.stock_levels?.total_available ?? 0).toLocaleString()}
                           </div>
                           <div style={{ fontSize: '11px', color: '#059669', marginTop: '2px' }}>{detailData.general_info.uom}</div>
                         </div>
@@ -696,7 +696,7 @@ export function WarehouseProductsPage() {
                         <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '12px', padding: '16px' }}>
                           <div style={{ fontSize: '11px', fontWeight: 700, color: '#d97706' }}>ĐANG GIỮ CHO ĐƠN</div>
                           <div style={{ fontSize: '22px', fontWeight: 900, color: '#d97706', marginTop: '4px' }}>
-                            {detailData.stock_levels.total_reserved.toLocaleString()}
+                            {(detailData.stock_levels?.total_reserved ?? 0).toLocaleString()}
                           </div>
                           <div style={{ fontSize: '11px', color: '#d97706', marginTop: '2px' }}>{detailData.general_info.uom}</div>
                         </div>
@@ -704,7 +704,7 @@ export function WarehouseProductsPage() {
                         <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '12px', padding: '16px' }}>
                           <div style={{ fontSize: '11px', fontWeight: 700, color: '#dc2626' }}>CÁCH LY / LỖI</div>
                           <div style={{ fontSize: '22px', fontWeight: 900, color: '#dc2626', marginTop: '4px' }}>
-                            {detailData.stock_levels.total_quarantined.toLocaleString()}
+                            {(detailData.stock_levels?.total_quarantined ?? 0).toLocaleString()}
                           </div>
                           <div style={{ fontSize: '11px', color: '#dc2626', marginTop: '2px' }}>{detailData.general_info.uom}</div>
                         </div>
@@ -774,10 +774,10 @@ export function WarehouseProductsPage() {
                                     </div>
                                   </td>
                                   <td style={{ padding: '12px 14px', textAlign: 'center', fontWeight: 700 }}>
-                                    {b.quantity_on_hand.toLocaleString()}
+                                    {(b.quantity_on_hand ?? 0).toLocaleString()}
                                   </td>
                                   <td style={{ padding: '12px 14px', textAlign: 'center', fontWeight: 800, color: '#059669' }}>
-                                    {b.quantity_available.toLocaleString()}
+                                    {(b.quantity_available ?? 0).toLocaleString()}
                                   </td>
                                   <td style={{ padding: '12px 14px', color: '#475569' }}>{b.location_name}</td>
                                   <td style={{ padding: '12px 14px' }}>

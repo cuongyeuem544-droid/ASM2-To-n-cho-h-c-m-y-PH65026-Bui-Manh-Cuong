@@ -132,10 +132,10 @@ export function StaffStockPage() {
                       {it.batches_count} lô
                     </td>
                     <td className="px-5 py-3.5 text-right font-black text-slate-800 text-base">
-                      {it.total_on_hand.toLocaleString()}
+                      {(it.total_on_hand ?? 0).toLocaleString()}
                     </td>
                     <td className="px-5 py-3.5 text-right font-black text-emerald-700 text-base">
-                      {it.total_available.toLocaleString()}
+                      {(it.total_available ?? 0).toLocaleString()}
                     </td>
                   </tr>
                 ))
