@@ -118,23 +118,39 @@ class MomoPaymentService:
                             f"[MOMO] Gateway returned non-zero code {res_data.get('resultCode')}: {res_data.get('message')}"
                         )
         except Exception as e:
-            logger.warning(f"[MOMO] Không thể kết nối tới server MoMo Sandbox ({e}). Kích hoạt Local Sandbox Simulator...")
+            logger.warning(f"[MOMO] Không thể kết nối tới server MoMo Sandbox: {e}")
+            momo_response_raw = f"NETWORK_ERROR: {str(e)}"
 
-        # Fallback mô phỏng dành cho môi trường Local Windows khi không có mạng ngoài hoặc MoMo Sandbox bảo trì
+        # Nếu không lấy được pay_url từ MoMo: Tuyệt đối KHÔNG tự sinh đường dẫn SimulatedSuccess giả lập
         if not pay_url:
-            simulation_url = f"{redirect_url}?orderId={order_id}&resultCode=0&message=SimulatedSuccess"
-            pay_url = simulation_url
-            qr_code_url = f"https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=2|99|{partner_code}|{order_id}|{amount}"
-            deeplink = f"momo://app?action=payWithApp&orderId={order_id}&amount={amount}"
-            momo_response_raw = json.dumps({
-                "mode": "LOCAL_SANDBOX_SIMULATED",
-                "partnerCode": partner_code,
-                "orderId": order_id,
-                "amount": amount,
-                "resultCode": 0,
-                "message": "Khởi tạo cổng thanh toán MoMo Sandbox thành công.",
-                "payUrl": pay_url,
-            })
+            trans = db.scalar(
+                select(PaymentTransaction).where(
+                    PaymentTransaction.order_id == order.id,
+                    PaymentTransaction.provider == "MOMO",
+                )
+            )
+            if not trans:
+                trans = PaymentTransaction(
+                    order_id=order.id,
+                    transaction_code=f"TXN-MOMO-{order.order_code}-{int(datetime.now().timestamp()) % 100000}",
+                    provider="MOMO",
+                    amount=Decimal(str(amount)),
+                    currency="VND",
+                    status="FAILED",
+                    provider_pay_url=None,
+                    provider_response_raw=momo_response_raw or "GATEWAY_UNAVAILABLE",
+                )
+                db.add(trans)
+            else:
+                trans.status = "FAILED"
+                trans.provider_pay_url = None
+                trans.provider_response_raw = momo_response_raw or "GATEWAY_UNAVAILABLE"
+            db.commit()
+
+            raise HTTPException(
+                status_code=502,
+                detail="Cổng thanh toán MoMo tạm thời không phản hồi hoặc đang bảo trì. Giao dịch chưa được khởi tạo, vui lòng thử lại sau hoặc chọn thanh toán VietQR / COD.",
+            )
 
         # Ghi nhận / Cập nhật PaymentTransaction trong CSDL
         trans = db.scalar(

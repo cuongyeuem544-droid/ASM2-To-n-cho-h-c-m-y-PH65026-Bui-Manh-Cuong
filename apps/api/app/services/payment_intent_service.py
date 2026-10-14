@@ -333,6 +333,24 @@ class PaymentIntentService:
         Tra cứu chi tiết lịch sử và tình trạng thanh toán của đơn hàng.
         """
         clean_code = order_code.strip()
+        if clean_code.startswith("EXC-"):
+            from app.models.returns import ExchangeOrder, ExchangeStatus
+            exchange = db.scalar(select(ExchangeOrder).where(ExchangeOrder.exchange_code == clean_code))
+            if not exchange:
+                raise HTTPException(status_code=404, detail=f"Không tìm thấy đơn đổi hàng '{clean_code}'.")
+            is_paid = exchange.status != ExchangeStatus.WAITING_PAYMENT.value
+            return {
+                "order_code": exchange.exchange_code,
+                "payment_status": "PAID" if is_paid else "PENDING",
+                "payment_method": "VIETQR",
+                "order_status": exchange.status,
+                "total_amount": float(exchange.price_difference),
+                "customer_name": "Khách hàng đổi hàng",
+                "can_retry": not is_paid,
+                "latest_transaction": None,
+                "transactions": [],
+            }
+
         order = db.scalar(select(Order).where(Order.order_code == clean_code))
         if not order:
             raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng.")

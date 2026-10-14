@@ -126,8 +126,16 @@ export default function CartPage() {
         items: cartItems.map((it) => {
           let dbId = it.dbId;
           if (!dbId && it.id.startsWith("pt-")) dbId = parseInt(it.id.replace("pt-", ""), 10);
+          else if (!dbId && /^\d+$/.test(it.id)) dbId = parseInt(it.id, 10);
+          else if (!dbId && it.id.startsWith("prod-")) {
+            const mockMap: Record<string, number> = {
+              "prod-01": 17, "prod-02": 16, "prod-03": 18, "prod-04": 20, "prod-05": 21,
+              "prod-06": 19, "prod-07": 22, "prod-08": 23, "prod-13": 43,
+            };
+            dbId = mockMap[it.id];
+          }
           return {
-            product_id: dbId || 17,
+            product_id: dbId || 0,
             sku_id: it.skuId,
             quantity: it.quantity,
             client_price: it.salePrice || it.price,
@@ -444,6 +452,8 @@ export default function CartPage() {
         let dbId = it.dbId;
         if (!dbId && it.id.startsWith("pt-")) {
           dbId = parseInt(it.id.replace("pt-", ""), 10);
+        } else if (!dbId && /^\d+$/.test(it.id)) {
+          dbId = parseInt(it.id, 10);
         } else if (!dbId && it.id.startsWith("prod-")) {
           const mockMap: Record<string, number> = {
             "prod-01": 17, // Panadol Extra
@@ -456,12 +466,13 @@ export default function CartPage() {
             "prod-08": 23, // Daflon 500mg
             "prod-13": 43, // Berocca Performance
           };
-          dbId = mockMap[it.id] || 17;
-        } else if (!dbId || dbId < 16) {
-          dbId = 17; // Safe published OTC fallback (Panadol Extra) instead of facility record (1-15)
+          dbId = mockMap[it.id];
+        }
+        if (!dbId || isNaN(dbId)) {
+          throw new Error(`Sản phẩm '${it.name}' không có mã định danh hợp lệ trên hệ thống. Vui lòng chọn lại.`);
         }
         return {
-          product_id: dbId || 17,
+          product_id: dbId,
           quantity: it.quantity,
           sku_id: it.skuId,
           client_unit_price: it.salePrice || it.price,
@@ -492,9 +503,13 @@ export default function CartPage() {
         ward_code: fulfillmentType === "DELIVERY" ? (currentVerified?.communeCode || currentVerified?.wardCode) : undefined,
       };
 
+      const token = typeof window !== "undefined" ? localStorage.getItem("pharmatrust_token") : null;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
       const res = await fetch("/api/v1/store/orders/checkout", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify(orderPayload),
       });
 
@@ -520,14 +535,21 @@ export default function CartPage() {
 
       // Handle MoMo Sandbox payment
       if (paymentMethod === "MOMO") {
-        const returnUrl = typeof window !== "undefined" ? `${window.location.origin}/checkout/result` : "";
+        const returnUrl = typeof window !== "undefined" ? `${window.location.origin}/checkout/result?phone=${encodeURIComponent(finalCustomerPhone || "")}` : "";
+        if (typeof window !== "undefined" && finalCustomerPhone) {
+          localStorage.setItem("h4care_checkout_phone", finalCustomerPhone);
+        }
         try {
+          const payHeaders: Record<string, string> = { "Content-Type": "application/json" };
+          if (token) payHeaders["Authorization"] = `Bearer ${token}`;
+
           const momoRes = await fetch("/api/v1/payments/momo/create", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: payHeaders,
             body: JSON.stringify({
               order_code: data.order_code,
               return_url: returnUrl,
+              phone_verify: finalCustomerPhone,
             }),
           });
           const momoData = await momoRes.json();
@@ -593,7 +615,12 @@ export default function CartPage() {
     }
     const intervalId = setInterval(async () => {
       try {
-        const res = await fetch(`/api/v1/payments/orders/${momoModal.orderCode}/status`);
+        const token = typeof window !== "undefined" ? localStorage.getItem("pharmatrust_token") : null;
+        const savedPhone = typeof window !== "undefined" ? localStorage.getItem("h4care_checkout_phone") || customerPhone : customerPhone;
+        const payHeaders: Record<string, string> = {};
+        if (token) payHeaders["Authorization"] = `Bearer ${token}`;
+        const phoneParam = savedPhone ? `?phone_verify=${encodeURIComponent(savedPhone)}` : "";
+        const res = await fetch(`/api/v1/payments/orders/${momoModal.orderCode}/status${phoneParam}`, { headers: payHeaders });
         if (res.ok) {
           const data = await res.json();
           if (data.payment_status === "PAID") {

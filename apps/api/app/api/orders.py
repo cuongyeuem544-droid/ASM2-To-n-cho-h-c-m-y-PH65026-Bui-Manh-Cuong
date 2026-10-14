@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.api.deps import get_current_user, require_roles
+from app.api.deps import get_current_user, get_optional_current_user, require_roles
 from app.db.session import get_db
 from app.models import (
     AdministrativeUnit,
@@ -264,7 +264,11 @@ def validate_cart(payload: CartValidateRequest, db: Session = Depends(get_db)):
 
 
 @store_order_router.post("/checkout")
-def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)):
+def checkout_order(
+    payload: CheckoutRequest,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
+):
     """
     Tạo đơn hàng mới từ Storefront Web Khách Hàng.
     Tính giá 100% tại máy chủ (Server-side Pricing), loại bỏ hoàn toàn thuốc kê đơn Rx và chặn can thiệp giá.
@@ -449,6 +453,7 @@ def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)):
     order_code = generate_order_code()
     order = Order(
         order_code=order_code,
+        user_id=current_user.id if current_user else None,
         idempotency_key=payload.idempotency_key.strip() if payload.idempotency_key else None,
         customer_name=name,
         customer_phone=phone,
@@ -553,9 +558,18 @@ def checkout_order(payload: CheckoutRequest, db: Session = Depends(get_db)):
 
 
 @store_order_router.get("/{order_code}")
-def get_order_by_code(order_code: str, db: Session = Depends(get_db)):
+def get_order_by_code(
+    order_code: str,
+    phone: Optional[str] = Query(None, description="Số điện thoại đặt hàng để xác thực nếu là khách vãng lai"),
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
+):
     """
     Tra cứu thông tin tiến độ đơn hàng cho khách hàng.
+    Yêu cầu bảo mật:
+    - Nhân viên (ADMIN, PHARMACIST): Có quyền tra cứu để hỗ trợ khách.
+    - Khách hàng đã đăng nhập (CUSTOMER): Chỉ xem đơn thuộc tài khoản của chính mình (order.user_id == current_user.id).
+    - Khách vãng lai: Bắt buộc cung cấp đúng số điện thoại đặt hàng (phone) để đối chiếu, cấm xem đơn của người khác.
     """
     order = db.scalar(
         select(Order)
@@ -564,6 +578,32 @@ def get_order_by_code(order_code: str, db: Session = Depends(get_db)):
     )
     if not order:
         raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng với mã này.")
+
+    # 1. Xác thực quyền xem đơn hàng (Anti-IDOR)
+    is_staff = current_user and getattr(current_user, "role", "") in ["ADMIN", "PHARMACIST", "DATA_REVIEWER"]
+    clean_order_phone = (order.customer_phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
+
+    if not is_staff:
+        if current_user and getattr(current_user, "role", "") == "CUSTOMER":
+            # Đơn gắn với tài khoản khác -> Chặn User A truy cập User B
+            if order.user_id and order.user_id != current_user.id:
+                raise HTTPException(status_code=403, detail="Bạn không có quyền xem đơn hàng này.")
+            # Đơn chưa gắn user_id (đặt dạng guest trước đó) -> Kiểm tra số điện thoại
+            if not order.user_id:
+                clean_user_phone = (current_user.phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
+                clean_req_phone = phone.strip().replace(" ", "").replace(".", "").replace("-", "") if phone else ""
+                if clean_user_phone != clean_order_phone and clean_req_phone != clean_order_phone:
+                    raise HTTPException(status_code=403, detail="Bạn không có quyền xem đơn hàng này.")
+        else:
+            # Khách vãng lai hoặc chưa đăng nhập: Bắt buộc cung cấp số điện thoại đặt hàng khớp chính xác
+            if not phone or not phone.strip():
+                raise HTTPException(
+                    status_code=403,
+                    detail="Vui lòng cung cấp số điện thoại đặt hàng (phone) để xác minh quyền truy cập đơn hàng.",
+                )
+            clean_input = phone.strip().replace(" ", "").replace(".", "").replace("-", "")
+            if clean_input != clean_order_phone:
+                raise HTTPException(status_code=403, detail="Số điện thoại xác thực không khớp với thông tin đơn hàng.")
 
     return {
         "order_code": order.order_code,
@@ -590,18 +630,41 @@ def get_order_by_code(order_code: str, db: Session = Depends(get_db)):
 
 
 @store_order_router.get("/customer/{phone}")
-def get_customer_orders(phone: str, db: Session = Depends(get_db)):
+def get_customer_orders(
+    phone: str,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
+):
     """
-    Lấy danh sách đơn hàng riêng biệt của khách hàng theo số điện thoại (bảo đảm cách ly tài khoản).
+    Lấy danh sách đơn hàng riêng biệt của khách hàng theo số điện thoại (Bảo đảm cách ly tài khoản & chống tra cứu lén).
+    - Khách hàng bắt buộc phải đăng nhập.
+    - User chỉ được xem lịch sử đơn hàng của chính số điện thoại tài khoản mình.
     """
-    clean_phone = phone.strip().replace(" ", "").replace("-", "")
+    if not current_user:
+        raise HTTPException(
+            status_code=401,
+            detail="Vui lòng đăng nhập để tra cứu lịch sử đơn hàng theo số điện thoại.",
+        )
+
+    is_staff = getattr(current_user, "role", "") in ["ADMIN", "PHARMACIST", "DATA_REVIEWER"]
+    clean_user_phone = (current_user.phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
+    clean_param_phone = phone.strip().replace(" ", "").replace(".", "").replace("-", "")
+
+    if not is_staff:
+        if clean_user_phone != clean_param_phone:
+            raise HTTPException(
+                status_code=403,
+                detail="Bạn không có quyền tra cứu lịch sử đơn hàng của số điện thoại khác.",
+            )
+
     orders = db.scalars(
         select(Order)
         .options(selectinload(Order.items))
         .where(
             or_(
+                Order.user_id == current_user.id,
                 Order.customer_phone == phone.strip(),
-                Order.customer_phone == clean_phone,
+                Order.customer_phone == clean_param_phone,
             )
         )
         .order_by(desc(Order.id))

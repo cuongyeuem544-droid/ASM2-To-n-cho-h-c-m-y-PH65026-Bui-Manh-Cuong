@@ -43,20 +43,23 @@ class Settings(BaseSettings):
     telegram_chat_id: str = ""
     alert_webhook_url: str = ""
 
-    # Cấu hình Cổng thanh toán MoMo Sandbox
+    # Cấu hình Cổng thanh toán MoMo Sandbox (Được nạp từ biến môi trường/file .env, không lưu khóa thật vào code)
     momo_partner_code: str = "MOMO"
-    momo_access_key: str = "F8BBA842ECF85"
-    momo_secret_key: str = "K951B6PE1waDMi640xX0huAHevg3hkVo"
+    momo_access_key: str = ""
+    momo_secret_key: str = ""
     momo_endpoint: str = "https://test-payment.momo.vn/v2/gateway/api/create"
     momo_return_url: str = "http://localhost:3000/checkout/result"
     momo_ipn_url: str = "http://localhost:8000/api/v1/payments/momo/webhook"
 
     # Cấu hình Thanh toán Chuyển khoản VietQR (Napas 247)
     vietqr_bank_id: str = "MB"
-    vietqr_account_number: str = "0901234567"
-    vietqr_account_holder: str = "NHA THUOC PHARMATRUST"
-    vietqr_webhook_secret: str = "h4care_vietqr_secret_2026"
+    vietqr_account_number: str = ""
+    vietqr_account_holder: str = ""
+    vietqr_webhook_secret: str = ""
     payment_expiry_minutes: int = 30
+
+    # Cơ chế kiểm soát Payment Simulator (Mặc định TẮT hoàn toàn - Fail Closed)
+    enable_payment_simulator: bool = False
 
     # Cấu hình Dịch vụ Gửi Email thật qua Gmail SMTP
     smtp_host: str = "smtp.gmail.com"
@@ -94,6 +97,29 @@ class Settings(BaseSettings):
             and self.smtp_host
             and self.smtp_host.strip()
         )
+
+    @property
+    def is_momo_configured(self) -> bool:
+        """Kiểm tra xem MoMo Sandbox/Production đã được cấu hình đầy đủ API keys chưa."""
+        return bool(
+            self.momo_partner_code
+            and self.momo_partner_code.strip()
+            and self.momo_access_key
+            and self.momo_access_key.strip()
+            and self.momo_secret_key
+            and self.momo_secret_key.strip()
+        )
+
+    @property
+    def is_simulator_permitted(self) -> bool:
+        """
+        Cơ chế Fail-Closed: Chỉ cho phép chạy Simulator khi đồng thời thỏa mãn:
+        1. Biến môi trường app_env thuộc nhóm ['development', 'dev', 'test', 'local'].
+        2. Biến enable_payment_simulator được bật tường minh là True.
+        Tuyệt đối chặn khi chạy trên production, staging, public hoặc khi biến bị thiếu/sai.
+        """
+        env = (self.app_env or "").lower().strip()
+        return env in {"development", "dev", "test", "local"} and bool(self.enable_payment_simulator)
 
     @property
     def raw_storage(self) -> Path:

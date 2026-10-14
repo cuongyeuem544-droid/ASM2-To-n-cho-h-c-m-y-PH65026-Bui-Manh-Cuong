@@ -69,7 +69,13 @@ function CheckoutResultContent() {
 
     async function fetchStatus() {
       try {
-        const res = await fetch(`/api/v1/payments/orders/${cleanOrderCode}/status`);
+        const phone = searchParams.get("phone") || (typeof window !== "undefined" ? localStorage.getItem("h4care_checkout_phone") || "" : "");
+        const token = typeof window !== "undefined" ? localStorage.getItem("h4care_auth_token") : null;
+        const headers: Record<string, string> = {};
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+        const queryParam = phone ? `?phone_verify=${encodeURIComponent(phone)}` : "";
+
+        const res = await fetch(`/api/v1/payments/orders/${cleanOrderCode}/status${queryParam}`, { headers });
         if (res.ok) {
           const data = await res.json();
           setOrderData(data);
@@ -84,7 +90,7 @@ function CheckoutResultContent() {
     }
 
     fetchStatus();
-  }, [cleanOrderCode]);
+  }, [cleanOrderCode, searchParams]);
 
   // Switch to COD with 1-click retry
   const handleSwitchToCod = async () => {
@@ -92,18 +98,25 @@ function CheckoutResultContent() {
     setIsRetrying(true);
     setRetryMessage(null);
     try {
+      const phone = searchParams.get("phone") || (typeof window !== "undefined" ? localStorage.getItem("h4care_checkout_phone") || "" : "");
+      const token = typeof window !== "undefined" ? localStorage.getItem("h4care_auth_token") : null;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
       const res = await fetch("/api/v1/payments/retry", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           order_code: cleanOrderCode,
           new_payment_method: "COD",
+          phone_verify: phone || undefined,
         }),
       });
       if (res.ok) {
         setRetryMessage("Đã chuyển thành công sang Thanh toán khi nhận hàng (COD)!");
         // Refresh status
-        const statusRes = await fetch(`/api/v1/payments/orders/${cleanOrderCode}/status`);
+        const queryParam = phone ? `?phone_verify=${encodeURIComponent(phone)}` : "";
+        const statusRes = await fetch(`/api/v1/payments/orders/${cleanOrderCode}/status${queryParam}`, { headers });
         if (statusRes.ok) {
           const fresh = await statusRes.json();
           setOrderData(fresh);

@@ -51,36 +51,36 @@ def index_single_product(db: Session, product: CanonicalProduct) -> None:
         unaccent_indications = strip_accents(product.indications or "").lower()
         unaccent_dosage = strip_accents(product.dosage_form or "").lower()
 
-        # Xóa bản ghi cũ nếu có
-        db.execute(
-            text("DELETE FROM products_fts WHERE product_id = :pid"),
-            {"pid": str(product.id)},
-        )
+        # Dùng savepoint (nested transaction) để nếu FTS5 lỗi thì không rollback giao dịch chính
+        with db.begin_nested():
+            # Xóa bản ghi cũ nếu có
+            db.execute(
+                text("DELETE FROM products_fts WHERE product_id = :pid"),
+                {"pid": str(product.id)},
+            )
 
-        # Chèn bản ghi mới
-        db.execute(
-            text("""
-                INSERT INTO products_fts (
-                    product_id, canonical_name, unaccent_name, registration_number,
-                    active_ingredients, indications, dosage_form, manufacturer
-                ) VALUES (
-                    :pid, :name, :uname, :reg, :ing, :ind, :dosage, :mfg
-                )
-            """),
-            {
-                "pid": str(product.id),
-                "name": product.canonical_name or "",
-                "uname": unaccent_name,
-                "reg": product.registration_number or "",
-                "ing": ingredients_str,
-                "ind": f"{product.indications or ''} {unaccent_indications}",
-                "dosage": f"{product.dosage_form or ''} {unaccent_dosage}",
-                "mfg": product.manufacturer or "",
-            },
-        )
-        db.commit()
+            # Chèn bản ghi mới
+            db.execute(
+                text("""
+                    INSERT INTO products_fts (
+                        product_id, canonical_name, unaccent_name, registration_number,
+                        active_ingredients, indications, dosage_form, manufacturer
+                    ) VALUES (
+                        :pid, :name, :uname, :reg, :ing, :ind, :dosage, :mfg
+                    )
+                """),
+                {
+                    "pid": str(product.id),
+                    "name": product.canonical_name or "",
+                    "uname": unaccent_name,
+                    "reg": product.registration_number or "",
+                    "ing": ingredients_str,
+                    "ind": f"{product.indications or ''} {unaccent_indications}",
+                    "dosage": f"{product.dosage_form or ''} {unaccent_dosage}",
+                    "mfg": product.manufacturer or "",
+                },
+            )
     except Exception as e:
-        db.rollback()
         logger.debug(f"Bỏ qua index FTS5 cho sản phẩm {product.id}: {e}")
 
 

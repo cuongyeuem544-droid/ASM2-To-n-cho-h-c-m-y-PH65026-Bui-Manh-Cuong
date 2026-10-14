@@ -8,14 +8,29 @@ TEST_DB = Path(__file__).parent / "test_pharmatrust.db"
 os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB}"
 os.environ["SECRET_KEY"] = "test-secret-key-that-is-long-enough-for-tests"
 os.environ["STORAGE_ROOT"] = str(Path(__file__).parent / "test_storage")
+os.environ["APP_ENV"] = "test"
+os.environ["ENABLE_PAYMENT_SIMULATOR"] = "true"
+os.environ["MOMO_PARTNER_CODE"] = "MOMO"
+os.environ["MOMO_ACCESS_KEY"] = "test_momo_access_key"
+os.environ["MOMO_SECRET_KEY"] = "test_momo_secret_key"
+os.environ["VIETQR_WEBHOOK_SECRET"] = "test_vietqr_secret"
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from app.core.config import settings  # noqa: E402
 from app.core.security import create_access_token  # noqa: E402
 from app.db.base import Base  # noqa: E402
+import app.models  # noqa: F401, E402
 from app.db.session import SessionLocal, engine  # noqa: E402
 from app.main import app  # noqa: E402
 from app.seed import seed_administrative_units, seed_demo_products, seed_sources, seed_users  # noqa: E402
+
+# Đảm bảo môi trường kiểm thử được bật simulator và sandbox keys
+settings.enable_payment_simulator = True
+settings.momo_partner_code = "MOMO"
+settings.momo_access_key = "test_momo_access_key"
+settings.momo_secret_key = "test_momo_secret_key"
+settings.vietqr_webhook_secret = "test_vietqr_secret"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -31,6 +46,8 @@ def database():
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
     with SessionLocal() as db:
+        from app.services.search_service import init_fts_table
+        init_fts_table(db)
         seed_users(db)
         seed_sources(db)
         seed_administrative_units(db)

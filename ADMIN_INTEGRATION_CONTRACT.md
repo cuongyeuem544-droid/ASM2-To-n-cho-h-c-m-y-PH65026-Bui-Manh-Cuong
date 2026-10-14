@@ -139,3 +139,35 @@ Dùng để kiểm tra nhanh trạng thái mở bán và tồn khả dụng khi 
    - Khi Admin thêm hoặc chỉnh sửa quy cách đóng gói trong bảng `product_skus`, hệ thống Storefront sẽ tự động đồng bộ hiển thị các nút chọn đơn vị (Hộp, Vỉ, Gói...) và cập nhật giá tương ứng.
 3. **Cách ly lô kiểm nghiệm:**
    - Khi Admin cần kiểm tra lô hoặc nghi ngờ chất lượng, chỉ cần cập nhật `status = 'QUARANTINED'` trên bảng `inventory_batches`. Toàn bộ Storefront và FEFO Engine sẽ lập tức loại trừ lô đó ra khỏi tồn bán được mà không làm lệch sổ cái kế toán.
+
+---
+
+## 5. BẢO MẬT PHÂN QUYỀN ĐƠN HÀNG, ĐỔI TRẢ & THANH TOÁN (SECURITY & ROLE CONTRACT)
+**Cập nhật:** Module C Security Hardening & Commercial Integrity
+
+### 5.1. Ma trận phân quyền vai trò (Role & Ownership Matrix)
+
+| Endpoint / Nhóm API | Khách vãng lai (Guest) | Khách đăng nhập (`CUSTOMER`) | Dược sĩ (`PHARMACIST`) / Quản trị (`ADMIN`) |
+| :--- | :--- | :--- | :--- |
+| `GET /store/orders/{order_code}` | Bắt buộc `?phone=<sđt>` khớp `order.customer_phone` (403 nếu sai/thiếu) | Chỉ xem được đơn của chính mình (khớp `user_id` hoặc `phone`) | Toàn quyền tra cứu mọi đơn hàng |
+| `GET /store/orders/customer/{phone}` | Bị từ chối (401 Unauthorized) | Bắt buộc đăng nhập; SĐT tra cứu phải khớp `current_user.phone` (403 nếu IDOR) | Toàn quyền tra cứu lịch sử đơn theo SĐT |
+| `GET /returns/{return_code}` | Bắt buộc `?phone_verify=<sđt>` khớp `return.customer_phone` | Chỉ xem được yêu cầu đổi trả của chính mình | Toàn quyền tra cứu hồ sơ đổi trả |
+| `GET /returns/my-requests` | Bị từ chối (401 Unauthorized) | Chỉ liệt kê yêu cầu đổi trả thuộc `current_user.id` | Toàn quyền tra cứu |
+| `POST /payments/momo/create`, `/vietqr/create`, `/intent`, `/retry`, `/cancel` | Bắt buộc `phone_verify` trong JSON body khớp `order.customer_phone` | Khớp `order.user_id` hoặc `current_user.phone` | Toàn quyền thao tác trên mọi đơn |
+| `POST /payments/reconciliation/*` | Bị cấm (403 Forbidden) | Bị cấm (403 Forbidden) | **Chỉ `ADMIN` hoặc `PHARMACIST`** có quyền đối soát tài chính ngân hàng |
+| `POST /payments/auto-heal` | Bị cấm (403 Forbidden) | Bị cấm (403 Forbidden) | **Chỉ `ADMIN` hoặc `PHARMACIST`** có quyền chạy job tự động sửa lỗi trạng thái |
+| `POST /payments/reservations/stale/release` | Bị cấm (403 Forbidden) | Bị cấm (403 Forbidden) | **Chỉ `ADMIN` hoặc `PHARMACIST`** có quyền giải phóng tồn kho treo |
+| `POST /payments/*/simulate` | Bị cấm tuyệt đối trên Production (`is_simulator_permitted == False` $\rightarrow$ 403 Fail-Closed) | Bị cấm tuyệt đối | Chỉ kích hoạt trong môi trường dev cục bộ khi bật cờ |
+
+### 5.2. Nguyên tắc an toàn thanh toán MoMo & VietQR
+1. **Loại bỏ URL giả lập khi lỗi mạng (Zero Fake URLs):**
+   - Khi MoMo Sandbox/Gateway trả lỗi hoặc timeout, Backend trả HTTP 502 Bad Gateway và ghi nhận transaction `FAILED`.
+   - Tuyệt đối không sinh URL `SimulatedSuccess` giả lập làm người mua hiểu nhầm là đã thanh toán.
+2. **Khởi tạo và đối soát VietQR:**
+   - Client công khai sử dụng `/payments/orders/{order_code}/status` để thăm dò trạng thái thanh toán đơn hàng.
+   - Các endpoint đối soát nội bộ `/payments/reconciliation/order` và `/payments/reconciliation/audit` yêu cầu Bearer token của Admin/Pharmacist.
+
+### 5.3. Quy tắc phân bổ tồn kho FEFO đa quy cách (Multi-SKU FEFO Allocation)
+- Khi khách đặt hàng theo một quy cách đóng gói cụ thể (ví dụ: `SKU-PAN-BOX-100` hoặc `SKU-PAN-SACHET-01`), hàm điều phối `route_and_allocate_order` phân bổ chính xác tồn kho theo SKU mà khách đã chọn thay vì mặc định về SKU hộp.
+- Giá tiền, chiết khấu voucher và phí vận chuyển do Backend tính toán và xác thực tại thời điểm Checkout; Frontend không quyết định giá.
+

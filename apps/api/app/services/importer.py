@@ -774,7 +774,7 @@ def import_rows(
                 )
             )
 
-        if existing_doc and not force_update and not auto_approve:
+        if existing_doc and not force_update:
             skipped += 1
             processed_items.append({
                 "row": index,

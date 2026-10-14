@@ -105,11 +105,21 @@ export default function AccountPage() {
     }
   }, [user]);
 
-  // Load customer-specific orders isolated by phone number
+  const getAuthHeaders = () => {
+    const token = typeof window !== "undefined"
+      ? localStorage.getItem("pharmatrust_token") || localStorage.getItem("h4care_auth_token")
+      : null;
+    const h: Record<string, string> = {};
+    if (token) h["Authorization"] = `Bearer ${token}`;
+    return h;
+  };
+
+  // Load customer-specific orders isolated by phone number with auth token
   const reloadOrders = () => {
     if (user?.phone) {
       setLoadingOrders(true);
-      fetch(`http://localhost:8000/api/v1/store/orders/customer/${encodeURIComponent(user.phone)}`)
+      const headers = getAuthHeaders();
+      fetch(`/api/v1/store/orders/customer/${encodeURIComponent(user.phone)}`, { headers })
         .then((res) => (res.ok ? res.json() : []))
         .then((data) => {
           if (Array.isArray(data)) setOrders(data);
@@ -127,7 +137,7 @@ export default function AccountPage() {
   useEffect(() => {
     if (selectedOrder?.order_code) {
       setLoadingPaymentData(true);
-      fetch(`/api/v1/payments/orders/${selectedOrder.order_code}/status`)
+      fetch(`/api/v1/payments/orders/${selectedOrder.order_code}/status`, { headers: getAuthHeaders() })
         .then((res) => (res.ok ? res.json() : null))
         .then((data) => setOrderPaymentData(data))
         .catch(() => setOrderPaymentData(null))
@@ -142,7 +152,7 @@ export default function AccountPage() {
     try {
       const res = await fetch("/api/v1/payments/retry", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({
           order_code: orderCode,
           new_payment_method: "COD",
@@ -150,7 +160,7 @@ export default function AccountPage() {
       });
       if (res.ok) {
         reloadOrders();
-        const pRes = await fetch(`/api/v1/payments/orders/${orderCode}/status`);
+        const pRes = await fetch(`/api/v1/payments/orders/${orderCode}/status`, { headers: getAuthHeaders() });
         if (pRes.ok) {
           const freshPayment = await pRes.json();
           setOrderPaymentData(freshPayment);
@@ -179,7 +189,7 @@ export default function AccountPage() {
     try {
       const res = await fetch(`/api/v1/payments/orders/${orderCode}/cancel`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({ reason: "Khách hàng yêu cầu hủy đơn qua trang Tài khoản" }),
       });
       if (res.ok) {
@@ -212,7 +222,7 @@ export default function AccountPage() {
       const returnUrl = typeof window !== "undefined" ? `${window.location.origin}/checkout/result` : "";
       const res = await fetch("/api/v1/payments/momo/create", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({
           order_code: orderCode,
           return_url: returnUrl,

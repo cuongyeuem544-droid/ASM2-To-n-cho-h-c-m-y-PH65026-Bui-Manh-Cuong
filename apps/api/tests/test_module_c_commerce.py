@@ -66,6 +66,24 @@ class TestModuleCCommerce(unittest.TestCase):
             self.db.commit()
             self.db.refresh(self.wh)
 
+        from app.models.entities import User
+        from app.models.enums import UserRole
+        from app.core.security import create_access_token, hash_password
+        admin = self.db.query(User).filter_by(role=UserRole.ADMIN).first()
+        if not admin:
+            admin = User(
+                email="admin_test@h4care.vn",
+                password_hash=hash_password("Admin@123"),
+                full_name="Admin Test",
+                role=UserRole.ADMIN,
+                is_active=True,
+            )
+            self.db.add(admin)
+            self.db.commit()
+            self.db.refresh(admin)
+        admin_tok = create_access_token(str(admin.id), "ADMIN")
+        self.admin_headers = {"Authorization": f"Bearer {admin_tok}"}
+
     def tearDown(self):
         self.db.close()
 
@@ -988,13 +1006,31 @@ class TestModuleCCommerce(unittest.TestCase):
         self.db.add(order)
         self.db.commit()
 
-        resp = self.client.post("/api/v1/payments/momo/create", json={
-            "order_code": order.order_code,
-            "return_url": "http://localhost:3000/checkout/result",
-        })
-        self.assertEqual(resp.status_code, 200)
-        data = resp.json()
-        self.assertIn("pay_url", data)
+        from unittest.mock import MagicMock, patch
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = '{"resultCode": 0}'
+        mock_resp.json.return_value = {
+            "resultCode": 0,
+            "message": "Thành công",
+            "payUrl": "https://test-payment.momo.vn/v2/gateway/pay?token=MOMO_TOKEN_OK",
+            "qrCodeUrl": "https://test-payment.momo.vn/qr/MOMO_TOKEN_OK",
+            "deeplink": "momo://app?action=payWithApp",
+        }
+
+        with patch("app.services.momo_service.httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client_cls.return_value.__enter__.return_value = mock_client
+            mock_client.post.return_value = mock_resp
+
+            resp = self.client.post("/api/v1/payments/momo/create", json={
+                "order_code": order.order_code,
+                "return_url": "http://localhost:3000/checkout/result",
+                "phone_verify": order.customer_phone,
+            })
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertIn("pay_url", data)
 
     # =========================================================================
     # 25. MOMO SUCCESS WEBHOOK
@@ -1069,6 +1105,7 @@ class TestModuleCCommerce(unittest.TestCase):
         resp = self.client.post("/api/v1/payments/retry", json={
             "order_code": order.order_code,
             "new_payment_method": "COD",
+            "phone_verify": order.customer_phone,
         })
         self.assertEqual(resp.status_code, 200)
         self.db.refresh(order)
@@ -1094,6 +1131,7 @@ class TestModuleCCommerce(unittest.TestCase):
 
         resp = self.client.post("/api/v1/payments/vietqr/create", json={
             "order_code": order.order_code,
+            "phone_verify": order.customer_phone,
         })
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
@@ -1129,7 +1167,7 @@ class TestModuleCCommerce(unittest.TestCase):
         self.db.add(tx)
         self.db.commit()
 
-        resp = self.client.get(f"/api/v1/payments/reconciliation/order/{order.order_code}")
+        resp = self.client.get(f"/api/v1/payments/reconciliation/order/{order.order_code}", headers=self.admin_headers)
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["discrepancy_type"], "UNDERPAID")
@@ -1178,6 +1216,7 @@ class TestModuleCCommerce(unittest.TestCase):
 
         resp = self.client.post(f"/api/v1/payments/orders/{order.order_code}/cancel", json={
             "reason": "Đổi ý không mua nữa",
+            "phone_verify": order.customer_phone,
         })
         self.assertEqual(resp.status_code, 200)
         self.db.refresh(order)
@@ -1239,6 +1278,7 @@ class TestModuleCCommerce(unittest.TestCase):
         # Hủy đơn -> available phải hoàn lại 30
         self.client.post(f"/api/v1/payments/orders/{code}/cancel", json={
             "reason": "Hủy đơn thử nghiệm giải phóng tồn",
+            "phone_verify": payload["customer_phone"],
         })
         self.db.refresh(stock)
         self.assertEqual(stock.quantity_available, 30)
@@ -1261,10 +1301,40 @@ class TestModuleCCommerce(unittest.TestCase):
         self.db.add(order)
         self.db.commit()
 
-        resp = self.client.get(f"/api/v1/store/orders/customer/{phone}")
+        # 1. Khách hàng chưa đăng nhập -> 401 Unauthorized
+        resp_unauth = self.client.get(f"/api/v1/store/orders/customer/{phone}")
+        self.assertEqual(resp_unauth.status_code, 401)
+
+        # 2. Đăng nhập đúng tài khoản sở hữu SĐT này
+        from app.models.entities import User
+        from app.models.enums import UserRole
+        from app.core.security import create_access_token, hash_password
+
+        cust_user = self.db.query(User).filter_by(phone=phone).first()
+        if not cust_user:
+            cust_user = User(
+                email=f"owner_{phone}@h4care.vn",
+                phone=phone,
+                password_hash=hash_password("Pass@123"),
+                full_name="Chủ Đơn",
+                role=UserRole.CUSTOMER,
+                is_active=True,
+            )
+            self.db.add(cust_user)
+            self.db.commit()
+
+        token = create_access_token(str(cust_user.id), "CUSTOMER")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # 3. Khách hàng xem đúng đơn của mình -> 200 OK
+        resp = self.client.get(f"/api/v1/store/orders/customer/{phone}", headers=headers)
         self.assertEqual(resp.status_code, 200)
         orders = resp.json()
         self.assertTrue(any(o["order_code"] == order.order_code for o in orders))
+
+        # 4. Cố tình tra cứu SĐT người khác -> 403 Forbidden
+        resp_idor = self.client.get("/api/v1/store/orders/customer/0988888888", headers=headers)
+        self.assertEqual(resp_idor.status_code, 403)
 
     # =========================================================================
     # 34. REFUND / RETURN INTEGRATION

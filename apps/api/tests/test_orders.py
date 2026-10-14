@@ -203,7 +203,16 @@ class TestOrdersSystem(unittest.TestCase):
         self.db.add(order)
         self.db.commit()
 
-        resp = self.client.get(f"/api/v1/store/orders/{order.order_code}")
+        # 1. Truy cập không cung cấp SĐT -> 403 Forbidden
+        resp_unauth = self.client.get(f"/api/v1/store/orders/{order.order_code}")
+        self.assertEqual(resp_unauth.status_code, 403)
+
+        # 2. Truy cập với sai SĐT -> 403 Forbidden
+        resp_wrong = self.client.get(f"/api/v1/store/orders/{order.order_code}?phone=0999999999")
+        self.assertEqual(resp_wrong.status_code, 403)
+
+        # 3. Truy cập với đúng SĐT đặt hàng -> 200 OK
+        resp = self.client.get(f"/api/v1/store/orders/{order.order_code}?phone={order.customer_phone}")
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["order_code"], "PT-260927-9999")

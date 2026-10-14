@@ -93,7 +93,7 @@ async def upload_file(
     initial_quantity: Optional[int] = Form(100),
     source_id: Optional[int] = Form(None),
     is_demo: bool = Form(False),
-    force_update: bool = Form(True),
+    force_update: bool = Form(False),
     auto_approve: bool = Form(True),
     user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
     db: Session = Depends(get_db),

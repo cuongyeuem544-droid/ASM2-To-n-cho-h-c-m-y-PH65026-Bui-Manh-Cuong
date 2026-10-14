@@ -141,10 +141,21 @@ class FulfillmentRoutingService:
         )
         today = date.today()
 
-        # 1. Map mỗi order item sang SKU
+        # 1. Map mỗi order item sang SKU chính xác (hỗ trợ multi-SKU người dùng chọn)
         item_sku_map: dict[int, ProductSku] = {}
         for it in items:
-            item_sku_map[it.id] = cls.get_or_create_default_sku(db, it.product_id)
+            sku_obj: Optional[ProductSku] = None
+            if it.product_sku:
+                raw_sku_code = it.product_sku.split(" ")[0].strip()
+                if raw_sku_code.startswith("SKU-"):
+                    sku_obj = db.scalar(select(ProductSku).where(ProductSku.sku_code == raw_sku_code))
+                if not sku_obj and it.product_sku.startswith("SKU-"):
+                    sku_obj = db.scalar(select(ProductSku).where(ProductSku.sku_code == it.product_sku.strip()))
+            if not sku_obj and it.product_id:
+                sku_obj = cls.get_or_create_default_sku(db, it.product_id)
+            if not sku_obj:
+                raise HTTPException(status_code=400, detail=f"Không tìm thấy quy cách đóng gói (SKU) hợp lệ cho '{it.product_name}'.")
+            item_sku_map[it.id] = sku_obj
 
         # 2. Kiểm tra tồn khả dụng của từng sản phẩm tại từng kho (chỉ xét lô ACTIVE và còn hạn dùng)
         # warehouse_id -> sku_id -> available_qty

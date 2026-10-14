@@ -1,12 +1,14 @@
 from typing import Any, Optional
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_optional_current_user, require_roles
 from app.core.config import settings
 from app.db.session import get_db
-from app.models import Order, PaymentTransaction
+from app.models import Order, PaymentTransaction, User
+from app.models.enums import UserRole
 from app.services.fulfillment_service import FulfillmentRoutingService
 from app.services.momo_service import MomoPaymentService
 from app.services.payment_intent_service import PaymentIntentService
@@ -23,6 +25,7 @@ payments_router = APIRouter(prefix="/payments", tags=["Cổng thanh toán & Đ�
 class CreateMomoPaymentRequest(BaseModel):
     order_code: str = Field(..., min_length=5, max_length=50)
     return_url: Optional[str] = None
+    phone_verify: Optional[str] = None
 
 
 class SimulatePaymentRequest(BaseModel):
@@ -33,6 +36,7 @@ class SimulatePaymentRequest(BaseModel):
 class CreateVietQrPaymentRequest(BaseModel):
     order_code: str = Field(..., min_length=5, max_length=50)
     return_url: Optional[str] = None
+    phone_verify: Optional[str] = None
 
 
 class SimulateVietQrRequest(BaseModel):
@@ -45,18 +49,21 @@ class CreatePaymentIntentRequest(BaseModel):
     order_code: str = Field(..., min_length=5, max_length=50)
     payment_method: str = Field(default="COD")
     return_url: Optional[str] = None
+    phone_verify: Optional[str] = None
 
 
 class RetryPaymentRequest(BaseModel):
     order_code: str = Field(..., min_length=5, max_length=50)
     new_payment_method: str = Field(..., min_length=2, max_length=30)
     return_url: Optional[str] = None
+    phone_verify: Optional[str] = None
 
 
 class CreateExchangeIntentRequest(BaseModel):
     exchange_code: str = Field(..., min_length=5, max_length=50)
     payment_method: str = Field(default="VIETQR")
     return_url: Optional[str] = None
+    phone_verify: Optional[str] = None
 
 
 class SimulateExchangePaymentRequest(BaseModel):
@@ -67,6 +74,73 @@ class SimulateExchangePaymentRequest(BaseModel):
 
 class CancelOrderRequest(BaseModel):
     reason: Optional[str] = "Khách hàng yêu cầu hủy đơn hàng"
+    phone_verify: Optional[str] = None
+
+
+# ==============================================================================
+# SECURITY HELPERS (Fail-Closed Simulation & Order Ownership Verification)
+# ==============================================================================
+
+def _assert_simulation_allowed() -> None:
+    """
+    Cơ chế Fail-Closed: Chỉ cho phép mô phỏng thanh toán khi:
+    - app_env thuộc nhóm ['development', 'dev', 'test', 'local']
+    - enable_payment_simulator được bật tường minh là True.
+    Mọi trường hợp khác (production, staging, public, hoặc cấu hình sai/thiếu):
+    chặn lập tức với HTTP 403 Forbidden.
+    """
+    if not getattr(settings, "is_simulator_permitted", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Chức năng mô phỏng thanh toán bị vô hiệu hóa hoàn toàn trên môi trường công khai / production.",
+        )
+
+
+def _verify_order_payment_access(
+    order: Order,
+    current_user: Optional[User],
+    phone_verify: Optional[str] = None,
+    action_name: str = "thao tác trên đơn hàng",
+) -> None:
+    """
+    Xác thực quyền thao tác trên đơn hàng cho các tác vụ thanh toán/hủy đơn (Anti-IDOR).
+    - Nhân viên (ADMIN, PHARMACIST, DATA_REVIEWER): Toàn quyền.
+    - Khách hàng đã đăng nhập (CUSTOMER): Chỉ thao tác trên đơn của chính mình (order.user_id == current_user.id).
+    - Khách vãng lai: Bắt buộc cung cấp số điện thoại (phone_verify) khớp chính xác với số điện thoại đặt hàng.
+    """
+    is_staff = current_user and getattr(current_user, "role", "") in ["ADMIN", "PHARMACIST", "DATA_REVIEWER"]
+    if is_staff:
+        return
+
+    clean_order_phone = (order.customer_phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
+
+    if current_user and getattr(current_user, "role", "") == "CUSTOMER":
+        if order.user_id is not None and order.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Bạn không có quyền {action_name} này.",
+            )
+        if order.user_id is None:
+            clean_user_phone = (current_user.phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
+            clean_req_phone = phone_verify.strip().replace(" ", "").replace(".", "").replace("-", "") if phone_verify else ""
+            if clean_user_phone != clean_order_phone and clean_req_phone != clean_order_phone:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Bạn không có quyền {action_name} này.",
+                )
+    else:
+        # Khách vãng lai chưa đăng nhập
+        if not phone_verify or not phone_verify.strip():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Vui lòng đăng nhập hoặc cung cấp số điện thoại đặt hàng (phone_verify) để {action_name}.",
+            )
+        clean_input = phone_verify.strip().replace(" ", "").replace(".", "").replace("-", "")
+        if clean_input != clean_order_phone:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Số điện thoại xác thực không khớp với thông tin đơn hàng.",
+            )
 
 
 # ==============================================================================
@@ -76,6 +150,7 @@ class CancelOrderRequest(BaseModel):
 @payments_router.post("/momo/create")
 def create_momo_payment(
     payload: CreateMomoPaymentRequest,
+    current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -85,6 +160,8 @@ def create_momo_payment(
     order = db.scalar(select(Order).where(Order.order_code == payload.order_code.strip()))
     if not order:
         raise HTTPException(status_code=404, detail=f"Không tìm thấy đơn hàng '{payload.order_code}'")
+
+    _verify_order_payment_access(order, current_user, phone_verify=payload.phone_verify, action_name="tạo thanh toán MoMo")
 
     if order.payment_status == "PAID":
         raise HTTPException(status_code=400, detail="Đơn hàng này đã được thanh toán thành công trước đó.")
@@ -121,14 +198,10 @@ def simulate_momo_payment(
     db: Session = Depends(get_db),
 ):
     """
-    [MÔI TRƯỜNG DEV/DEMO] Mô phỏng quét mã thanh toán MoMo thành công trực tiếp trên máy chủ cục bộ
-    mà không cần thông qua mạng công cộng.
+    [MÔI TRƯỜNG DEV/DEMO] Mô phỏng quét mã thanh toán MoMo thành công trực tiếp trên máy chủ cục bộ.
+    Vô hiệu hóa tuyệt đối trên môi trường production/public (Fail-Closed).
     """
-    if getattr(settings, "app_env", "").lower() == "production":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Chức năng mô phỏng thanh toán bị vô hiệu hóa hoàn toàn trên môi trường Production.",
-        )
+    _assert_simulation_allowed()
     return MomoPaymentService.simulate_payment(
         db=db,
         order_code=payload.order_code.strip(),
@@ -143,6 +216,7 @@ def simulate_momo_payment(
 @payments_router.post("/vietqr/create")
 def create_vietqr_payment(
     payload: CreateVietQrPaymentRequest,
+    current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -152,6 +226,8 @@ def create_vietqr_payment(
     order = db.scalar(select(Order).where(Order.order_code == payload.order_code.strip()))
     if not order:
         raise HTTPException(status_code=404, detail=f"Không tìm thấy đơn hàng '{payload.order_code}'")
+
+    _verify_order_payment_access(order, current_user, phone_verify=payload.phone_verify, action_name="tạo mã VietQR")
 
     return VietQrService.create_payment_request(
         db=db,
@@ -194,12 +270,9 @@ def simulate_vietqr_payment(
 ):
     """
     [MÔI TRƯỜNG DEV/DEMO] Giả lập nhận tiền chuyển khoản VietQR thành công trên local.
+    Vô hiệu hóa tuyệt đối trên môi trường production/public (Fail-Closed).
     """
-    if getattr(settings, "app_env", "").lower() == "production":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Chức năng mô phỏng thanh toán bị vô hiệu hóa hoàn toàn trên môi trường Production.",
-        )
+    _assert_simulation_allowed()
     return VietQrService.simulate_payment(
         db=db,
         code=payload.code.strip(),
@@ -215,12 +288,19 @@ def simulate_vietqr_payment(
 @payments_router.post("/intent")
 def create_payment_intent(
     payload: CreatePaymentIntentRequest,
+    current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
     """
     Khởi tạo Payment Intent hợp nhất:
     Hỗ trợ COD, VietQR Napas 247, và MoMo Sandbox. Trả về thông tin đầy đủ để giao diện hiển thị.
     """
+    order = db.scalar(select(Order).where(Order.order_code == payload.order_code.strip()))
+    if not order:
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy đơn hàng '{payload.order_code}'")
+
+    _verify_order_payment_access(order, current_user, phone_verify=payload.phone_verify, action_name="khởi tạo thanh toán")
+
     return PaymentIntentService.create_intent(
         db=db,
         order_code=payload.order_code.strip(),
@@ -232,12 +312,19 @@ def create_payment_intent(
 @payments_router.post("/retry")
 def retry_payment(
     payload: RetryPaymentRequest,
+    current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
     """
     Cơ chế Thử lại Thanh toán (Payment Retry) & Chuyển đổi Phương thức thanh toán:
     Hủy an toàn các giao dịch đang treo và tạo Intent mới với phương thức mong muốn.
     """
+    order = db.scalar(select(Order).where(Order.order_code == payload.order_code.strip()))
+    if not order:
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy đơn hàng '{payload.order_code}'")
+
+    _verify_order_payment_access(order, current_user, phone_verify=payload.phone_verify, action_name="thử lại thanh toán")
+
     return PaymentIntentService.retry_payment(
         db=db,
         order_code=payload.order_code.strip(),
@@ -253,14 +340,25 @@ def retry_payment(
 @payments_router.post("/exchange/intent")
 def create_exchange_payment_intent(
     payload: CreateExchangeIntentRequest,
+    current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
     """
     Khởi tạo Payment Intent thu phụ phí chênh lệch cho Đơn đổi hàng (ExchangeOrder).
     """
+    from app.models.returns import ExchangeOrder
+    clean_code = payload.exchange_code.strip().upper()
+    exchange = db.scalar(select(ExchangeOrder).where(ExchangeOrder.exchange_code == clean_code))
+    if not exchange:
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy đơn đổi hàng '{clean_code}'.")
+
+    orig_order = db.get(Order, exchange.original_order_id)
+    if orig_order:
+        _verify_order_payment_access(orig_order, current_user, phone_verify=payload.phone_verify, action_name="thanh toán phụ phí đổi hàng")
+
     return PaymentIntentService.create_exchange_intent(
         db=db,
-        exchange_code=payload.exchange_code.strip(),
+        exchange_code=clean_code,
         payment_method=payload.payment_method,
         return_url=payload.return_url,
     )
@@ -273,12 +371,9 @@ def simulate_exchange_payment(
 ):
     """
     [MÔI TRƯỜNG DEV/DEMO] Mô phỏng khách hàng đã thanh toán phụ phí đổi hàng thành công.
+    Vô hiệu hóa tuyệt đối trên môi trường production/public (Fail-Closed).
     """
-    if getattr(settings, "app_env", "").lower() == "production":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Chức năng mô phỏng thanh toán bị vô hiệu hóa hoàn toàn trên môi trường Production.",
-        )
+    _assert_simulation_allowed()
     return VietQrService.simulate_payment(
         db=db,
         code=payload.exchange_code.strip(),
@@ -294,20 +389,43 @@ def simulate_exchange_payment(
 @payments_router.get("/orders/{order_code}/status")
 def get_order_payment_status(
     order_code: str,
+    phone_verify: Optional[str] = Query(None, description="Số điện thoại đặt hàng để xác thực"),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
     """
     Kiểm tra trạng thái thanh toán hiện tại của đơn hàng, kèm toàn bộ lịch sử giao dịch.
+    Hỗ trợ cả mã đơn thường và mã đơn đổi hàng (EXC-).
     """
+    clean_code = order_code.strip()
+
+    if clean_code.startswith("EXC-"):
+        from app.models.returns import ExchangeOrder
+        exchange = db.scalar(select(ExchangeOrder).where(ExchangeOrder.exchange_code == clean_code))
+        if not exchange:
+            raise HTTPException(status_code=404, detail="Không tìm thấy đơn đổi hàng.")
+        orig_order = db.get(Order, exchange.original_order_id)
+        if orig_order:
+            _verify_order_payment_access(orig_order, current_user, phone_verify=phone_verify, action_name="tra cứu thanh toán đổi hàng")
+        return PaymentIntentService.get_order_payment_summary(db=db, order_code=clean_code)
+
+    order = db.scalar(select(Order).where(Order.order_code == clean_code))
+    if not order:
+        raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng.")
+
+    _verify_order_payment_access(order, current_user, phone_verify=phone_verify, action_name="tra cứu thanh toán")
+
     return PaymentIntentService.get_order_payment_summary(
         db=db,
-        order_code=order_code.strip(),
+        order_code=clean_code,
     )
 
 
 @payments_router.get("/transactions/{transaction_code}/status")
 def get_transaction_status(
     transaction_code: str,
+    phone_verify: Optional[str] = Query(None),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -320,6 +438,11 @@ def get_transaction_status(
     )
     if not trans:
         raise HTTPException(status_code=404, detail="Không tìm thấy giao dịch thanh toán.")
+
+    if trans.order_id:
+        order = db.get(Order, trans.order_id)
+        if order:
+            _verify_order_payment_access(order, current_user, phone_verify=phone_verify, action_name="tra cứu giao dịch")
 
     return {
         "id": trans.id,
@@ -337,17 +460,17 @@ def get_transaction_status(
 
 
 # ==============================================================================
-# 6. PAYMENT RECONCILIATION CORE
+# 6. PAYMENT RECONCILIATION CORE (Strict Staff Only: ADMIN, PHARMACIST)
 # ==============================================================================
 
 @payments_router.get("/reconciliation/order/{order_code}")
 def reconcile_single_order(
     order_code: str,
+    current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.PHARMACIST)),
     db: Session = Depends(get_db),
 ):
     """
-    Đối soát tài chính giữa số tiền đơn hàng và các giao dịch thanh toán thực nhận.
-    Phát hiện MATCHED, OVERPAID, UNDERPAID, DUPLICATE_PAYMENT, INCONSISTENT_STATUS.
+    [NỘI BỘ DƯỢC SĨ/ADMIN] Đối soát tài chính giữa số tiền đơn hàng và các giao dịch thực nhận.
     """
     return PaymentReconciliationService.reconcile_order(
         db=db,
@@ -358,10 +481,11 @@ def reconcile_single_order(
 @payments_router.post("/reconciliation/heal/{order_code}")
 def auto_heal_order_status(
     order_code: str,
+    current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.PHARMACIST)),
     db: Session = Depends(get_db),
 ):
     """
-    Tự động khắc phục sai lệch trạng thái nếu tiền đã vào cổng thành công 100% nhưng đơn hàng chưa chuyển PAID.
+    [NỘI BỘ DƯỢC SĨ/ADMIN] Tự động khắc phục sai lệch trạng thái nếu tiền đã vào cổng thành công 100%.
     """
     return PaymentReconciliationService.auto_heal_order(
         db=db,
@@ -372,10 +496,11 @@ def auto_heal_order_status(
 @payments_router.get("/reconciliation/audit")
 def audit_payment_reconciliation(
     limit: int = 50,
+    current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.PHARMACIST)),
     db: Session = Depends(get_db),
 ):
     """
-    Báo cáo kiểm toán đối soát tổng thể toàn hệ thống cho các đơn hàng gần đây.
+    [NỘI BỘ DƯỢC SĨ/ADMIN] Báo cáo kiểm toán đối soát tổng thể toàn hệ thống cho các đơn hàng gần đây.
     """
     return PaymentReconciliationService.audit_system(
         db=db,
@@ -391,6 +516,7 @@ def audit_payment_reconciliation(
 def cancel_order_and_release_stock(
     order_code: str,
     payload: CancelOrderRequest,
+    current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -401,6 +527,8 @@ def cancel_order_and_release_stock(
     order = db.scalar(select(Order).where(Order.order_code == clean_code))
     if not order:
         raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng.")
+
+    _verify_order_payment_access(order, current_user, phone_verify=payload.phone_verify, action_name="hủy đơn hàng")
 
     if order.order_status in ["SHIPPING", "COMPLETED"]:
         raise HTTPException(
@@ -429,11 +557,11 @@ def cancel_order_and_release_stock(
 @payments_router.post("/reservations/expire-stale")
 def trigger_stale_reservations_expiration(
     max_age_minutes: int = 30,
+    current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.PHARMACIST)),
     db: Session = Depends(get_db),
 ):
     """
-    [JOB BẢO TRÌ ĐỊNH KỲ] Tự động quét và giải phóng thuốc giữ chỗ cho các đơn hàng trực tuyến
-    (MoMo/VietQR) đã quá thời hạn cho phép thanh toán mà khách chưa hoàn tất.
+    [JOB BẢO TRÌ ĐỊNH KỲ] Quét và giải phóng thuốc giữ chỗ cho các đơn hàng trực tuyến quá hạn thanh toán.
     """
     cancelled = FulfillmentRoutingService.expire_stale_reservations(
         db=db,

@@ -196,23 +196,38 @@ def get_my_return_requests(
     current_user: Optional[User] = Depends(get_optional_current_user),
 ):
     """
-    Lấy danh sách các yêu cầu đổi/trả của khách hàng hiện tại hoặc tra cứu theo SĐT đã xác thực.
+    Lấy danh sách các yêu cầu đổi/trả của khách hàng hiện tại (Bảo đảm cách ly tài khoản).
+    - Khách hàng bắt buộc phải đăng nhập.
+    - User chỉ được xem danh sách yêu cầu đổi/trả thuộc tài khoản hoặc số điện thoại của chính mình.
     """
-    query = select(ReturnRequest).order_by(ReturnRequest.id.desc())
-
-    if current_user and current_user.role == "CUSTOMER":
-        query = query.where(ReturnRequest.user_id == current_user.id)
-    elif customer_phone:
-        clean_phone = customer_phone.strip().replace(" ", "").replace(".", "").replace("-", "")
-        if len(clean_phone) < 9:
-            raise HTTPException(status_code=400, detail="Số điện thoại tra cứu không hợp lệ (tối thiểu 9-10 chữ số).")
-        query = query.where(ReturnRequest.customer_phone == clean_phone)
-    else:
-        # Nếu chưa đăng nhập và không truyền SĐT -> Yêu cầu đăng nhập hoặc nhập SĐT
+    if not current_user:
         raise HTTPException(
             status_code=401,
-            detail="Vui lòng đăng nhập hoặc cung cấp số điện thoại để tra cứu yêu cầu đổi trả.",
+            detail="Vui lòng đăng nhập để tra cứu danh sách yêu cầu đổi/trả.",
         )
+
+    is_staff = getattr(current_user, "role", "") in ["ADMIN", "PHARMACIST", "DATA_REVIEWER"]
+    clean_user_phone = (current_user.phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
+
+    query = select(ReturnRequest).order_by(ReturnRequest.id.desc())
+
+    if not is_staff:
+        if customer_phone:
+            clean_param_phone = customer_phone.strip().replace(" ", "").replace(".", "").replace("-", "")
+            if clean_param_phone != clean_user_phone:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Bạn không có quyền xem danh sách đổi/trả của số điện thoại khác.",
+                )
+        query = query.where(
+            or_(
+                ReturnRequest.user_id == current_user.id,
+                ReturnRequest.customer_phone == clean_user_phone,
+            )
+        )
+    elif customer_phone:
+        clean_phone = customer_phone.strip().replace(" ", "").replace(".", "").replace("-", "")
+        query = query.where(ReturnRequest.customer_phone == clean_phone)
 
     records = db.scalars(query.limit(limit)).all()
 
@@ -243,26 +258,40 @@ def get_return_detail(
 ):
     """
     Xem chi tiết tiến trình đổi/trả, dòng thời gian (timeline), thông tin bưu tá và đối soát hoàn tiền.
+    Yêu cầu bảo mật:
+    - Nhân viên (ADMIN, PHARMACIST): Toàn quyền tra cứu để xử lý nghiệp vụ.
+    - Khách hàng đã đăng nhập (CUSTOMER): Chỉ được xem yêu cầu thuộc tài khoản của chính mình.
+    - Khách vãng lai: Bắt buộc cung cấp đúng số điện thoại đặt hàng (phone_verify) để đối chiếu, cấm người lạ đọc thông tin.
     """
     ret = db.scalar(select(ReturnRequest).where(ReturnRequest.return_code == return_code))
     if not ret:
         raise HTTPException(status_code=404, detail=f"Không tìm thấy yêu cầu '{return_code}'.")
 
-    # Kiểm tra quyền truy cập (Anti-IDOR & Privacy Masking)
+    # Kiểm tra quyền truy cập (Anti-IDOR - Từ chối người chưa đủ quyền)
     is_staff = current_user and getattr(current_user, "role", "") in ["ADMIN", "PHARMACIST", "DATA_REVIEWER"]
-    is_owner = current_user and getattr(current_user, "role", "") == "CUSTOMER" and ret.user_id == current_user.id
-    phone_matched = False
-    if phone_verify and phone_verify.strip():
-        clean_input = phone_verify.strip().replace(" ", "").replace(".", "").replace("-", "")
-        clean_order_phone = (ret.customer_phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
-        if clean_input == clean_order_phone:
-            phone_matched = True
-        else:
-            raise HTTPException(status_code=403, detail="Số điện thoại xác thực không chính xác.")
-    elif current_user and getattr(current_user, "role", "") == "CUSTOMER" and ret.user_id and ret.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập yêu cầu này.")
+    clean_order_phone = (ret.customer_phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
 
-    is_fully_authorized = is_staff or is_owner or phone_matched
+    if not is_staff:
+        if current_user and getattr(current_user, "role", "") == "CUSTOMER":
+            # Đơn gắn với tài khoản khác -> Chặn User A truy cập User B
+            if ret.user_id and ret.user_id != current_user.id:
+                raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập yêu cầu đổi/trả này.")
+            # Đơn chưa gắn user_id (đặt dạng guest trước đó) -> Kiểm tra số điện thoại
+            if not ret.user_id:
+                clean_user_phone = (current_user.phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
+                clean_req_phone = phone_verify.strip().replace(" ", "").replace(".", "").replace("-", "") if phone_verify else ""
+                if clean_user_phone != clean_order_phone and clean_req_phone != clean_order_phone:
+                    raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập yêu cầu đổi/trả này.")
+        else:
+            # Khách vãng lai hoặc chưa đăng nhập: Bắt buộc cung cấp phone_verify khớp chính xác
+            if not phone_verify or not phone_verify.strip():
+                raise HTTPException(
+                    status_code=403,
+                    detail="Vui lòng đăng nhập hoặc cung cấp số điện thoại (phone_verify) để xem thông tin đổi/trả.",
+                )
+            clean_input = phone_verify.strip().replace(" ", "").replace(".", "").replace("-", "")
+            if clean_input != clean_order_phone:
+                raise HTTPException(status_code=403, detail="Số điện thoại xác thực không khớp với yêu cầu đổi/trả.")
 
     # Format danh sách sản phẩm
     items_data = []
@@ -311,12 +340,6 @@ def get_return_detail(
     # Format thông tin hoàn tiền (Refunds)
     refunds_data = []
     for ref in ret.refunds:
-        acc_num = ref.beneficiary_account_number
-        if not is_fully_authorized and acc_num:
-            acc_num = f"****{acc_num[-4:]}" if len(acc_num) >= 4 else "****"
-        acc_name = ref.beneficiary_account_name
-        if not is_fully_authorized and acc_name:
-            acc_name = f"{acc_name[:3]}***" if len(acc_name) >= 3 else "***"
         refunds_data.append({
             "id": ref.id,
             "refund_code": ref.refund_code,
@@ -324,12 +347,12 @@ def get_return_detail(
             "refund_method": ref.refund_method,
             "status": ref.status,
             "reconciliation_status": ref.reconciliation_status,
-            "bank_transfer_ref": ref.bank_transfer_ref if is_fully_authorized else None,
-            "gateway_trans_id": ref.gateway_trans_id if is_fully_authorized else None,
+            "bank_transfer_ref": ref.bank_transfer_ref,
+            "gateway_trans_id": ref.gateway_trans_id,
             "beneficiary_bank": ref.beneficiary_bank,
-            "beneficiary_account_number": acc_num,
-            "beneficiary_account_name": acc_name,
-            "proof_document_url": ref.proof_document_url if is_fully_authorized else None,
+            "beneficiary_account_number": ref.beneficiary_account_number,
+            "beneficiary_account_name": ref.beneficiary_account_name,
+            "proof_document_url": ref.proof_document_url,
             "processed_at": ref.processed_at.isoformat() if ref.processed_at else None,
         })
 

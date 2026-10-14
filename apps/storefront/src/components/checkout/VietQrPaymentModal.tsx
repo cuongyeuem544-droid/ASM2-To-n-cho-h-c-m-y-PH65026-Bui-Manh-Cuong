@@ -65,15 +65,15 @@ export default function VietQrPaymentModal({
 
     const intervalId = setInterval(async () => {
       try {
-        const isExchange = orderCode.startsWith("EXC-");
-        const endpoint = isExchange
-          ? `/api/v1/payments/reconciliation/order/${orderCode}`
-          : `/api/v1/payments/orders/${orderCode}/status`;
+        const token = typeof window !== "undefined" ? localStorage.getItem("h4care_auth_token") : null;
+        const headers: Record<string, string> = {};
+        if (token) headers["Authorization"] = `Bearer ${token}`;
 
-        const res = await fetch(endpoint);
+        const endpoint = `/api/v1/payments/orders/${encodeURIComponent(orderCode)}/status`;
+        const res = await fetch(endpoint, { headers });
         if (res.ok) {
           const data = await res.json();
-          if (data.payment_status === "PAID" || data.status === "ALLOCATING_STOCK" || data.reconciliation_status === "MATCHED") {
+          if (data.payment_status === "PAID" || data.status === "ALLOCATING_STOCK" || data.order_status === "PAID") {
             setIsPaid(true);
             setStatusMessage("Giao dịch chuyển khoản đã được xác nhận thành công!");
             clearInterval(intervalId);

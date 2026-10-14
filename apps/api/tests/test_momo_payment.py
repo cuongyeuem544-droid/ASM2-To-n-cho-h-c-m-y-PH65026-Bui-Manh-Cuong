@@ -180,25 +180,54 @@ class TestMomoPaymentSuite(unittest.TestCase):
 
     def test_02_create_momo_payment_request(self):
         """Khách hàng tạo yêu cầu thanh toán MoMo Sandbox cho đơn hàng."""
+        from unittest.mock import MagicMock, patch
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = '{"resultCode": 0}'
+        mock_resp.json.return_value = {
+            "resultCode": 0,
+            "message": "Success",
+            "payUrl": "https://test-payment.momo.vn/v2/gateway/pay?token=MOMO_TEST_OK",
+            "qrCodeUrl": "https://test-payment.momo.vn/qr/MOMO_TEST_OK",
+            "deeplink": "momo://app?action=payWithApp",
+        }
+
         payload = {
             "order_code": self.order_code,
             "return_url": "http://localhost:3000/checkout/result",
+            "phone_verify": self.order.customer_phone,
         }
-        resp = self.client.post("/api/v1/payments/momo/create", json=payload)
-        self.assertEqual(resp.status_code, 200, resp.text)
-        data = resp.json()
 
-        self.assertEqual(data["status"], "SUCCESS")
-        self.assertEqual(data["order_code"], self.order_code)
-        self.assertEqual(data["amount"], 300000)
-        self.assertIn("pay_url", data)
-        self.assertIn("qr_code_url", data)
+        # 1. Khi gateway phản hồi thành công (resultCode=0)
+        with patch("app.services.momo_service.httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client_cls.return_value.__enter__.return_value = mock_client
+            mock_client.post.return_value = mock_resp
 
-        # Kiểm tra bản ghi PaymentTransaction trong CSDL
-        txn = self.db.query(PaymentTransaction).filter_by(order_id=self.order.id, provider="MOMO").first()
-        self.assertIsNotNone(txn)
-        self.assertEqual(txn.status, "PENDING")
-        self.assertEqual(txn.amount, Decimal("300000.0"))
+            resp = self.client.post("/api/v1/payments/momo/create", json=payload)
+            self.assertEqual(resp.status_code, 200, resp.text)
+            data = resp.json()
+            assert "status" in data, f"KEYS IN DATA: {list(data.keys())}"
+            self.assertEqual(data["status"], "SUCCESS")
+            self.assertEqual(data["order_code"], self.order_code)
+            self.assertEqual(data["amount"], 300000)
+            self.assertIn("pay_url", data)
+            self.assertIn("qr_code_url", data)
+
+            # Kiểm tra bản ghi PaymentTransaction trong CSDL
+            txn = self.db.query(PaymentTransaction).filter_by(order_id=self.order.id, provider="MOMO").first()
+            self.assertIsNotNone(txn)
+            self.assertEqual(txn.status, "PENDING")
+            self.assertEqual(txn.amount, Decimal("300000.0"))
+
+        # 2. Khi gateway bị ngắt kết nối -> Trả về 502 Fail-Safe và không tạo Simulated URL
+        with patch("app.services.momo_service.httpx.Client") as mock_fail_cls:
+            mock_fail = MagicMock()
+            mock_fail_cls.return_value.__enter__.return_value = mock_fail
+            mock_fail.post.side_effect = Exception("Gateway unreachable")
+            fail_resp = self.client.post("/api/v1/payments/momo/create", json=payload)
+            self.assertEqual(fail_resp.status_code, 502)
 
     def test_03_momo_ipn_webhook_success_completes_order(self):
         """IPN Webhook từ MoMo với resultCode=0 xác nhận đơn hàng đã thanh toán thành công."""
@@ -323,8 +352,13 @@ class TestMomoPaymentSuite(unittest.TestCase):
         self.assertEqual(self.order.payment_status, "PAID")
 
     def test_06_query_payment_status(self):
-        """Tra cứu trạng thái thanh toán đơn hàng qua API."""
-        resp = self.client.get(f"/api/v1/payments/orders/{self.order_code}/status")
+        """Tra cứu trạng thái thanh toán đơn hàng qua API với kiểm tra xác thực."""
+        # Không có số điện thoại -> 403
+        resp_unauth = self.client.get(f"/api/v1/payments/orders/{self.order_code}/status")
+        self.assertEqual(resp_unauth.status_code, 403)
+
+        # Có số điện thoại khớp -> 200
+        resp = self.client.get(f"/api/v1/payments/orders/{self.order_code}/status?phone_verify={self.order.customer_phone}")
         self.assertEqual(resp.status_code, 200, resp.text)
         data = resp.json()
 
