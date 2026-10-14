@@ -10,6 +10,7 @@ import {
   Bot,
   ShieldCheck,
   Sparkles,
+  Pill,
 } from "lucide-react";
 import { ChatMessage, ChatResponse } from "@/lib/chatbot/types";
 import { ChatMessageList } from "./ChatMessageList";
@@ -43,6 +44,15 @@ export const ChatbotWidget: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [hasUnread, setHasUnread] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
+  const [contextProduct, setContextProduct] = useState<{
+    id: string;
+    name: string;
+    slug: string;
+    brand?: string;
+    activeIngredient?: string;
+    price?: number;
+    isPrescription?: boolean;
+  } | null>(null);
 
   // Khôi phục lịch sử chat từ sessionStorage khi component mount
   useEffect(() => {
@@ -60,6 +70,29 @@ export const ChatbotWidget: React.FC = () => {
     }
   }, []);
 
+  // Lắng nghe sự kiện mở chat từ trang sản phẩm (PDP)
+  useEffect(() => {
+    const handleOpenChat = (event: Event) => {
+      const customEvent = event as CustomEvent<{
+        message?: string;
+        contextProduct?: any;
+      }>;
+      setIsOpen(true);
+      setIsMinimized(false);
+      if (customEvent.detail?.contextProduct) {
+        setContextProduct(customEvent.detail.contextProduct);
+      }
+      if (customEvent.detail?.message) {
+        handleSendMessage(customEvent.detail.message, customEvent.detail.contextProduct);
+      }
+    };
+
+    window.addEventListener("h4care_open_chat", handleOpenChat);
+    return () => {
+      window.removeEventListener("h4care_open_chat", handleOpenChat);
+    };
+  }, [messages, isLoading, contextProduct]);
+
   // Lưu lịch sử chat vào sessionStorage khi có thay đổi
   useEffect(() => {
     if (!isMounted) return;
@@ -70,8 +103,10 @@ export const ChatbotWidget: React.FC = () => {
     }
   }, [messages, isMounted]);
 
-  const handleSendMessage = async (text: string) => {
+  const handleSendMessage = async (text: string, overrideProduct?: any) => {
     if (!text.trim() || isLoading) return;
+
+    const currentProduct = overrideProduct || contextProduct;
 
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
@@ -99,6 +134,7 @@ export const ChatbotWidget: React.FC = () => {
         body: JSON.stringify({
           message: text,
           conversationHistory: historyForApi,
+          contextProduct: currentProduct || undefined,
         }),
       });
 
@@ -246,6 +282,26 @@ export const ChatbotWidget: React.FC = () => {
             {/* Nội dung khi không bị thu nhỏ */}
             {!isMinimized && (
               <>
+                {/* Banner Ngữ Cảnh Sản Phẩm (nếu mở từ PDP) */}
+                {contextProduct && (
+                  <div className="px-3 py-1.5 bg-brand-blue-50/90 border-b border-brand-blue-100 flex items-center justify-between text-xs text-brand-blue-900 shrink-0">
+                    <div className="flex items-center gap-1.5 truncate">
+                      <Pill className="w-3.5 h-3.5 text-brand-blue-600 shrink-0" />
+                      <span className="text-[11px] font-bold truncate">
+                        Đang tư vấn: {contextProduct.name}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setContextProduct(null)}
+                      className="p-1 text-slate-400 hover:text-slate-700 ml-2 rounded transition-colors"
+                      title="Bỏ ngữ cảnh sản phẩm"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+
                 {/* Danh sách tin nhắn */}
                 <ChatMessageList messages={messages} isLoading={isLoading} />
 

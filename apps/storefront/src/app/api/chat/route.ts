@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { message, conversationHistory = [] } = body;
+    const { message, conversationHistory = [], contextProduct, currentUser } = body;
 
     if (!message || typeof message !== "string" || message.trim().length === 0) {
       return NextResponse.json(
@@ -93,7 +93,8 @@ export async function POST(req: NextRequest) {
     // 4. Gọi bộ máy AI điều phối
     const response: ChatResponse = await getAiChatResponse(
       message.trim(),
-      cleanHistory
+      cleanHistory,
+      { currentUser, contextProduct }
     );
 
     return NextResponse.json(response, { status: 200 });

@@ -41,6 +41,8 @@ import {
   Layers,
   Sparkles,
   ArrowRight,
+  Bot,
+  MessageSquare,
 } from "lucide-react";
 
 const FALLBACK_MEDICINE_IMAGE =
@@ -153,6 +155,27 @@ export default function ProductDetailPage() {
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 2500);
     }
+  };
+
+  // Hỏi Trợ lý AI H4CARE về sản phẩm này
+  const handleAskAssistant = () => {
+    if (!product || typeof window === "undefined") return;
+    window.dispatchEvent(
+      new CustomEvent("h4care_open_chat", {
+        detail: {
+          message: `Cho tôi hỏi thêm thông tin về sản phẩm ${product.name}`,
+          contextProduct: {
+            id: String(product.id || product.dbId || ""),
+            name: product.name,
+            slug: product.slug,
+            brand: product.brand,
+            activeIngredient: product.activeIngredient,
+            price: product.price,
+            isPrescription: product.isPrescription,
+          },
+        },
+      })
+    );
   };
 
   // 3. Shopping cart action handler
@@ -610,6 +633,15 @@ export default function ProductDetailPage() {
                         Gửi Đơn Thuốc & Tư Vấn Dược Sĩ Trực Tuyến
                       </Button>
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={handleAskAssistant}
+                      className="w-full py-2.5 px-4 rounded-xl border border-brand-blue-200 bg-brand-blue-50 hover:bg-brand-blue-100 text-brand-blue-700 font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-2xs"
+                    >
+                      <Bot className="w-4 h-4 text-brand-blue-600" />
+                      <span>Hỏi Trợ Lý AI Về Sản Phẩm Này</span>
+                    </button>
                   </div>
                 ) : product.catalogTier === "REFERENCE_ONLY" ? (
                   /* 2. SẢN PHẨM DANH MỤC THAM KHẢO / CHƯA MỞ BÁN THẬT */
@@ -638,6 +670,15 @@ export default function ProductDetailPage() {
                         Gửi Câu Hỏi Cho Dược Sĩ Trực Tuyến
                       </Button>
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={handleAskAssistant}
+                      className="w-full py-2.5 px-4 rounded-xl border border-brand-blue-200 bg-brand-blue-50 hover:bg-brand-blue-100 text-brand-blue-700 font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-2xs"
+                    >
+                      <Bot className="w-4 h-4 text-brand-blue-600" />
+                      <span>Hỏi Trợ Lý AI Về Sản Phẩm Này</span>
+                    </button>
                   </div>
                 ) : (
                   /* 3. SẢN PHẨM ĐỦ ĐIỀU KIỆN MỞ BÁN THƯƠNG MẠI (SALE_ELIGIBLE) */
@@ -690,6 +731,16 @@ export default function ProductDetailPage() {
                         Mua Ngay
                       </Button>
                     </div>
+
+                    {/* Nút Hỏi Trợ Lý AI Về Sản Phẩm Này */}
+                    <button
+                      type="button"
+                      onClick={handleAskAssistant}
+                      className="w-full py-2.5 px-4 rounded-xl border border-brand-blue-200 bg-brand-blue-50 hover:bg-brand-blue-100 text-brand-blue-700 font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-2xs"
+                    >
+                      <Bot className="w-4 h-4 text-brand-blue-600" />
+                      <span>Hỏi Trợ Lý AI Về Sản Phẩm Này</span>
+                    </button>
 
                     {/* Delivery & Payment Assurance Badge */}
                     <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs text-slate-600">

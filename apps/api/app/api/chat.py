@@ -107,6 +107,10 @@ RED_FLAG_KEYWORDS = [
     ("co giat", "CẢNH BÁO: CO GIẬT", "Sốt cao kèm co giật cần được đưa tới bệnh viện ngay lập tức."),
     ("non ra mau", "CẢNH BÁO: XUẤT HUYẾT TIÊU HÓA", "Nôn ra máu hoặc đi ngoài phân đen cần cấp cứu y tế ngay lập tức."),
     ("meo mieng", "CẢNH BÁO: DẤU HIỆU ĐỘT QUỴ", "Dấu hiệu méo miệng, yếu liệt nửa người cần cấp cứu trong thời gian vàng 3-4 giờ."),
+    ("ngat", "CẢNH BÁO KHẨN CẤP: DẤU HIỆU NGẤT / MẤT Ý THỨC", "Dấu hiệu ngất, choáng váng mất tri giác hoặc đau dữ dội kèm ngất là tình trạng cấp cứu tối khẩn. Cần đưa người bệnh đến cơ sở y tế hoặc gọi 115 ngay lập tức."),
+    ("bat tinh", "CẢNH BÁO KHẨN CẤP: BẤT TỈNH / HÔN MÊ", "Người bệnh bất tỉnh cần được hỗ trợ y tế khẩn cấp. Hãy gọi 115 ngay lập tức."),
+    ("hon me", "CẢNH BÁO KHẨN CẤP: HÔN MÊ", "Người bệnh rơi vào trạng thái hôn mê cần cấp cứu ngay."),
+    ("dau bung du doi", "CẢNH BÁO: ĐAU BỤNG CẤP DỮ DỘI", "Cơn đau bụng dữ dội đột ngột có thể là dấu hiệu viêm ruột thừa cấp hoặc thủng tạng rỗng. Cần đi cấp cứu ngay."),
 ]
 
 
@@ -197,6 +201,29 @@ def chat_with_pharmacist(
             reply="Chào bạn, tình trạng đau đầu kéo dài cần được theo dõi cẩn thận. Bạn cho mình hỏi thêm: **Bạn đau ở mức độ nào (đau âm ỉ cả đầu hay đau nhói nửa đầu) và có kèm theo sốt, chóng mặt hay buồn nôn không ạ?** Người bệnh là người lớn hay trẻ em vậy ạ?",
             quick_replies=["Đau âm ỉ, không sốt", "Đau nửa đầu", "Dành cho trẻ em"],
             provider_used="fastapi_h4care_expert",
+        )
+
+    # 8.1. Hỗ trợ gặp Dược sĩ thật (HUMAN_SUPPORT)
+    if re.search(r"\b(duoc si that|bac si that|gap duoc si|gap bac si|nguoi that|gap nhan vien|nhan vien tu van|tong dai)\b", norm_msg, re.IGNORECASE):
+        return ChatResponseSchema(
+            reply="Dạ hiện tại em là **Trợ lý Dược sĩ AI**, không thể chuyển máy trực tiếp cho nhân sự thật qua cửa sổ này.\n\nĐể được kết nối trực tiếp với **Dược sĩ chuyên môn H4CARE**, quý khách vui lòng liên hệ:\n- 📞 **Tổng đài Dược sĩ:** 1800 6828 (Miễn phí cước, 8:00 - 21:00 hàng ngày)\n- ✉️ **Email chuyên môn:** duocsi@h4care.vn\n- 🏥 **Tư vấn trực tiếp:** Tại các chi nhánh nhà thuốc H4CARE chuẩn GPP trên toàn quốc.\n\n*Nếu bạn có câu hỏi về liều dùng hoặc thông tin thuốc cần tra cứu gấp, bạn có thể gửi ngay tại đây để em hỗ trợ nhé!*",
+            quick_replies=["📞 Hotline 1800 6828", "🔍 Tra cứu thuốc", "📦 Tra cứu đơn hàng"],
+            provider_used="fastapi_human_support",
+        )
+
+    # 8.2. Thông tin dược lý thuốc (DRUG_INFORMATION)
+    if re.search(r"\b(paracetamol|panadol|efferalgan|hapacol)\b.*(la thuoc gi|la gi|tac dung gi|cong dung)", norm_msg, re.IGNORECASE) or re.search(r"\b(paracetamol|panadol)\s+la\s+thuoc\s+gi\b", norm_msg, re.IGNORECASE):
+        return ChatResponseSchema(
+            reply="**Paracetamol** (Acetaminophen) là thuốc giảm đau, hạ sốt phổ biến hàng đầu trong y khoa.\n\n- **Chỉ định:** Hạ sốt do cảm cúm, sốt siêu vi; giảm các cơn đau mức độ nhẹ đến vừa như đau đầu, đau răng, đau mỏi cơ, đau bụng kinh.\n- **Liều dùng thông thường (Người lớn):** 500mg - 1000mg/lần, mỗi lần cách nhau tối thiểu 4 - 6 giờ. **Tối đa không quá 4g (4.000mg)/ngày**.\n- ⚠️ **Cảnh báo an toàn (Gan):** Quá liều Paracetamol là nguyên nhân hàng đầu gây ngộ độc và hoại tử tế bào gan cấp. Tuyệt đối không dùng cùng lúc nhiều chế phẩm có chứa Paracetamol và tránh uống rượu bia trong thời gian dùng thuốc.",
+            quick_replies=["💊 Paracetamol có tác dụng phụ gì?", "⚖️ So sánh với Ibuprofen", "🔍 Tìm mua Panadol H4CARE"],
+            provider_used="fastapi_drug_knowledge",
+        )
+
+    if re.search(r"\b(tac dung phu|tac dung khong mong muon|nguy hiem|canh bao|di ung)\b.*(paracetamol|thuoc do|thuoc nay)", norm_msg, re.IGNORECASE) or norm_msg in ["tac dung phu gi", "thuoc do co tac dung phu gi", "thuoc nay co tac dung phu gi"]:
+        return ChatResponseSchema(
+            reply="Về **Tác dụng phụ và Thận trọng an toàn khi dùng Paracetamol**:\n\n- **Tác dụng không mong muốn thường gặp / nhẹ:** Phát ban nhẹ, nổi mề đay, rối loạn tiêu hóa nhẹ (hiếm gặp ở liều chuẩn).\n- ⚠️ **Độc tính trên gan (Cực kỳ nguy hiểm khi quá liều):** Dùng quá 4g/ngày hoặc dùng liều cao kéo dài, hoặc uống chung với rượu bia có thể gây hoại tử tế bào gan không hồi phục.\n- **Chống chỉ định & Thận trọng:** Người suy gan nặng, viêm gan tiến triển, người thiếu hụt men G6PD, người nghiện rượu.\n\n*Nếu xuất hiện dấu hiệu vàng da, mệt lả, nôn nhiều sau khi uống thuốc, cần ngừng thuốc và đến cơ sở y tế ngay lập tức.*",
+            quick_replies=["⚖️ So sánh với Ibuprofen", "📖 Liều dùng đúng cách", "📞 Tổng đài Dược sĩ 1800 6828"],
+            provider_used="fastapi_drug_knowledge",
         )
 
     # 9. Tìm kiếm thuốc trong cơ sở dữ liệu

@@ -41,6 +41,35 @@ export const RED_FLAG_SYMPTOMS = [
     action: "Ngừng ngay thuốc đang dùng, mang theo mẫu thuốc và đến cơ sở y tế gần nhất để tiêm thuốc chống sốc.",
     level: "emergency" as const,
   },
+  {
+    keywords: [
+      "bị ngất",
+      "ngất",
+      "ngất xỉu",
+      "ngất đi",
+      "hôn mê",
+      "bất tỉnh",
+      "choáng ngất",
+      "ngất lịm",
+      "bất tỉnh nhân sự",
+      "ngất xỉu và đau",
+      "đau và ngất",
+      "đau bụng dữ dội và ngất",
+      "đau dữ dội và ngất",
+      "đau bụng và ngất",
+    ],
+    title: "CẢNH BÁO CẤP CỨU P0: DẤU HIỆU NGẤT / MẤT Ý THỨC NGUY KỊCH",
+    message: "Tình trạng ngất xỉu, bất tỉnh hoặc mất ý thức kèm theo cơn đau dữ dội là dấu hiệu cấp cứu y khoa cực kỳ khẩn cấp. Người bệnh có thể gặp nguy cơ sốc mất máu, vỡ tạng nội tạng, trụy tim mạch hoặc viêm phúc mạc cấp đe dọa trực tiếp tính mạng.",
+    action: "HÃY GỌI NGAY CẤP CỨU 115 hoặc nhờ người xung quanh khẩn cấp đưa đến bệnh viện gần nhất! Đặt người bệnh nằm nghiêng an toàn, không cho ăn uống bất cứ thứ gì và TUYỆT ĐỐI KHÔNG tự ý cho uống thuốc giảm đau.",
+    level: "emergency" as const,
+  },
+  {
+    keywords: ["bụng cứng như gỗ", "đau bụng dữ dội đột ngột", "đau dữ dội không chịu nổi", "viêm phúc mạc"],
+    title: "CẢNH BÁO: NGUY CƠ BỤNG NGOẠI KHOA CẤP CỨU",
+    message: "Cơn đau bụng dữ dội đột ngột, bụng cứng như gỗ có thể do thủng tạng rỗng, vỡ ruột thừa hoặc viêm tụy cấp hoại tử.",
+    action: "Cần đến ngay phòng Cấp cứu bệnh viện. Không chườm nóng và không tự ý uống thuốc giảm đau làm lu mờ triệu chứng ngoại khoa.",
+    level: "emergency" as const,
+  },
 ];
 
 export const STORE_POLICIES_INFO = {
