@@ -61,6 +61,202 @@ LEGACY_NAM_DINH_MAPPING: dict[str, tuple[str, str, float, float]] = {
     "my loc": ("Mỹ Lộc", "Mỹ Lộc", 20.4600, 106.1350),
 }
 
+import logging
+import time
+
+logger = logging.getLogger("pharmatrust.places")
+
+# In-memory TTL Cache cho Autocomplete và Reverse Geocoding (TTL 3600s, max 500 mục)
+_PLACES_AUTOCOMPLETE_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+_PLACES_REVERSE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+CACHE_TTL_SECONDS = 3600
+MAX_CACHE_ENTRIES = 500
+
+# Danh bạ địa điểm trọng điểm quốc gia (Bệnh viện, Trường học, Công trình lớn)
+# Đảm bảo dữ liệu thực tế, tọa độ chính xác, hỗ trợ tìm kiếm khi dịch vụ ngoài chập chờn
+VIETNAM_CURATED_POIS: list[dict[str, Any]] = [
+    {
+        "place_id": "curated_fpt_poly_hn",
+        "name": "Trường Cao đẳng FPT Polytechnic Hà Nội",
+        "short_address": "Trịnh Văn Bô, Phường Xuân Phương, Tỉnh/TP Hà Nội",
+        "formatted_address": "Đường Trịnh Văn Bô, Phường Xuân Phương, Quận Nam Từ Liêm, Thành phố Hà Nội",
+        "street_address": "Đường Trịnh Văn Bô",
+        "lat": 21.0382,
+        "lng": 105.7468,
+        "province_code": "01",
+        "province_name": "Thành phố Hà Nội",
+        "commune_code": "011051",
+        "commune_name": "Phường Xuân Phương",
+        "district_name": "Quận Nam Từ Liêm",
+        "provider": "curated_national_poi",
+        "category": "education",
+        "verified": True,
+        "keywords": ["fpt polytechnic", "fpt poly", "cao dang fpt", "trinh van bo"],
+    },
+    {
+        "place_id": "curated_fpt_poly_hcm_1",
+        "name": "Trường Cao đẳng FPT Polytechnic TP.HCM (Cơ sở Nam Kỳ Khởi Nghĩa)",
+        "short_address": "391A Nam Kỳ Khởi Nghĩa, Phường Võ Thị Sáu, TP. Hồ Chí Minh",
+        "formatted_address": "391A Nam Kỳ Khởi Nghĩa, Phường Võ Thị Sáu, Quận 3, Thành phố Hồ Chí Minh",
+        "street_address": "391A Nam Kỳ Khởi Nghĩa",
+        "lat": 10.7915,
+        "lng": 106.6828,
+        "province_code": "79",
+        "province_name": "Thành phố Hồ Chí Minh",
+        "commune_code": "791502",
+        "commune_name": "Phường Võ Thị Sáu",
+        "district_name": "Quận 3",
+        "provider": "curated_national_poi",
+        "category": "education",
+        "verified": True,
+        "keywords": ["fpt polytechnic", "fpt poly", "cao dang fpt", "nam ky khoi nghia", "phuong 7", "vo thi sau"],
+    },
+    {
+        "place_id": "curated_fpt_poly_dn",
+        "name": "Trường Cao đẳng FPT Polytechnic Đà Nẵng",
+        "short_address": "137 Nguyễn Thị Thập, Phường Hòa Minh, Thành phố Đà Nẵng",
+        "formatted_address": "137 Nguyễn Thị Thập, Phường Hòa Minh, Quận Liên Chiểu, Thành phố Đà Nẵng",
+        "street_address": "137 Nguyễn Thị Thập",
+        "lat": 16.0645,
+        "lng": 108.1695,
+        "province_code": "48",
+        "province_name": "Thành phố Đà Nẵng",
+        "commune_code": "481406",
+        "commune_name": "Phường Hòa Minh",
+        "district_name": "Quận Liên Chiểu",
+        "provider": "curated_national_poi",
+        "category": "education",
+        "verified": True,
+        "keywords": ["fpt polytechnic", "fpt poly", "da nang", "nguyen thi thap"],
+    },
+    {
+        "place_id": "curated_bv_bach_mai",
+        "name": "Bệnh viện Bạch Mai",
+        "short_address": "78 Giải Phóng, Phường Bạch Mai, Tỉnh/TP Hà Nội",
+        "formatted_address": "Số 78 Đường Giải Phóng, Phường Bạch Mai, Quận Đống Đa, Thành phố Hà Nội",
+        "street_address": "Số 78 Đường Giải Phóng",
+        "lat": 20.9996,
+        "lng": 105.8402,
+        "province_code": "01",
+        "province_name": "Thành phố Hà Nội",
+        "commune_code": "011031",
+        "commune_name": "Phường Bạch Mai",
+        "district_name": "Quận Đống Đa",
+        "provider": "curated_national_poi",
+        "category": "hospital",
+        "verified": True,
+        "keywords": ["bach mai", "benh vien bach mai", "giai phong", "phuong mai"],
+    },
+    {
+        "place_id": "curated_bv_cho_ray",
+        "name": "Bệnh viện Chợ Rẫy",
+        "short_address": "201B Nguyễn Chí Thanh, Phường 12, TP. Hồ Chí Minh",
+        "formatted_address": "201B Nguyễn Chí Thanh, Phường 12, Quận 5, Thành phố Hồ Chí Minh",
+        "street_address": "201B Nguyễn Chí Thanh",
+        "lat": 10.7578,
+        "lng": 106.6596,
+        "province_code": "79",
+        "province_name": "Thành phố Hồ Chí Minh",
+        "commune_code": "27016",
+        "commune_name": "Phường 12",
+        "district_name": "Quận 5",
+        "provider": "curated_national_poi",
+        "category": "hospital",
+        "verified": True,
+        "keywords": ["cho ray", "benh vien cho ray", "nguyen chi thanh"],
+    },
+    {
+        "place_id": "curated_keangnam_72",
+        "name": "Tòa nhà Keangnam Hanoi Landmark Tower (Landmark 72)",
+        "short_address": "Phạm Hùng, Phường Mễ Trì, Tỉnh/TP Hà Nội",
+        "formatted_address": "Tòa nhà Keangnam Landmark 72, Đường Phạm Hùng, Phường Mễ Trì, Quận Nam Từ Liêm, Thành phố Hà Nội",
+        "street_address": "Đường Phạm Hùng",
+        "lat": 21.0169,
+        "lng": 105.7841,
+        "province_code": "01",
+        "province_name": "Thành phố Hà Nội",
+        "commune_code": "011047",
+        "commune_name": "Phường Mễ Trì",
+        "district_name": "Quận Nam Từ Liêm",
+        "provider": "curated_national_poi",
+        "category": "commercial",
+        "verified": True,
+        "keywords": ["keangnam", "landmark 72", "keangnam landmark", "pham hung"],
+    },
+    {
+        "place_id": "curated_times_city",
+        "name": "Khu đô thị Vinhomes Times City",
+        "short_address": "458 Minh Khai, Phường Vĩnh Tuy, Tỉnh/TP Hà Nội",
+        "formatted_address": "Khu đô thị Vinhomes Times City, 458 Minh Khai, Phường Vĩnh Tuy, Quận Hai Bà Trưng, Thành phố Hà Nội",
+        "street_address": "458 Minh Khai",
+        "lat": 20.9944,
+        "lng": 105.8675,
+        "province_code": "01",
+        "province_name": "Thành phố Hà Nội",
+        "commune_code": "00307",
+        "commune_name": "Phường Vĩnh Tuy",
+        "district_name": "Quận Hai Bà Trưng",
+        "provider": "curated_national_poi",
+        "category": "commercial",
+        "verified": True,
+        "keywords": ["times city", "vinhomes times city", "minh khai"],
+    },
+    {
+        "place_id": "curated_dh_bach_khoa_hn",
+        "name": "Trường Đại học Bách Khoa Hà Nội",
+        "short_address": "1 Đại Cồ Việt, Phường Bách Khoa, Tỉnh/TP Hà Nội",
+        "formatted_address": "Số 1 Đại Cồ Việt, Phường Bách Khoa, Quận Hai Bà Trưng, Thành phố Hà Nội",
+        "street_address": "Số 1 Đại Cồ Việt",
+        "lat": 21.0045,
+        "lng": 105.8437,
+        "province_code": "01",
+        "province_name": "Thành phố Hà Nội",
+        "commune_code": "011033",
+        "commune_name": "Phường Bách Khoa",
+        "district_name": "Quận Hai Bà Trưng",
+        "provider": "curated_national_poi",
+        "category": "education",
+        "verified": True,
+        "keywords": ["bach khoa", "dai hoc bach khoa", "dai co viet"],
+    },
+    {
+        "place_id": "curated_ho_hoan_kiem",
+        "name": "Hồ Hoàn Kiếm (Hồ Gươm)",
+        "short_address": "Khu vực Hồ Hoàn Kiếm, Phường Hoàn Kiếm, Tỉnh/TP Hà Nội",
+        "formatted_address": "Hồ Hoàn Kiếm (Hồ Gươm), Phường Hoàn Kiếm, Quận Hoàn Kiếm, Thành phố Hà Nội",
+        "street_address": "Đinh Tiên Hoàng",
+        "lat": 21.0285,
+        "lng": 105.8542,
+        "province_code": "01",
+        "province_name": "Thành phố Hà Nội",
+        "commune_code": "011001",
+        "commune_name": "Phường Hoàn Kiếm",
+        "district_name": "Quận Hoàn Kiếm",
+        "provider": "curated_national_poi",
+        "category": "place",
+        "verified": True,
+        "keywords": ["ho guom", "ho hoan kiem", "dinh tien hoang", "hang trong"],
+    },
+    {
+        "place_id": "curated_72_tran_duy_hung",
+        "name": "Số 72 Trần Duy Hưng",
+        "short_address": "72 Trần Duy Hưng, Phường Trung Hòa, Tỉnh/TP Hà Nội",
+        "formatted_address": "Số 72 Đường Trần Duy Hưng, Phường Trung Hòa, Quận Cầu Giấy, Thành phố Hà Nội",
+        "street_address": "Số 72 Trần Duy Hưng",
+        "lat": 21.0102,
+        "lng": 105.7985,
+        "province_code": "01",
+        "province_name": "Thành phố Hà Nội",
+        "commune_code": "00520",
+        "commune_name": "Phường Trung Hòa",
+        "district_name": "Quận Cầu Giấy",
+        "provider": "curated_national_poi",
+        "category": "street",
+        "verified": True,
+        "keywords": ["72 tran duy hung", "tran duy hung"],
+    },
+]
+
 
 class PlacesService:
     @classmethod
@@ -68,20 +264,79 @@ class PlacesService:
         """
         Báo cáo trạng thái nhà cung cấp Geocoding theo yêu cầu:
         GOOGLE PLACES: CONFIGURED / NOT CONFIGURED
-        FALLBACK: OpenStreetMap / Nominatim + Photon + Internal 2-Tier GeoService
+        FALLBACK: OpenStreetMap / Nominatim + Photon + Curated National POIs + Internal 2-Tier GeoService
         """
         google_key = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
         is_google_configured = bool(google_key and len(google_key) > 10)
         return {
             "google_configured": is_google_configured,
             "active_provider": "google_places" if is_google_configured else "osm_photon",
-            "fallback_provider": "osm_photon_administrative",
+            "fallback_provider": "curated_national_pois_and_administrative",
+            "cache_entries": len(_PLACES_AUTOCOMPLETE_CACHE),
             "report": (
                 "GOOGLE PLACES: CONFIGURED"
                 if is_google_configured
-                else "GOOGLE PLACES: NOT CONFIGURED | FALLBACK: OpenStreetMap / Nominatim + Photon + Internal 2-Tier GeoService"
+                else "GOOGLE PLACES: NOT CONFIGURED | FALLBACK: OpenStreetMap / Photon + Curated National POIs + Internal 2-Tier GeoService"
             ),
         }
+
+    @classmethod
+    def _search_curated_pois(cls, query: str, limit: int = 5) -> list[dict[str, Any]]:
+        """
+        Tìm kiếm trong danh bạ POI trọng điểm quốc gia (Bệnh viện, Trường học, Công trình lớn).
+        Cung cấp dữ liệu thực tế và chính xác ngay cả khi dịch vụ mạng ngoài bị timeout/rate-limit.
+        """
+        q_norm = remove_accents(query.lower()).strip()
+        matched: list[dict[str, Any]] = []
+        for poi in VIETNAM_CURATED_POIS:
+            poi_name_norm = remove_accents(poi["name"].lower())
+            keywords = [remove_accents(k.lower()) for k in poi.get("keywords", [])]
+            if q_norm in poi_name_norm or any(k in q_norm or q_norm in k for k in keywords):
+                poi_copy = {k: v for k, v in poi.items() if k != "keywords"}
+                matched.append(poi_copy)
+                if len(matched) >= limit:
+                    break
+        return matched
+
+    @classmethod
+    def _get_from_autocomplete_cache(cls, key: str) -> Optional[list[dict[str, Any]]]:
+        item = _PLACES_AUTOCOMPLETE_CACHE.get(key)
+        if item:
+            ts, val = item
+            if time.time() - ts < CACHE_TTL_SECONDS:
+                return [dict(x) for x in val]
+            _PLACES_AUTOCOMPLETE_CACHE.pop(key, None)
+        return None
+
+    @classmethod
+    def _set_autocomplete_cache(cls, key: str, val: list[dict[str, Any]]) -> None:
+        if len(_PLACES_AUTOCOMPLETE_CACHE) >= MAX_CACHE_ENTRIES:
+            oldest_key = min(_PLACES_AUTOCOMPLETE_CACHE.keys(), key=lambda k: _PLACES_AUTOCOMPLETE_CACHE[k][0])
+            _PLACES_AUTOCOMPLETE_CACHE.pop(oldest_key, None)
+        _PLACES_AUTOCOMPLETE_CACHE[key] = (time.time(), [dict(x) for x in val])
+
+    @classmethod
+    def _get_from_reverse_cache(cls, key: str) -> Optional[dict[str, Any]]:
+        item = _PLACES_REVERSE_CACHE.get(key)
+        if item:
+            ts, val = item
+            if time.time() - ts < CACHE_TTL_SECONDS:
+                return dict(val)
+            _PLACES_REVERSE_CACHE.pop(key, None)
+        return None
+
+    @classmethod
+    def _set_reverse_cache(cls, key: str, val: dict[str, Any]) -> None:
+        if len(_PLACES_REVERSE_CACHE) >= MAX_CACHE_ENTRIES:
+            oldest_key = min(_PLACES_REVERSE_CACHE.keys(), key=lambda k: _PLACES_REVERSE_CACHE[k][0])
+            _PLACES_REVERSE_CACHE.pop(oldest_key, None)
+        _PLACES_REVERSE_CACHE[key] = (time.time(), dict(val))
+
+    @classmethod
+    def clear_caches(cls) -> None:
+        """Dùng cho test isolation để xóa sạch cache giữa các lần chạy test."""
+        _PLACES_AUTOCOMPLETE_CACHE.clear()
+        _PLACES_REVERSE_CACHE.clear()
 
     @classmethod
     def _match_administrative_units(
@@ -205,7 +460,24 @@ class PlacesService:
 
         # Giới hạn limit từ 1 đến 15
         search_limit = max(1, min(limit, 15))
+
+        # 0. Kiểm tra cache
+        cache_key = f"{query_clean.lower()}:{search_limit}:{lat}:{lng}"
+        cached = cls._get_from_autocomplete_cache(cache_key)
+        if cached is not None:
+            return cached
+
         results: list[dict[str, Any]] = []
+
+        # 0.5. Tìm kiếm trong Danh bạ POI trọng điểm quốc gia (Bệnh viện, Trường học, Công trình lớn)
+        curated_matches = cls._search_curated_pois(query_clean, limit=search_limit)
+        for poi in curated_matches:
+            if not any(r["place_id"] == poi["place_id"] for r in results):
+                results.append(poi)
+
+        if len(results) >= search_limit:
+            cls._set_autocomplete_cache(cache_key, results[:search_limit])
+            return results[:search_limit]
 
         # 1. Nếu có cấu hình GOOGLE_MAPS_API_KEY, thử gọi Google Places API
         google_key = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
@@ -215,11 +487,14 @@ class PlacesService:
                     query_clean, google_key, search_limit, lat, lng
                 )
                 if google_results:
-                    results.extend(google_results)
+                    for gr in google_results:
+                        if not any(r["place_id"] == gr["place_id"] for r in results):
+                            results.append(gr)
                     if len(results) >= search_limit:
+                        cls._set_autocomplete_cache(cache_key, results[:search_limit])
                         return results[:search_limit]
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Google Places autocomplete error: %s", e)
 
         # 1.5. Legacy Nam Định & địa danh sáp nhập sau 2025 (Ưu tiên gợi ý chính xác theo mô hình 2 cấp)
         q_norm = remove_accents(query_clean)
@@ -348,28 +623,32 @@ class PlacesService:
             if extracted_street not in sub_queries:
                 sub_queries.append(extracted_street)
 
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            for sq in sub_queries:
-                photon_results = await cls._search_photon_places_with_client(
-                    client, sq, search_limit, lat, lng
-                )
-                for pr in photon_results:
-                    # Nếu người dùng nhập số nhà cụ thể (ví dụ 72 Trần Duy Hưng) và kết quả là tên đường
-                    if extracted_num and pr.get("category") == "street" and not pr["name"].startswith("Số "):
-                        pr_copy = dict(pr)
-                        pr_copy["name"] = f"Số {extracted_num} {pr['name']}"
-                        pr_copy["street_address"] = f"Số {extracted_num} {pr['street_address']}"
-                        pr_copy["formatted_address"] = f"Số {extracted_num} {pr['formatted_address']}"
-                        if not any(r["name"] == pr_copy["name"] for r in results):
-                            results.append(pr_copy)
+        timeout_config = httpx.Timeout(connect=2.5, read=3.5, write=3.0, pool=5.0)
+        try:
+            async with httpx.AsyncClient(timeout=timeout_config) as client:
+                for sq in sub_queries:
+                    photon_results = await cls._search_photon_places_with_client(
+                        client, sq, search_limit, lat, lng
+                    )
+                    for pr in photon_results:
+                        # Nếu người dùng nhập số nhà cụ thể (ví dụ 72 Trần Duy Hưng) và kết quả là tên đường
+                        if extracted_num and pr.get("category") == "street" and not pr["name"].startswith("Số "):
+                            pr_copy = dict(pr)
+                            pr_copy["name"] = f"Số {extracted_num} {pr['name']}"
+                            pr_copy["street_address"] = f"Số {extracted_num} {pr['street_address']}"
+                            pr_copy["formatted_address"] = f"Số {extracted_num} {pr['formatted_address']}"
+                            if not any(r["name"] == pr_copy["name"] for r in results):
+                                results.append(pr_copy)
 
-                    if not any(
-                        r["place_id"] == pr["place_id"] or r["name"] == pr["name"] for r in results
-                    ):
-                        results.append(pr)
+                        if not any(
+                            r["place_id"] == pr["place_id"] or r["name"] == pr["name"] for r in results
+                        ):
+                            results.append(pr)
 
-                if len(results) >= search_limit:
-                    break
+                    if len(results) >= search_limit:
+                        break
+        except Exception as e:
+            logger.warning("Photon OSM autocomplete search error: %s", e)
 
         # 3. Bổ sung từ cơ sở dữ liệu hành chính 34 tỉnh + 3.321 xã nếu số lượng gợi ý chưa đủ
         if len(results) < search_limit:
@@ -430,7 +709,10 @@ class PlacesService:
                 if len(results) >= search_limit:
                     break
 
-        return results[:search_limit]
+        final_results = results[:search_limit]
+        if final_results:
+            cls._set_autocomplete_cache(cache_key, final_results)
+        return final_results
 
     @classmethod
     async def _search_google_places(
@@ -584,44 +866,53 @@ class PlacesService:
         Dùng khi: kéo pin, click bản đồ, bấm 'Vị trí hiện tại của tôi'.
         100% dữ liệu thực từ geocoding provider (không hardcode).
         """
+        # 0. Kiểm tra cache
+        cache_key = f"{round(lat, 4)}:{round(lng, 4)}"
+        cached = cls._get_from_reverse_cache(cache_key)
+        if cached is not None:
+            return cached
+
+        res = None
         # 1. Thử Google Geocoding API nếu có key
         google_key = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
         if google_key and len(google_key) > 10:
             try:
                 res = await cls._reverse_google(lat, lng, google_key)
-                if res:
-                    return res
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Google reverse geocode error: %s", e)
 
         # 2. Thử Photon Reverse Geocoding trực tiếp
-        try:
-            res_photon = await cls._reverse_photon_osm(lat, lng)
-            if res_photon and (res_photon.get("province_code") or res_photon.get("formatted_address")):
-                return res_photon
-        except Exception:
-            pass
+        if not res or not (res.get("province_code") or res.get("formatted_address")):
+            try:
+                res_photon = await cls._reverse_photon_osm(lat, lng)
+                if res_photon and (res_photon.get("province_code") or res_photon.get("formatted_address")):
+                    res = res_photon
+            except Exception as e:
+                logger.warning("Photon reverse geocode error: %s", e)
 
         # 3. Fallback tính toán nội bộ theo Bounding Box và khoảng cách
-        prov, comm = cls._match_administrative_units(lat=lat, lng=lng)
-        p_name = prov["fullName"] if prov else "Việt Nam"
-        c_name = comm["fullName"] if comm else ""
-        formatted = f"Vị trí ghim tại ({lat:.4f}, {lng:.4f}), {c_name}, {p_name}".strip(", ")
+        if not res:
+            prov, comm = cls._match_administrative_units(lat=lat, lng=lng)
+            p_name = prov["fullName"] if prov else "Việt Nam"
+            c_name = comm["fullName"] if comm else ""
+            formatted = f"Vị trí ghim tại ({lat:.4f}, {lng:.4f}), {c_name}, {p_name}".strip(", ")
+            res = {
+                "place_id": f"rev_{round(lat, 4)}_{round(lng, 4)}",
+                "formatted_address": formatted,
+                "street_address": f"Vị trí ghim ({lat:.4f}, {lng:.4f})",
+                "lat": round(lat, 6),
+                "lng": round(lng, 6),
+                "province_code": prov["code"] if prov else None,
+                "province_name": prov["fullName"] if prov else None,
+                "commune_code": comm["code"] if comm else None,
+                "commune_name": comm["fullName"] if comm else None,
+                "district_name": comm.get("legacyDistrictName") if comm else None,
+                "provider": "internal_bbox",
+                "is_verified": True,
+            }
 
-        return {
-            "place_id": f"rev_{round(lat, 4)}_{round(lng, 4)}",
-            "formatted_address": formatted,
-            "street_address": f"Vị trí ghim ({lat:.4f}, {lng:.4f})",
-            "lat": round(lat, 6),
-            "lng": round(lng, 6),
-            "province_code": prov["code"] if prov else None,
-            "province_name": prov["fullName"] if prov else None,
-            "commune_code": comm["code"] if comm else None,
-            "commune_name": comm["fullName"] if comm else None,
-            "district_name": comm.get("legacyDistrictName") if comm else None,
-            "provider": "internal_bbox",
-            "is_verified": True,
-        }
+        cls._set_reverse_cache(cache_key, res)
+        return res
 
     @classmethod
     async def _reverse_google(cls, lat: float, lng: float, api_key: str) -> Optional[dict[str, Any]]:
@@ -668,9 +959,10 @@ class PlacesService:
         return None
 
     @classmethod
-    async def _reverse_photon_osm(cls, lat: float, lng: float) -> dict[str, Any]:
+    async def _reverse_photon_osm(cls, lat: float, lng: float) -> Optional[dict[str, Any]]:
         """
         Reverse Geocoding qua Photon / OSM.
+        Trả về None nếu Photon không kết nối được hoặc không tìm thấy feature nào.
         """
         formatted = ""
         street = ""
@@ -679,7 +971,8 @@ class PlacesService:
         city = ""
 
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            timeout_config = httpx.Timeout(connect=2.5, read=3.5, write=3.0, pool=5.0)
+            async with httpx.AsyncClient(timeout=timeout_config) as client:
                 resp = await client.get(
                     "https://photon.komoot.io/reverse",
                     params={"lat": lat, "lon": lng},
@@ -697,8 +990,12 @@ class PlacesService:
 
                         parts = [p for p in [name, street, district, city] if p]
                         formatted = ", ".join(parts)
+                    else:
+                        return None
+                else:
+                    return None
         except Exception:
-            pass
+            return None
 
         prov, comm = cls._match_administrative_units(
             lat=lat,

@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.db.session import get_db
 from app.models import Order, PaymentTransaction
 from app.services.fulfillment_service import FulfillmentRoutingService
@@ -123,6 +124,11 @@ def simulate_momo_payment(
     [MÔI TRƯỜNG DEV/DEMO] Mô phỏng quét mã thanh toán MoMo thành công trực tiếp trên máy chủ cục bộ
     mà không cần thông qua mạng công cộng.
     """
+    if getattr(settings, "app_env", "").lower() == "production":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Chức năng mô phỏng thanh toán bị vô hiệu hóa hoàn toàn trên môi trường Production.",
+        )
     return MomoPaymentService.simulate_payment(
         db=db,
         order_code=payload.order_code.strip(),
@@ -189,6 +195,11 @@ def simulate_vietqr_payment(
     """
     [MÔI TRƯỜNG DEV/DEMO] Giả lập nhận tiền chuyển khoản VietQR thành công trên local.
     """
+    if getattr(settings, "app_env", "").lower() == "production":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Chức năng mô phỏng thanh toán bị vô hiệu hóa hoàn toàn trên môi trường Production.",
+        )
     return VietQrService.simulate_payment(
         db=db,
         code=payload.code.strip(),
@@ -263,6 +274,11 @@ def simulate_exchange_payment(
     """
     [MÔI TRƯỜNG DEV/DEMO] Mô phỏng khách hàng đã thanh toán phụ phí đổi hàng thành công.
     """
+    if getattr(settings, "app_env", "").lower() == "production":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Chức năng mô phỏng thanh toán bị vô hiệu hóa hoàn toàn trên môi trường Production.",
+        )
     return VietQrService.simulate_payment(
         db=db,
         code=payload.exchange_code.strip(),

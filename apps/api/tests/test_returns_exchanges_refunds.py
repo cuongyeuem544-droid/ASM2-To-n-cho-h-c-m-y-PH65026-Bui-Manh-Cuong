@@ -14,6 +14,7 @@ from sqlalchemy import select
 from app.db.session import SessionLocal
 from app.models import (
     CanonicalProduct,
+    EmailOutbox,
     InventoryBatch,
     Order,
     OrderItem,
@@ -653,4 +654,82 @@ def test_momo_refund_attempt_logging(client: TestClient, setup_aftersales_data, 
     attempts = res_detail.json()["attempts"]
     assert len(attempts) >= 1
     assert attempts[0]["gateway_provider"] == "MOMO"
+
+
+def test_guest_missing_phone_rejected(client: TestClient, setup_aftersales_data):
+    """
+    Khách vãng lai không truyền SĐT xác thực -> 403 Bị từ chối.
+    """
+    deliv_code = setup_aftersales_data["order_delivered_code"]
+    item_id = setup_aftersales_data["order_item_id"]
+
+    res = client.post(
+        "/api/v1/returns",
+        json={
+            "order_code": deliv_code,
+            "request_type": "RETURN",
+            "reason_code": "WRONG_ITEM",
+            "reason_text": "Không cung cấp SĐT",
+            "items": [{"order_item_id": item_id, "requested_quantity": 1}],
+            "customer_phone_verify": None,
+        },
+    )
+    assert res.status_code == 403
+    assert "xác minh quyền sở hữu" in res.json()["detail"].lower() or "số điện thoại" in res.json()["detail"].lower()
+
+
+def test_return_excessive_quantity_rejected(client: TestClient, setup_aftersales_data):
+    """
+    Yêu cầu trả số lượng vượt quá số lượng mua -> 400 Bị từ chối.
+    """
+    deliv_code = setup_aftersales_data["order_delivered_code"]
+    item_id = setup_aftersales_data["order_item_id"]
+
+    res = client.post(
+        "/api/v1/returns",
+        json={
+            "order_code": deliv_code,
+            "request_type": "RETURN",
+            "reason_code": "WRONG_ITEM",
+            "reason_text": "Số lượng vượt mức",
+            "items": [{"order_item_id": item_id, "requested_quantity": 9999}],
+            "customer_phone_verify": "0912345678",
+        },
+    )
+    assert res.status_code == 400
+    assert "không hợp lệ" in res.json()["detail"].lower() or "số lượng" in res.json()["detail"].lower()
+
+
+def test_email_outbox_created_on_return(client: TestClient, setup_aftersales_data):
+    """
+    Xác minh EmailOutbox được tạo với đúng schema (reference_type=RETURN_REQUEST, status=PENDING).
+    """
+    deliv_code = setup_aftersales_data["order_delivered_code"]
+    item_id = setup_aftersales_data["order_item_id"]
+
+    res = client.post(
+        "/api/v1/returns",
+        json={
+            "order_code": deliv_code,
+            "request_type": "RETURN",
+            "reason_code": "WRONG_ITEM",
+            "reason_text": "Kiểm tra EmailOutbox",
+            "items": [{"order_item_id": item_id, "requested_quantity": 1}],
+            "customer_phone_verify": "0912345678",
+        },
+    )
+    assert res.status_code == 200
+    ret_code = res.json()["return_code"]
+
+    with SessionLocal() as db:
+        outbox = db.scalar(
+            select(EmailOutbox).where(
+                EmailOutbox.reference_type == "RETURN_REQUEST",
+                EmailOutbox.reference_id == ret_code,
+            )
+        )
+        assert outbox is not None
+        assert outbox.status == "PENDING"
+        assert ret_code in outbox.subject
+
 

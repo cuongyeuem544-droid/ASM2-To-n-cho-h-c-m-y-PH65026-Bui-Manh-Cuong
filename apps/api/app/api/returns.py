@@ -69,15 +69,18 @@ class ReturnRequestCreate(BaseModel):
     items: List[ReturnItemCreate]
     evidence_urls: Optional[List[str]] = None
     customer_phone_verify: Optional[str] = None
+    customer_email_verify: Optional[str] = None
 
 
 class ShippingUpdate(BaseModel):
     carrier_name: str
     tracking_code: str
+    phone_verify: Optional[str] = None
 
 
 class CancelReturnRequest(BaseModel):
     reason: Optional[str] = None
+    phone_verify: Optional[str] = None
 
 
 # --- Endpoints ---
@@ -173,6 +176,7 @@ def create_return_request(
         evidences_payload=evidences_data,
         current_user=current_user,
         customer_phone_verify=payload.customer_phone_verify,
+        customer_email_verify=payload.customer_email_verify,
     )
 
     return {
@@ -199,8 +203,10 @@ def get_my_return_requests(
     if current_user and current_user.role == "CUSTOMER":
         query = query.where(ReturnRequest.user_id == current_user.id)
     elif customer_phone:
-        clean_phone = customer_phone.strip().replace(" ", "").replace(".", "")
-        query = query.where(ReturnRequest.customer_phone.like(f"%{clean_phone}%"))
+        clean_phone = customer_phone.strip().replace(" ", "").replace(".", "").replace("-", "")
+        if len(clean_phone) < 9:
+            raise HTTPException(status_code=400, detail="Số điện thoại tra cứu không hợp lệ (tối thiểu 9-10 chữ số).")
+        query = query.where(ReturnRequest.customer_phone == clean_phone)
     else:
         # Nếu chưa đăng nhập và không truyền SĐT -> Yêu cầu đăng nhập hoặc nhập SĐT
         raise HTTPException(
@@ -242,15 +248,21 @@ def get_return_detail(
     if not ret:
         raise HTTPException(status_code=404, detail=f"Không tìm thấy yêu cầu '{return_code}'.")
 
-    # Kiểm tra quyền truy cập
-    if current_user and current_user.role == "CUSTOMER":
-        if ret.user_id and ret.user_id != current_user.id:
-            raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập yêu cầu này.")
-    elif phone_verify:
-        clean_input = phone_verify.strip().replace(" ", "").replace(".", "")
-        clean_order_phone = (ret.customer_phone or "").strip().replace(" ", "").replace(".", "")
-        if clean_input != clean_order_phone:
+    # Kiểm tra quyền truy cập (Anti-IDOR & Privacy Masking)
+    is_staff = current_user and getattr(current_user, "role", "") in ["ADMIN", "PHARMACIST", "DATA_REVIEWER"]
+    is_owner = current_user and getattr(current_user, "role", "") == "CUSTOMER" and ret.user_id == current_user.id
+    phone_matched = False
+    if phone_verify and phone_verify.strip():
+        clean_input = phone_verify.strip().replace(" ", "").replace(".", "").replace("-", "")
+        clean_order_phone = (ret.customer_phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
+        if clean_input == clean_order_phone:
+            phone_matched = True
+        else:
             raise HTTPException(status_code=403, detail="Số điện thoại xác thực không chính xác.")
+    elif current_user and getattr(current_user, "role", "") == "CUSTOMER" and ret.user_id and ret.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập yêu cầu này.")
+
+    is_fully_authorized = is_staff or is_owner or phone_matched
 
     # Format danh sách sản phẩm
     items_data = []
@@ -299,6 +311,12 @@ def get_return_detail(
     # Format thông tin hoàn tiền (Refunds)
     refunds_data = []
     for ref in ret.refunds:
+        acc_num = ref.beneficiary_account_number
+        if not is_fully_authorized and acc_num:
+            acc_num = f"****{acc_num[-4:]}" if len(acc_num) >= 4 else "****"
+        acc_name = ref.beneficiary_account_name
+        if not is_fully_authorized and acc_name:
+            acc_name = f"{acc_name[:3]}***" if len(acc_name) >= 3 else "***"
         refunds_data.append({
             "id": ref.id,
             "refund_code": ref.refund_code,
@@ -306,12 +324,12 @@ def get_return_detail(
             "refund_method": ref.refund_method,
             "status": ref.status,
             "reconciliation_status": ref.reconciliation_status,
-            "bank_transfer_ref": ref.bank_transfer_ref,
-            "gateway_trans_id": ref.gateway_trans_id,
+            "bank_transfer_ref": ref.bank_transfer_ref if is_fully_authorized else None,
+            "gateway_trans_id": ref.gateway_trans_id if is_fully_authorized else None,
             "beneficiary_bank": ref.beneficiary_bank,
-            "beneficiary_account_number": ref.beneficiary_account_number,
-            "beneficiary_account_name": ref.beneficiary_account_name,
-            "proof_document_url": ref.proof_document_url,
+            "beneficiary_account_number": acc_num,
+            "beneficiary_account_name": acc_name,
+            "proof_document_url": ref.proof_document_url if is_fully_authorized else None,
             "processed_at": ref.processed_at.isoformat() if ref.processed_at else None,
         })
 
@@ -397,6 +415,21 @@ def update_return_shipping(
     """
     Khách hàng gửi hàng và cập nhật đơn vị vận chuyển + mã vận đơn theo dõi.
     """
+    ret = db.scalar(select(ReturnRequest).where(ReturnRequest.return_code == return_code))
+    if not ret:
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy yêu cầu '{return_code}'.")
+
+    is_staff = current_user and getattr(current_user, "role", "") in ["ADMIN", "PHARMACIST", "DATA_REVIEWER"]
+    if not is_staff:
+        if current_user and getattr(current_user, "role", "") == "CUSTOMER":
+            if ret.user_id and ret.user_id != current_user.id:
+                raise HTTPException(status_code=403, detail="Bạn không có quyền cập nhật yêu cầu này.")
+        elif payload.phone_verify and payload.phone_verify.strip():
+            clean_input = payload.phone_verify.strip().replace(" ", "").replace(".", "").replace("-", "")
+            clean_order_phone = (ret.customer_phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
+            if clean_input != clean_order_phone:
+                raise HTTPException(status_code=403, detail="Số điện thoại xác thực không chính xác.")
+
     ret = ReturnService.update_customer_shipping(
         db=db,
         return_code=return_code,
@@ -422,6 +455,21 @@ def cancel_return_request(
     """
     Khách hàng chủ động hủy yêu cầu đổi/trả khi chưa gửi hàng đi.
     """
+    ret = db.scalar(select(ReturnRequest).where(ReturnRequest.return_code == return_code))
+    if not ret:
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy yêu cầu '{return_code}'.")
+
+    is_staff = current_user and getattr(current_user, "role", "") in ["ADMIN", "PHARMACIST", "DATA_REVIEWER"]
+    if not is_staff:
+        if current_user and getattr(current_user, "role", "") == "CUSTOMER":
+            if ret.user_id and ret.user_id != current_user.id:
+                raise HTTPException(status_code=403, detail="Bạn không có quyền hủy yêu cầu này.")
+        elif payload.phone_verify and payload.phone_verify.strip():
+            clean_input = payload.phone_verify.strip().replace(" ", "").replace(".", "").replace("-", "")
+            clean_order_phone = (ret.customer_phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
+            if clean_input != clean_order_phone:
+                raise HTTPException(status_code=403, detail="Số điện thoại xác thực không chính xác.")
+
     ret = ReturnService.cancel_return_request(
         db=db,
         return_code=return_code,

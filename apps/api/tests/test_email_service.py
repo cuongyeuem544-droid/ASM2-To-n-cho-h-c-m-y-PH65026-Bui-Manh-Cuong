@@ -244,6 +244,107 @@ class TestEmailServiceSuite(unittest.TestCase):
             self.assertIsNone(updated.last_error)
             self.assertEqual(updated.retry_count, 2)
 
+    def test_06_retry_limit_exceeded(self):
+        """Khi retry_count >= max_retries, từ chối retry và lưu vết RETRY_EXCEEDED."""
+        outbox = EmailOutbox(
+            recipient_email="retry.exceeded@gmail.com",
+            subject="Thư vượt quá retry",
+            body_html="<p>Exceeded</p>",
+            reference_type="ORDER_CONFIRMATION",
+            reference_id="PT-EXCEEDED-01",
+            status="FAILED",
+            retry_count=3,
+            max_retries=3,
+            last_error="Lỗi trước đó",
+        )
+        self.db.add(outbox)
+        self.db.commit()
+
+        with self.assertRaises(ValueError) as ctx:
+            EmailService.resend_email(db=self.db, outbox_id=outbox.id)
+        self.assertIn("vượt quá số lần thử", str(ctx.exception))
+        self.assertIn("RETRY_EXCEEDED", outbox.last_error or "")
+
+    def test_07_duplicate_send_prevention(self):
+        """Nếu đơn hàng đã có bản ghi EmailOutbox trạng thái SENT, không tạo bản ghi mới và không gửi lại."""
+        # 1. Giả lập đơn đã gửi thành công
+        existing = EmailOutbox(
+            recipient_email="nguyenvana@gmail.com",
+            subject="Đã gửi thành công",
+            body_html="<p>Sent</p>",
+            reference_type="ORDER_CONFIRMATION",
+            reference_id="PT-TEST-EMAIL-01",
+            status="SENT",
+            retry_count=0,
+            max_retries=3,
+        )
+        self.db.add(existing)
+        self.db.commit()
+
+        # 2. Gọi lại queue_and_send_order_confirmation
+        result = EmailService.queue_and_send_order_confirmation(
+            db=self.db,
+            order=self.order,
+            send_immediately=True,
+        )
+        self.assertEqual(result.id, existing.id)
+        self.assertEqual(result.status, "SENT")
+
+        # Đảm bảo chỉ có duy nhất 1 bản ghi trong DB
+        count = len(self.db.scalars(select(EmailOutbox).where(EmailOutbox.reference_id == "PT-TEST-EMAIL-01")).all())
+        self.assertEqual(count, 1)
+
+    def test_08_dns_resolution_failed_classification(self):
+        """Lỗi [Errno 11001] getaddrinfo failed được phân loại chuẩn thành DNS_RESOLUTION_FAILED."""
+        import socket
+        gaierr = socket.gaierror(11001, "getaddrinfo failed")
+        code, retryable, msg = EmailService.classify_smtp_error(gaierr)
+        self.assertEqual(code, "DNS_RESOLUTION_FAILED")
+        self.assertTrue(retryable)
+        self.assertIn("getaddrinfo failed", msg)
+
+    def test_09_timeout_classification(self):
+        """Lỗi Timeout kết nối SMTP được phân loại thành SMTP_CONNECTION_TIMEOUT."""
+        timeout_err = TimeoutError("Connection timed out")
+        code, retryable, msg = EmailService.classify_smtp_error(timeout_err)
+        self.assertEqual(code, "SMTP_CONNECTION_TIMEOUT")
+        self.assertTrue(retryable)
+
+    def test_10_auth_failed_classification(self):
+        """Lỗi sai username/password SMTP được phân loại thành SMTP_AUTHENTICATION_FAILED và không retry vô ích."""
+        import smtplib
+        auth_err = smtplib.SMTPAuthenticationError(535, b"Authentication failed")
+        code, retryable, msg = EmailService.classify_smtp_error(auth_err)
+        self.assertEqual(code, "SMTP_AUTHENTICATION_FAILED")
+        self.assertFalse(retryable)
+
+    def test_11_ssl_tls_conflict_validation(self):
+        """Báo lỗi khi cả SMTP_SSL và SMTP_TLS đều được bật đồng thời."""
+        with patch.object(settings, "smtp_user", "test@gmail.com"), \
+             patch.object(settings, "smtp_password", "pass"), \
+             patch.object(settings, "smtp_ssl", True), \
+             patch.object(settings, "smtp_tls", True):
+            with self.assertRaises(ValueError) as ctx:
+                EmailService.send_smtp_email(
+                    recipient_email="test@gmail.com",
+                    subject="Conflict",
+                    body_html="<p>Test</p>",
+                )
+            self.assertIn("xung đột", str(ctx.exception))
+
+    def test_12_html_escaping_customer_input(self):
+        """Dữ liệu khách hàng nhập chứa mã độc hại được escape an toàn bởi html.escape."""
+        self.order.customer_name = "<script>alert('xss')</script> Nguyễn Văn B"
+        self.order.shipping_address = "<b>Tòa nhà H4</b> <img src=x onerror=alert(1)>"
+        subject, body_html, body_text = EmailService.build_order_confirmation_html(
+            db=self.db, order=self.order
+        )
+        self.assertNotIn("<script>", body_html)
+        self.assertIn("&lt;script&gt;", body_html)
+        self.assertNotIn("<img src=x", body_html)
+        self.assertIn("&lt;img src=x", body_html)
+
 
 if __name__ == "__main__":
     unittest.main()
+

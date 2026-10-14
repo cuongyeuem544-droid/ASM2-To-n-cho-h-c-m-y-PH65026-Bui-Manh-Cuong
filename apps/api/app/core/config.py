@@ -83,6 +83,19 @@ class Settings(BaseSettings):
         return value
 
     @property
+    def is_smtp_configured(self) -> bool:
+        """Kiểm tra xem SMTP đã được bật và cấu hình đầy đủ tài khoản hay chưa."""
+        return bool(
+            self.smtp_enabled
+            and self.smtp_user
+            and self.smtp_user.strip()
+            and self.smtp_password
+            and self.smtp_password.strip()
+            and self.smtp_host
+            and self.smtp_host.strip()
+        )
+
+    @property
     def raw_storage(self) -> Path:
         return self.storage_root / "raw"
 
