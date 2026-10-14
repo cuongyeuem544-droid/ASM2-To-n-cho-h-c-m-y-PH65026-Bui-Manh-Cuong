@@ -61,6 +61,8 @@ from app.models.returns import (
     RefundStatus,
     RestockDestination,
     ReturnEvidence,
+    ReturnEvidenceRequest,
+    ReturnEvidenceRequestStatus,
     ReturnInspection,
     ReturnItem,
     ReturnRequest,
@@ -963,3 +965,339 @@ def test_28_admin_reassign_warehouse(client, admin_headers):
         assert len(cases) > 0
         for c in cases:
             assert c.warehouse_id == new_wh_id, "Tất cả ca hoàn phải được chuyển sang kho mới"
+
+
+# --------------------------------------------------------------------------
+# Scenario 29: Warehouse Manager Requests Customer Evidence (1 to 3 images)
+# --------------------------------------------------------------------------
+def test_29_manager_requests_customer_evidence_success(client, manager_hcm_headers):
+    case_code = _get_or_create_test_case("KHO-HCM-01")
+    with SessionLocal() as db:
+        c = db.scalar(select(WarehouseReturnCase).where(WarehouseReturnCase.case_code == case_code))
+        c.status = ReturnStatus.INSPECTING.value
+        db.commit()
+
+    res = client.post(
+        f"/api/v1/warehouse/me/returns/{case_code}/request-evidence",
+        headers=manager_hcm_headers,
+        json={
+            "required_image_count": 2,
+            "reason": "Tem niêm phong có dấu hiệu bị rách",
+            "instructions": "Chụp rõ 2 góc cạnh tem niêm phong và đáy hộp có số lô, HSD",
+        },
+    )
+    assert res.status_code == 200, res.text
+    data = res.json()
+    assert data["status"] == "SUCCESS"
+    assert data["case_status"] == ReturnStatus.WAITING_CUSTOMER_EVIDENCE.value
+    assert "request_code" in data
+
+    with SessionLocal() as db:
+        req = db.scalar(select(ReturnEvidenceRequest).where(ReturnEvidenceRequest.request_code == data["request_code"]))
+        assert req is not None
+        assert req.required_image_count == 2
+        assert req.status == "OPEN"
+        assert req.expires_at is not None
+        time_diff = (req.expires_at - req.requested_at).total_seconds()
+        assert 259100 <= time_diff <= 259300
+
+
+# --------------------------------------------------------------------------
+# Scenario 30: Validation of Required Image Count (0 or >3 Rejected)
+# --------------------------------------------------------------------------
+def test_30_manager_requests_invalid_image_count_rejected(client, manager_hcm_headers):
+    case_code = _get_or_create_test_case("KHO-HCM-01")
+
+    # 1. Thử yêu cầu 0 ảnh
+    res0 = client.post(
+        f"/api/v1/warehouse/me/returns/{case_code}/request-evidence",
+        headers=manager_hcm_headers,
+        json={
+            "required_image_count": 0,
+            "reason": "Test 0 anh",
+            "instructions": "Test 0 anh",
+        },
+    )
+    assert res0.status_code == 422, "Yêu cầu 0 ảnh phải bị từ chối với 422"
+
+    # 2. Thử yêu cầu 4 ảnh
+    res4 = client.post(
+        f"/api/v1/warehouse/me/returns/{case_code}/request-evidence",
+        headers=manager_hcm_headers,
+        json={
+            "required_image_count": 4,
+            "reason": "Test 4 anh",
+            "instructions": "Test 4 anh",
+        },
+    )
+    assert res4.status_code == 422, "Yêu cầu trên 3 ảnh phải bị từ chối với 422"
+
+
+# --------------------------------------------------------------------------
+# Scenario 31: Anti-IDOR: Manager Cannot Request Evidence for Other Warehouse
+# --------------------------------------------------------------------------
+def test_31_anti_idor_cross_warehouse_evidence_request_rejected(client, manager_hn_headers):
+    case_code = _get_or_create_test_case("KHO-HCM-01")
+
+    # Manager Hà Nội cố tình gửi yêu cầu cho ca hoàn thuộc kho HCM
+    res = client.post(
+        f"/api/v1/warehouse/me/returns/{case_code}/request-evidence",
+        headers=manager_hn_headers,
+        json={
+            "required_image_count": 1,
+            "reason": "Manager HN can thiep kho HCM",
+            "instructions": "Chup anh",
+        },
+    )
+    assert res.status_code == 403, "Chặn IDOR: Quản lý kho A không được yêu cầu ảnh cho đơn kho B"
+
+
+# --------------------------------------------------------------------------
+# Scenario 32: Customer Views Evidence Request & Anti-IDOR
+# --------------------------------------------------------------------------
+def test_32_customer_views_evidence_request_and_anti_idor(client, buyer_headers):
+    case_code = _get_or_create_test_case("KHO-HCM-01")
+    with SessionLocal() as db:
+        c = db.scalar(select(WarehouseReturnCase).where(WarehouseReturnCase.case_code == case_code))
+        buyer = db.scalar(select(User).where(User.email == "buyer@pharmatrust.vn"))
+        c.return_request.user_id = buyer.id
+
+        # Tạo user khác để test Anti-IDOR
+        other_user = db.scalar(select(User).where(User.email == "other_customer@pharmatrust.vn"))
+        if not other_user:
+            other_user = User(
+                email="other_customer@pharmatrust.vn",
+                full_name="Other Customer",
+                password_hash=hash_password("Other@123456"),
+                role=UserRole.CUSTOMER.value,
+                is_active=True,
+            )
+            db.add(other_user)
+        db.commit()
+        return_code = c.return_request.return_code
+
+    # 1. Khách hàng chính chủ xem chi tiết yêu cầu bổ sung
+    res = client.get(f"/api/v1/returns/{return_code}/evidence-request", headers=buyer_headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["has_active_request"] is True
+    assert data["request"]["required_image_count"] == 2
+    assert data["request"]["status"] == "OPEN"
+    assert data["request"]["remaining_seconds"] > 0
+
+    # 2. Khách khác cố tình truy cập đơn hoàn này -> 403 Forbidden
+    other_login = client.post(
+        "/api/v1/auth/login",
+        json={"email": "other_customer@pharmatrust.vn", "password": "Other@123456"},
+    )
+    assert other_login.status_code == 200
+    other_headers = {"Authorization": f"Bearer {other_login.json()['access_token']}"}
+
+    res_other = client.get(f"/api/v1/returns/{return_code}/evidence-request", headers=other_headers)
+    assert res_other.status_code == 403, "Khách khác không được xem yêu cầu bổ sung ảnh của người khác"
+
+
+# --------------------------------------------------------------------------
+# Scenario 33: Customer Submits Evidence - Exact Count Validation & Transition
+# --------------------------------------------------------------------------
+def test_33_customer_submits_evidence_exact_count_validation(client, buyer_headers):
+    case_code = _get_or_create_test_case("KHO-HCM-01")
+    with SessionLocal() as db:
+        c = db.scalar(select(WarehouseReturnCase).where(WarehouseReturnCase.case_code == case_code))
+        return_code = c.return_request.return_code
+
+    # 1. Quản lý yêu cầu 2 ảnh, khách nộp 1 ảnh -> Bị từ chối (422)
+    res_1_img = client.post(
+        f"/api/v1/returns/{return_code}/evidence/submit",
+        headers=buyer_headers,
+        json={
+            "images": [
+                {"file_url": "/api/v1/returns/evidence/evid_01.jpg", "file_name": "photo1.jpg"},
+            ],
+            "customer_note": "Toi nop 1 anh thoi",
+        },
+    )
+    assert res_1_img.status_code == 422, "Nộp thiếu số ảnh phải bị từ chối 422"
+
+    # 2. Khách nộp 3 ảnh trong khi yêu cầu 2 ảnh -> Bị từ chối (422)
+    res_3_img = client.post(
+        f"/api/v1/returns/{return_code}/evidence/submit",
+        headers=buyer_headers,
+        json={
+            "images": [
+                {"file_url": "/api/v1/returns/evidence/evid_01.jpg", "file_name": "photo1.jpg"},
+                {"file_url": "/api/v1/returns/evidence/evid_02.jpg", "file_name": "photo2.jpg"},
+                {"file_url": "/api/v1/returns/evidence/evid_03.jpg", "file_name": "photo3.jpg"},
+            ],
+            "customer_note": "Toi nop 3 anh",
+        },
+    )
+    assert res_3_img.status_code == 422, "Nộp thừa số ảnh phải bị từ chối 422"
+
+    # 3. Khách nộp đúng 2 ảnh hợp lệ -> Thành công!
+    res_2_img = client.post(
+        f"/api/v1/returns/{return_code}/evidence/submit",
+        headers=buyer_headers,
+        json={
+            "images": [
+                {"file_url": "/api/v1/returns/evidence/evid_01.jpg", "file_name": "photo1.jpg"},
+                {"file_url": "/api/v1/returns/evidence/evid_02.jpg", "file_name": "photo2.png"},
+            ],
+            "customer_note": "Da chup ro ca 2 anh theo yeu cau",
+        },
+    )
+    assert res_2_img.status_code == 200, res_2_img.text
+    assert res_2_img.json()["status"] == "SUBMITTED"
+
+    with SessionLocal() as db:
+        c = db.scalar(select(WarehouseReturnCase).where(WarehouseReturnCase.case_code == case_code))
+        assert c.status == ReturnStatus.WAITING_MANAGER_REVIEW.value
+        assert c.return_request.status == ReturnStatus.WAITING_MANAGER_REVIEW.value
+        evids = db.scalars(select(ReturnEvidence).where(ReturnEvidence.return_request_id == c.return_request_id)).all()
+        assert len(evids) >= 2
+
+
+# --------------------------------------------------------------------------
+# Scenario 34: Warehouse Manager Accepts Evidence -> WAITING_MANAGER_APPROVAL
+# --------------------------------------------------------------------------
+def test_34_manager_accepts_evidence_advances_status(client, manager_hcm_headers):
+    case_code = _get_or_create_test_case("KHO-HCM-01")
+
+    res = client.post(
+        f"/api/v1/warehouse/me/returns/{case_code}/accept-evidence",
+        headers=manager_hcm_headers,
+        json={"manager_note": "Bằng chứng rõ ràng, hợp lệ."},
+    )
+    assert res.status_code == 200, res.text
+    data = res.json()
+    assert data["status"] == "SUCCESS"
+    assert data["case_status"] == ReturnStatus.WAITING_MANAGER_APPROVAL.value
+
+    with SessionLocal() as db:
+        c = db.scalar(select(WarehouseReturnCase).where(WarehouseReturnCase.case_code == case_code))
+        assert c.status == ReturnStatus.WAITING_MANAGER_APPROVAL.value
+        req = db.scalar(select(ReturnEvidenceRequest).where(ReturnEvidenceRequest.warehouse_return_case_id == c.id).order_by(ReturnEvidenceRequest.id.desc()))
+        assert req.status == "ACCEPTED"
+        assert req.reviewed_at is not None
+
+
+# --------------------------------------------------------------------------
+# Scenario 35: 3-Day Timeout Cancels Return Case but Preserves Original Order
+# --------------------------------------------------------------------------
+def test_35_evidence_timeout_3_days_cancels_return_preserves_order(client, manager_hcm_headers, buyer_headers):
+    case_code = _get_or_create_test_case("KHO-HCM-01")
+    with SessionLocal() as db:
+        c = db.scalar(select(WarehouseReturnCase).where(WarehouseReturnCase.case_code == case_code))
+        c.status = ReturnStatus.INSPECTING.value
+        case_id = c.id
+        order_id = c.return_request.order_id
+        db.commit()
+
+    # 1. Quản lý tạo yêu cầu mới
+    res_req = client.post(
+        f"/api/v1/warehouse/me/returns/{case_code}/request-evidence",
+        headers=manager_hcm_headers,
+        json={
+            "required_image_count": 1,
+            "reason": "Kiem tra qua han 3 ngay",
+            "instructions": "Chup anh",
+        },
+    )
+    assert res_req.status_code == 200
+
+    # 2. Giả lập thời gian đã trôi qua hơn 3 ngày
+    with SessionLocal() as db:
+        req = db.scalar(select(ReturnEvidenceRequest).where(ReturnEvidenceRequest.warehouse_return_case_id == case_id, ReturnEvidenceRequest.status == "OPEN"))
+        assert req is not None
+        req.requested_at = datetime.now(UTC) - timedelta(days=4)
+        req.expires_at = datetime.now(UTC) - timedelta(days=1)
+        db.commit()
+
+    # 3. Kích hoạt scheduler quét quá hạn
+    with SessionLocal() as db:
+        count = WarehouseReturnService.check_and_expire_evidence_requests(db)
+        assert count >= 1
+
+    # 4. Kiểm tra ca hoàn chuyển sang CANCELLED_EVIDENCE_TIMEOUT nhưng đơn hàng gốc KHÔNG bị hủy
+    with SessionLocal() as db:
+        c = db.scalar(select(WarehouseReturnCase).where(WarehouseReturnCase.id == case_id))
+        assert c.status == ReturnStatus.CANCELLED_EVIDENCE_TIMEOUT.value
+        assert c.return_request.status == ReturnStatus.CANCELLED_EVIDENCE_TIMEOUT.value
+        assert "3 ngày" in (c.rejection_reason or "")
+
+        order = db.scalar(select(Order).where(Order.id == order_id))
+        assert order is not None
+        assert order.order_status != "CANCELLED", "QUAN TRỌNG: Quá hạn bổ sung ảnh chỉ hủy yêu cầu đổi trả, KHÔNG làm hủy Order mua hàng gốc của khách!"
+
+    # 5. Khách hàng cố nộp ảnh sau khi đã quá hạn -> Bị từ chối
+    with SessionLocal() as db:
+        c = db.scalar(select(WarehouseReturnCase).where(WarehouseReturnCase.id == case_id))
+        ret_code = c.return_request.return_code
+
+    res_late = client.post(
+        f"/api/v1/returns/{ret_code}/evidence/submit",
+        headers=buyer_headers,
+        json={
+            "images": [{"file_url": "/api/v1/returns/evidence/evid_late.jpg", "file_name": "late.jpg"}],
+        },
+    )
+    assert res_late.status_code == 400, "Sau khi quá hạn, form tải ảnh bị khóa và từ chối gửi"
+
+
+# --------------------------------------------------------------------------
+# Scenario 36: Cannot Create Two Active Evidence Requests Concurrently
+# --------------------------------------------------------------------------
+def test_36_cannot_create_two_active_evidence_requests_concurrently(client, manager_hcm_headers):
+    case_code = _get_or_create_test_case("KHO-HCM-01")
+    with SessionLocal() as db:
+        c = db.scalar(select(WarehouseReturnCase).where(WarehouseReturnCase.case_code == case_code))
+        c.status = ReturnStatus.INSPECTING.value
+        db.commit()
+
+    # 1. Tạo yêu cầu thứ nhất
+    res1 = client.post(
+        f"/api/v1/warehouse/me/returns/{case_code}/request-evidence",
+        headers=manager_hcm_headers,
+        json={
+            "required_image_count": 1,
+            "reason": "Yêu cầu lần 1",
+            "instructions": "Chụp tem",
+        },
+    )
+    assert res1.status_code == 200
+
+    # 2. Thử tạo yêu cầu thứ 2 khi yêu cầu 1 đang OPEN -> Bị từ chối (400)
+    res2 = client.post(
+        f"/api/v1/warehouse/me/returns/{case_code}/request-evidence",
+        headers=manager_hcm_headers,
+        json={
+            "required_image_count": 2,
+            "reason": "Yêu cầu lần 2",
+            "instructions": "Chụp tem và đáy",
+        },
+    )
+    assert res2.status_code == 400, "Không được tạo hai yêu cầu bằng chứng đang hoạt động cùng lúc"
+
+
+# --------------------------------------------------------------------------
+# Scenario 37: Get Return Case Detail by Manager Without Prior Refund Record
+# --------------------------------------------------------------------------
+def test_37_get_return_case_detail_safe_refund_info(client, manager_hcm_headers):
+    """
+    Xác nhận Quản lý kho mở chi tiết ca hoàn mới (chưa có bản ghi Refund)
+    không bao giờ bị lỗi AttributeError: 'ReturnRequest' object has no attribute 'bank_name' (500).
+    """
+    case_code = _get_or_create_test_case("KHO-HCM-01")
+    res = client.get(
+        f"/api/v1/warehouse/me/returns/{case_code}",
+        headers=manager_hcm_headers,
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["case_code"] == case_code
+    assert "refund_info" in data
+    assert data["refund_info"]["beneficiary_bank"] is not None
+    assert data["refund_info"]["beneficiary_account_name"] is not None
+    assert "active_evidence_request" in data
+
+

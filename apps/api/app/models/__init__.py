@@ -78,6 +78,8 @@ from app.models.returns import (
     ReturnStatusHistory,
     WarehouseReturnCase,
     ReturnInspection,
+    ReturnEvidenceRequest,
+    ReturnEvidenceRequestStatus,
 )
 from app.models.security_and_promotions import (
     PasswordResetToken,
@@ -160,4 +162,6 @@ __all__ = [
     "WarehouseLocation",
     "WarehouseReturnCase",
     "ReturnInspection",
+    "ReturnEvidenceRequest",
+    "ReturnEvidenceRequestStatus",
 ]

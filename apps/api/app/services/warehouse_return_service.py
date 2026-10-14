@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import UTC, datetime, date
+from datetime import UTC, datetime, date, timedelta
 from decimal import Decimal
 from typing import Any, Sequence
 
@@ -43,6 +43,8 @@ from app.models.returns import (
     RefundMethod,
     RefundStatus,
     ReturnEvidence,
+    ReturnEvidenceRequest,
+    ReturnEvidenceRequestStatus,
     ReturnInspection,
     ReturnItem,
     ReturnRequest,
@@ -60,6 +62,14 @@ logger = logging.getLogger("pharmatrust.warehouse_returns")
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def to_utc(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
 
 
 class WarehouseReturnService:
@@ -1275,3 +1285,470 @@ class WarehouseReturnService:
         )
         db.add(hist)
         return hist
+
+    @classmethod
+    def request_customer_evidence(
+        cls,
+        db: Session,
+        case_code: str,
+        user: User,
+        warehouse_id: int | None,
+        reason: str,
+        instructions: str,
+        required_image_count: int,
+        return_item_id: int | None = None,
+    ) -> ReturnEvidenceRequest:
+        """
+        Quản lý kho yêu cầu khách hàng bổ sung từ 1 đến 3 ảnh bằng chứng.
+        """
+        case = cls.get_case_by_identifier(db, case_code, warehouse_id=None)
+
+        # RBAC: Quản lý kho chỉ được yêu cầu cho kho của mình
+        if user.role == "WAREHOUSE_MANAGER":
+            if case.warehouse_id != user.warehouse_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Bạn không có quyền yêu cầu bổ sung ảnh cho ca hoàn của chi nhánh kho khác.",
+                )
+        elif user.role != "ADMIN":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Chỉ Quản lý kho mới được yêu cầu khách hàng bổ sung hình ảnh.",
+            )
+
+        # Ràng buộc số lượng ảnh từ 1 đến 3
+        if not (1 <= required_image_count <= 3):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Số lượng ảnh yêu cầu bắt buộc phải từ 1 đến 3 ảnh.",
+            )
+
+        clean_reason = reason.strip() if reason else ""
+        clean_instructions = instructions.strip() if instructions else ""
+        if len(clean_reason) < 3:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Lý do yêu cầu bắt buộc và phải có ít nhất 3 ký tự.",
+            )
+        if len(clean_instructions) < 3:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Hướng dẫn chụp ảnh bắt buộc và phải có ít nhất 3 ký tự.",
+            )
+
+        # Ràng buộc: Không tạo 2 yêu cầu bằng chứng đang hoạt động
+        existing_active = db.scalar(
+            select(ReturnEvidenceRequest).where(
+                ReturnEvidenceRequest.warehouse_return_case_id == case.id,
+                ReturnEvidenceRequest.status == ReturnEvidenceRequestStatus.OPEN.value,
+            )
+        )
+        if existing_active:
+            # Kiểm tra xem yêu cầu cũ có bị quá hạn chưa
+            if to_utc(existing_active.expires_at) <= utcnow():
+                cls.expire_evidence_request(db, existing_active)
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Đã có yêu cầu bổ sung hình ảnh đang mở cho ca hoàn này. Vui lòng chờ khách nộp hoặc hết hạn.",
+                )
+
+        if return_item_id:
+            matched_item = next((it for it in case.items if it.id == return_item_id), None)
+            if not matched_item:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Sản phẩm chỉ định không thuộc ca hoàn này.",
+                )
+
+        now = utcnow()
+        expires_at = now + timedelta(days=3)
+        req_code = f"REQ-EVID-{uuid.uuid4().hex[:8].upper()}"
+
+        evidence_req = ReturnEvidenceRequest(
+            request_code=req_code,
+            return_request_id=case.return_request_id,
+            warehouse_return_case_id=case.id,
+            warehouse_id=case.warehouse_id,
+            requested_by_user_id=user.id,
+            customer_id=case.return_request.user_id if case.return_request else None,
+            return_item_id=return_item_id,
+            reason=clean_reason,
+            instructions=clean_instructions,
+            required_image_count=required_image_count,
+            status=ReturnEvidenceRequestStatus.OPEN.value,
+            requested_at=now,
+            expires_at=expires_at,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(evidence_req)
+
+        # Cập nhật trạng thái ca hoàn và return_request
+        old_status = case.status
+        case.status = ReturnStatus.WAITING_CUSTOMER_EVIDENCE.value
+        case.updated_at = now
+        if case.return_request:
+            case.return_request.status = ReturnStatus.WAITING_CUSTOMER_EVIDENCE.value
+            case.return_request.updated_at = now
+
+        cls._add_case_history(
+            db=db,
+            case=case,
+            from_status=old_status,
+            to_status=ReturnStatus.WAITING_CUSTOMER_EVIDENCE.value,
+            actor=user,
+            actor_role=user.role,
+            note=f"Quản lý kho yêu cầu bổ sung {required_image_count} ảnh. Lý do: {clean_reason}. Hạn chót: {expires_at.strftime('%d/%m/%Y %H:%M')}",
+        )
+
+        write_audit(
+            db=db,
+            action="REQUEST_CUSTOMER_EVIDENCE",
+            entity_type="WAREHOUSE_RETURN_CASE",
+            entity_id=case.case_code,
+            user=user,
+            details=f"Yêu cầu {required_image_count} ảnh: {clean_reason} (Mã YC: {req_code})",
+        )
+
+        db.commit()
+        db.refresh(evidence_req)
+        return evidence_req
+
+    @classmethod
+    def get_customer_evidence_request(
+        cls,
+        db: Session,
+        return_code: str,
+        user: User | None = None,
+        phone_verify: str | None = None,
+    ) -> ReturnEvidenceRequest | None:
+        """
+        Lấy thông tin yêu cầu bổ sung ảnh cho khách hàng (kèm kiểm tra quá hạn Just-in-Time).
+        """
+        ret_req = db.scalar(
+            select(ReturnRequest).where(ReturnRequest.return_code == return_code)
+        )
+        if not ret_req:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Không tìm thấy yêu cầu đổi trả.",
+            )
+
+        if user:
+            if ret_req.user_id and ret_req.user_id != user.id and user.role not in ["ADMIN", "WAREHOUSE_MANAGER", "WAREHOUSE_STAFF"]:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Bạn không có quyền xem yêu cầu đổi trả của khách hàng khác.",
+                )
+        elif phone_verify:
+            if ret_req.customer_phone != phone_verify.strip():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Số điện thoại xác thực không khớp.",
+                )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Vui lòng đăng nhập hoặc cung cấp số điện thoại xác thực.",
+            )
+
+        req = db.scalar(
+            select(ReturnEvidenceRequest)
+            .where(ReturnEvidenceRequest.return_request_id == ret_req.id)
+            .order_by(ReturnEvidenceRequest.id.desc())
+        )
+        if not req:
+            return None
+
+        # Just-in-Time expiry check
+        if req.status == ReturnEvidenceRequestStatus.OPEN.value and to_utc(req.expires_at) <= utcnow():
+            cls.expire_evidence_request(db, req)
+            db.commit()
+            db.refresh(req)
+
+        return req
+
+    @classmethod
+    def submit_customer_evidence(
+        cls,
+        db: Session,
+        return_code: str,
+        user: User | None,
+        images: list[dict[str, Any]],
+        customer_note: str | None = None,
+        phone_verify: str | None = None,
+    ) -> ReturnEvidenceRequest:
+        """
+        Khách hàng gửi bổ sung đúng số lượng ảnh theo yêu cầu của Quản lý kho.
+        """
+        ret_req = db.scalar(
+            select(ReturnRequest).where(ReturnRequest.return_code == return_code)
+        )
+        if not ret_req:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Không tìm thấy yêu cầu đổi trả.",
+            )
+
+        if user:
+            if ret_req.user_id and ret_req.user_id != user.id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Bạn không có quyền tải ảnh lên yêu cầu đổi trả của người khác.",
+                )
+        elif phone_verify:
+            if ret_req.customer_phone != phone_verify.strip():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Số điện thoại xác thực không khớp.",
+                )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Vui lòng đăng nhập để gửi hình ảnh bằng chứng.",
+            )
+
+        req = db.scalar(
+            select(ReturnEvidenceRequest)
+            .where(
+                ReturnEvidenceRequest.return_request_id == ret_req.id,
+                ReturnEvidenceRequest.status == ReturnEvidenceRequestStatus.OPEN.value,
+            )
+            .order_by(ReturnEvidenceRequest.id.desc())
+        )
+        if not req:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Không có yêu cầu bổ sung hình ảnh nào đang mở cho đơn hoàn này.",
+            )
+
+        now = utcnow()
+        # Kiểm tra quá hạn 3 ngày tại thời điểm gửi (Just-In-Time)
+        if to_utc(req.expires_at) <= now:
+            cls.expire_evidence_request(db, req)
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Yêu cầu bổ sung hình ảnh đã quá hạn 3 ngày. Đơn hoàn đã bị hủy tự động.",
+            )
+
+        # Ràng buộc số lượng ảnh phải đúng chính xác
+        if len(images) != req.required_image_count:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Bạn phải gửi chính xác {req.required_image_count} hình ảnh theo yêu cầu của Quản lý kho (hiện có {len(images)} ảnh).",
+            )
+
+        allowed_extensions = {".jpg", ".jpeg", ".png", ".webp"}
+        for img in images:
+            file_url = img.get("file_url")
+            file_name = img.get("file_name", "evidence.jpg")
+            if not file_url:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Đường dẫn file_url không được để trống.",
+                )
+            ext = "." + file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
+            if ext not in allowed_extensions and not any(file_url.lower().endswith(e) for e in allowed_extensions):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Định dạng ảnh '{ext or file_name}' không hợp lệ. Chỉ chấp nhận .jpg, .jpeg, .png, .webp.",
+                )
+
+            evid = ReturnEvidence(
+                return_request_id=ret_req.id,
+                warehouse_return_case_id=req.warehouse_return_case_id,
+                evidence_request_id=req.id,
+                return_item_id=req.return_item_id,
+                file_url=file_url,
+                file_name=file_name,
+                mime_type=img.get("mime_type", "image/jpeg"),
+                file_size=img.get("file_size", 0),
+                file_category="CUSTOMER_SUPPLEMENTARY",
+                description=customer_note,
+                customer_note=customer_note,
+                uploaded_by=user.id if user else None,
+                created_at=now,
+            )
+            db.add(evid)
+
+        req.status = ReturnEvidenceRequestStatus.SUBMITTED.value
+        req.submitted_at = now
+        req.customer_note = customer_note
+        req.updated_at = now
+
+        case = req.warehouse_case
+        old_status = case.status if case else ret_req.status
+        if case:
+            case.status = ReturnStatus.WAITING_MANAGER_REVIEW.value
+            case.updated_at = now
+            cls._add_case_history(
+                db=db,
+                case=case,
+                from_status=old_status,
+                to_status=ReturnStatus.WAITING_MANAGER_REVIEW.value,
+                actor=user,
+                actor_role="CUSTOMER",
+                note=f"Khách hàng đã bổ sung đủ {len(images)} ảnh theo yêu cầu.",
+            )
+            write_audit(
+                db=db,
+                action="SUBMIT_CUSTOMER_EVIDENCE",
+                entity_type="WAREHOUSE_RETURN_CASE",
+                entity_id=case.case_code,
+                user=user,
+                details=f"Khách hàng nộp {len(images)} ảnh bổ sung cho yêu cầu {req.request_code}",
+            )
+
+        ret_req.status = ReturnStatus.WAITING_MANAGER_REVIEW.value
+        ret_req.updated_at = now
+
+        db.commit()
+        db.refresh(req)
+        return req
+
+    @classmethod
+    def accept_customer_evidence(
+        cls,
+        db: Session,
+        case_code: str,
+        user: User,
+        warehouse_id: int | None,
+        manager_note: str | None = None,
+    ) -> WarehouseReturnCase:
+        """
+        Quản lý kho duyệt chấp nhận bằng chứng và chuyển đơn hoàn sang WAITING_MANAGER_APPROVAL.
+        """
+        case = cls.get_case_by_identifier(db, case_code, warehouse_id=None)
+
+        if user.role == "WAREHOUSE_MANAGER":
+            if case.warehouse_id != user.warehouse_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Bạn không có quyền duyệt bằng chứng của ca hoàn kho khác.",
+                )
+        elif user.role != "ADMIN":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Chỉ Quản lý kho mới có quyền duyệt bằng chứng.",
+            )
+
+        req = db.scalar(
+            select(ReturnEvidenceRequest)
+            .where(
+                ReturnEvidenceRequest.warehouse_return_case_id == case.id,
+                ReturnEvidenceRequest.status == ReturnEvidenceRequestStatus.SUBMITTED.value,
+            )
+            .order_by(ReturnEvidenceRequest.id.desc())
+        )
+        if not req:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Không có yêu cầu bằng chứng nào đang ở trạng thái 'Đã nộp' (SUBMITTED) để duyệt.",
+            )
+
+        now = utcnow()
+        req.status = ReturnEvidenceRequestStatus.ACCEPTED.value
+        req.reviewed_at = now
+        req.updated_at = now
+
+        old_status = case.status
+        # Chuyển sang WAITING_MANAGER_APPROVAL (như người dùng đã xác nhận)
+        case.status = ReturnStatus.WAITING_MANAGER_APPROVAL.value
+        case.updated_at = now
+        if manager_note:
+            case.manager_note = f"{case.manager_note or ''}\n[Duyệt ảnh]: {manager_note.strip()}".strip()
+
+        if case.return_request:
+            case.return_request.status = ReturnStatus.WAITING_MANAGER_APPROVAL.value
+            case.return_request.updated_at = now
+
+        cls._add_case_history(
+            db=db,
+            case=case,
+            from_status=old_status,
+            to_status=ReturnStatus.WAITING_MANAGER_APPROVAL.value,
+            actor=user,
+            actor_role=user.role,
+            note=f"Quản lý kho đã chấp nhận bằng chứng ảnh. Chuyển ca hoàn sang Chờ Quản lý duyệt hoàn.",
+        )
+
+        write_audit(
+            db=db,
+            action="ACCEPT_CUSTOMER_EVIDENCE",
+            entity_type="WAREHOUSE_RETURN_CASE",
+            entity_id=case.case_code,
+            user=user,
+            details=f"Quản lý chấp nhận bằng chứng cho yêu cầu {req.request_code}. Chuyển trạng thái sang WAITING_MANAGER_APPROVAL.",
+        )
+
+        db.commit()
+        db.refresh(case)
+        return case
+
+    @classmethod
+    def expire_evidence_request(cls, db: Session, req: ReturnEvidenceRequest) -> None:
+        """
+        Xử lý quá hạn 3 ngày: Hủy yêu cầu hoàn trả sang CANCELLED_EVIDENCE_TIMEOUT,
+        khóa upload, nhưng TUYỆT ĐỐI không hủy Order mua hàng gốc của khách.
+        """
+        now = utcnow()
+        req.status = ReturnEvidenceRequestStatus.EXPIRED.value
+        req.updated_at = now
+
+        reason_msg = "Khách hàng không bổ sung đủ hình ảnh trong thời hạn 3 ngày"
+        case = req.warehouse_case
+        ret_req = req.return_request
+
+        if case:
+            old_status = case.status
+            case.status = ReturnStatus.CANCELLED_EVIDENCE_TIMEOUT.value
+            case.rejection_reason = reason_msg
+            case.updated_at = now
+            cls._add_case_history(
+                db=db,
+                case=case,
+                from_status=old_status,
+                to_status=ReturnStatus.CANCELLED_EVIDENCE_TIMEOUT.value,
+                actor=None,
+                actor_role="SYSTEM",
+                note=f"Hệ thống tự động hủy ca hoàn: {reason_msg}",
+            )
+            write_audit(
+                db=db,
+                action="EXPIRE_RETURN_EVIDENCE_TIMEOUT",
+                entity_type="WAREHOUSE_RETURN_CASE",
+                entity_id=case.case_code,
+                user=None,
+                details=f"Yêu cầu {req.request_code} hết hạn 3 ngày. Ca hoàn {case.case_code} chuyển sang CANCELLED_EVIDENCE_TIMEOUT.",
+            )
+
+        if ret_req:
+            ret_req.status = ReturnStatus.CANCELLED_EVIDENCE_TIMEOUT.value
+            ret_req.rejection_reason = reason_msg
+            ret_req.cancelled_at = now
+            ret_req.updated_at = now
+
+    @classmethod
+    def check_and_expire_evidence_requests(cls, db: Session) -> int:
+        """
+        Tác vụ định kỳ (Scheduler): Quét các yêu cầu bằng chứng đã quá hạn 3 ngày.
+        """
+        now = utcnow()
+        open_reqs = db.scalars(
+            select(ReturnEvidenceRequest).where(
+                ReturnEvidenceRequest.status == ReturnEvidenceRequestStatus.OPEN.value,
+            )
+        ).all()
+
+        count = 0
+        for req in open_reqs:
+            if req.expires_at and to_utc(req.expires_at) <= now:
+                cls.expire_evidence_request(db, req)
+                count += 1
+
+        if count > 0:
+            db.commit()
+            logger.info(f"Đã tự động xử lý quá hạn {count} yêu cầu bổ sung hình ảnh đổi trả.")
+        return count

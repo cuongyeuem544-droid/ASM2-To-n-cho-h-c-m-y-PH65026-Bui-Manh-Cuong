@@ -59,6 +59,8 @@ from app.models.returns import (
     RefundMethod,
     RefundStatus,
     ReturnEvidence,
+    ReturnEvidenceRequest,
+    ReturnEvidenceRequestStatus,
     ReturnInspection,
     ReturnItem,
     ReturnRequest,
@@ -165,6 +167,17 @@ class ProcessRefundPayload(BaseModel):
 class StockDispositionPayload(BaseModel):
     disposition: str = Field(..., description="RESTOCK, QUARANTINE, DISPOSE")
     note: Optional[str] = None
+
+
+class RequestEvidencePayload(BaseModel):
+    reason: str = Field(..., min_length=3, description="Lý do yêu cầu bổ sung ảnh")
+    instructions: str = Field(..., min_length=3, description="Hướng dẫn chụp ảnh cho khách")
+    required_image_count: int = Field(..., ge=1, le=3, description="Số lượng ảnh bắt buộc: 1, 2 hoặc 3")
+    return_item_id: Optional[int] = Field(default=None, description="ID sản phẩm cần bổ sung (nếu có)")
+
+
+class AcceptEvidencePayload(BaseModel):
+    manager_note: Optional[str] = Field(default=None, description="Ghi chú của quản lý khi chấp nhận")
 
 
 # ==========================================
@@ -518,8 +531,8 @@ def get_manager_return_case_detail(
 
     for it in case.items:
         oit = order_items_map.get(it.order_item_id)
-        net_unit = RefundCalculationService.calculate_net_unit_price(order, oit) if (order and oit) else it.unit_price_at_purchase
-        line_proposed = net_unit * Decimal(str(it.accepted_quantity if it.accepted_quantity > 0 else it.requested_quantity))
+        net_unit = RefundCalculationService.calculate_net_unit_price(order, oit) if (order and oit) else (it.unit_price_at_purchase or Decimal("0.0"))
+        line_proposed = net_unit * Decimal(str(it.accepted_quantity if (it.accepted_quantity is not None and it.accepted_quantity > 0) else (it.requested_quantity or 0)))
         items_refund_proposed += line_proposed
 
         items_data.append({
@@ -531,10 +544,10 @@ def get_manager_return_case_detail(
             "received_quantity": it.received_quantity,
             "accepted_quantity": it.accepted_quantity,
             "rejected_quantity": it.rejected_quantity,
-            "unit_price": float(it.unit_price_at_purchase),
-            "net_unit_price": float(net_unit),
+            "unit_price": float(it.unit_price_at_purchase or 0),
+            "net_unit_price": float(net_unit or 0),
             "subtotal": float(line_proposed),
-            "approved_refund_amount": float(it.approved_refund_amount),
+            "approved_refund_amount": float(it.approved_refund_amount or 0),
             "condition": it.condition,
             "inspection_note": it.inspection_note,
         })
@@ -544,6 +557,30 @@ def get_manager_return_case_detail(
     order_total = Decimal(str(order.total_amount)) if order else Decimal("0.0")
     max_possible = max(Decimal("0.0"), order_total - already_refunded)
     final_proposed = min(items_refund_proposed, max_possible)
+
+    # Lấy thông tin tài khoản thụ hưởng hoàn tiền an toàn (từ bản ghi Refund nếu đã có)
+    last_refund = (
+        case.refunds[-1]
+        if case.refunds
+        else (
+            case.return_request.refunds[-1]
+            if (case.return_request and case.return_request.refunds)
+            else None
+        )
+    )
+    bank_name = (
+        getattr(last_refund, "beneficiary_bank", None)
+        or getattr(last_refund, "beneficiary_bank_name", None)
+        or "Mặc định"
+    )
+    account_name = (
+        getattr(last_refund, "beneficiary_account_name", None)
+        or (case.return_request.customer_name if case.return_request else "Khách hàng")
+    )
+    acc_no = getattr(last_refund, "beneficiary_account_number", None)
+    account_number_masked = (
+        f"***{acc_no[-4:]}" if (acc_no and len(acc_no) >= 4) else (acc_no or "—")
+    )
 
     return {
         "id": case.id,
@@ -628,10 +665,106 @@ def get_manager_return_case_detail(
             "estimated_refund_amount": float(final_proposed),
             "already_refunded": already_refunded > Decimal("0.0"),
             "refund_status": "COMPLETED" if (already_refunded > Decimal("0.0") and final_proposed == Decimal("0.0")) else "PENDING",
-            "beneficiary_bank": (case.return_request.bank_name or "Mặc định") if case.return_request else "Mặc định",
-            "beneficiary_account_name": (case.return_request.bank_account_holder or "Khách hàng") if case.return_request else "Khách hàng",
-            "beneficiary_account_number_masked": (case.return_request.bank_account_number or "—") if case.return_request else "—",
+            "beneficiary_bank": bank_name,
+            "beneficiary_account_name": account_name,
+            "beneficiary_account_number_masked": account_number_masked,
         },
+        "active_evidence_request": (
+            lambda req: {
+                "id": req.id,
+                "request_code": req.request_code,
+                "return_item_id": req.return_item_id,
+                "reason": req.reason,
+                "instructions": req.instructions,
+                "required_image_count": req.required_image_count,
+                "status": req.status,
+                "requested_at": req.requested_at.isoformat() if req.requested_at else None,
+                "expires_at": req.expires_at.isoformat() if req.expires_at else None,
+                "submitted_at": req.submitted_at.isoformat() if req.submitted_at else None,
+                "customer_note": req.customer_note,
+                "evidences": [
+                    {
+                        "id": ev.id,
+                        "file_url": ev.file_url,
+                        "file_name": ev.file_name,
+                        "created_at": ev.created_at.isoformat() if ev.created_at else None,
+                    }
+                    for ev in (req.evidences or [])
+                ],
+            } if req else None
+        )(
+            db.scalar(
+                select(ReturnEvidenceRequest)
+                .options(selectinload(ReturnEvidenceRequest.evidences))
+                .where(
+                    ReturnEvidenceRequest.warehouse_return_case_id == case.id,
+                    ReturnEvidenceRequest.status.in_([
+                        ReturnEvidenceRequestStatus.OPEN.value,
+                        ReturnEvidenceRequestStatus.SUBMITTED.value,
+                    ]),
+                )
+                .order_by(ReturnEvidenceRequest.id.desc())
+            )
+        ),
+    }
+
+
+@manager_router.post("/returns/{return_code}/request-evidence")
+@compat_portal_router.post("/me/returns/{return_code}/request-evidence")
+def request_customer_evidence_endpoint(
+    return_code: str,
+    payload: RequestEvidencePayload,
+    db: Session = Depends(get_db),
+    auth: tuple[User, int | None] = Depends(require_warehouse_manager),
+):
+    """
+    Quản lý kho yêu cầu khách hàng bổ sung từ 1 đến 3 ảnh.
+    """
+    manager, warehouse_id = auth
+    evidence_req = WarehouseReturnService.request_customer_evidence(
+        db=db,
+        case_code=return_code,
+        user=manager,
+        warehouse_id=warehouse_id,
+        reason=payload.reason,
+        instructions=payload.instructions,
+        required_image_count=payload.required_image_count,
+        return_item_id=payload.return_item_id,
+    )
+    return {
+        "status": "SUCCESS",
+        "message": f"Đã gửi yêu cầu khách bổ sung {evidence_req.required_image_count} hình ảnh thành công.",
+        "request_code": evidence_req.request_code,
+        "expires_at": evidence_req.expires_at.isoformat() if evidence_req.expires_at else None,
+        "case_status": ReturnStatus.WAITING_CUSTOMER_EVIDENCE.value,
+    }
+
+
+@manager_router.post("/returns/{return_code}/accept-evidence")
+@compat_portal_router.post("/me/returns/{return_code}/accept-evidence")
+def accept_customer_evidence_endpoint(
+    return_code: str,
+    payload: Optional[AcceptEvidencePayload] = None,
+    db: Session = Depends(get_db),
+    auth: tuple[User, int | None] = Depends(require_warehouse_manager),
+):
+    """
+    Quản lý kho duyệt chấp nhận bằng chứng và chuyển ca hoàn sang WAITING_MANAGER_APPROVAL.
+    """
+    manager, warehouse_id = auth
+    note = payload.manager_note if payload else None
+    case = WarehouseReturnService.accept_customer_evidence(
+        db=db,
+        case_code=return_code,
+        user=manager,
+        warehouse_id=warehouse_id,
+        manager_note=note,
+    )
+    return {
+        "status": "SUCCESS",
+        "message": "Đã chấp nhận bằng chứng của khách hàng. Ca hoàn chuyển sang trạng thái Chờ Quản lý duyệt hoàn.",
+        "case_code": case.case_code,
+        "case_status": case.status,
     }
 
 

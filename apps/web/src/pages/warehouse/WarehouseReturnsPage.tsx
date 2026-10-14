@@ -89,6 +89,7 @@ interface WarehouseReturnCaseDetail {
   items: ReturnCaseItem[]
   inspections: InspectionRecord[]
   evidences: ReturnEvidenceItem[]
+  active_evidence_request?: ActiveEvidenceRequest
   refund_info?: {
     estimated_refund_amount?: number
     already_refunded?: boolean
@@ -105,6 +106,27 @@ interface WarehouseReturnCaseDetail {
   }
 }
 
+interface ActiveEvidenceRequest {
+  id: number
+  request_code: string
+  return_item_id?: number
+  product_name?: string
+  reason: string
+  instructions: string
+  required_image_count: number
+  status: string
+  requested_at?: string
+  expires_at?: string
+  submitted_at?: string
+  customer_note?: string
+  evidences?: Array<{
+    id: number
+    file_url: string
+    file_name: string
+    created_at?: string
+  }>
+}
+
 interface WarehouseStaffOption {
   id: number
   full_name: string
@@ -114,6 +136,8 @@ interface WarehouseStaffOption {
 const STATUS_TABS = [
   { value: 'ALL', label: 'Tất cả' },
   { value: 'ASSIGNED_TO_WAREHOUSE', label: 'Chờ nhận hàng' },
+  { value: 'WAITING_CUSTOMER_EVIDENCE', label: 'Chờ khách nộp ảnh' },
+  { value: 'WAITING_MANAGER_REVIEW', label: 'Khách đã nộp ảnh' },
   { value: 'INSPECTING', label: 'Đang kiểm hàng' },
   { value: 'WAITING_MANAGER_APPROVAL', label: 'Chờ duyệt' },
   { value: 'APPROVED', label: 'Đã duyệt' },
@@ -129,10 +153,13 @@ const STATUS_CONFIG: Record<string, { label: string; bg: string; color: string }
   WAITING_CUSTOMER_SHIPMENT: { label: 'Chờ khách gửi', bg: '#f1f5f9', color: '#475569' },
   IN_TRANSIT: { label: 'Đang giao tới kho', bg: '#e0f2fe', color: '#0284c7' },
   RECEIVED: { label: 'Đã nhận tại kho', bg: '#dbeafe', color: '#1d4ed8' },
+  WAITING_CUSTOMER_EVIDENCE: { label: 'Chờ khách gửi ảnh', bg: '#fff7ed', color: '#c2410c' },
+  WAITING_MANAGER_REVIEW: { label: 'Khách đã gửi ảnh', bg: '#fef3c7', color: '#b45309' },
   INSPECTING: { label: 'NV đang kiểm hàng', bg: '#f3e8ff', color: '#7c3aed' },
   WAITING_MANAGER_APPROVAL: { label: 'Chờ Quản lý duyệt', bg: '#fff7ed', color: '#ea580c' },
   APPROVED: { label: 'Quản lý đã duyệt', bg: '#dcfce7', color: '#166534' },
   REJECTED: { label: 'Đã từ chối', bg: '#fee2e2', color: '#b91c1c' },
+  CANCELLED_EVIDENCE_TIMEOUT: { label: 'Hết hạn bổ sung ảnh', bg: '#fee2e2', color: '#991b1b' },
   REFUND_PENDING: { label: 'Chờ hoàn tiền', bg: '#cffafe', color: '#0e7490' },
   REFUND_PROCESSING: { label: 'Đang xử lý hoàn tiền', bg: '#ede9fe', color: '#6d28d9' },
   REFUNDED: { label: 'Đã hoàn tiền', bg: '#bbf7d0', color: '#15803d' },
@@ -182,6 +209,67 @@ export function WarehouseReturnsPage() {
   const [showDispositionModal, setShowDispositionModal] = useState(false)
   const [dispositionChoice, setDispositionChoice] = useState<'RESTOCK' | 'QUARANTINE' | 'DISPOSE'>('RESTOCK')
   const [dispositionNote, setDispositionNote] = useState('')
+
+  // Request Evidence Modal
+  const [showRequestEvidenceModal, setShowRequestEvidenceModal] = useState(false)
+  const [evidenceRequiredCount, setEvidenceRequiredCount] = useState<number>(1)
+  const [evidenceReason, setEvidenceReason] = useState('')
+  const [evidenceInstructions, setEvidenceInstructions] = useState('')
+  const [evidenceItemId, setEvidenceItemId] = useState<number | ''>('')
+
+  const handleRequestEvidence = async () => {
+    if (!selectedCase) return
+    if (!evidenceReason.trim() || !evidenceInstructions.trim()) {
+      setActionError('Vui lòng nhập đầy đủ lý do và hướng dẫn chụp ảnh.')
+      return
+    }
+    setActionLoading(true)
+    setActionError('')
+    try {
+      await api(`/warehouse/me/returns/${selectedCase.case_code}/request-evidence`, {
+        method: 'POST',
+        body: JSON.stringify({
+          required_image_count: Number(evidenceRequiredCount),
+          reason: evidenceReason.trim(),
+          instructions: evidenceInstructions.trim(),
+          return_item_id: evidenceItemId ? Number(evidenceItemId) : null,
+        }),
+      })
+      setActionSuccess('Đã gửi yêu cầu bổ sung hình ảnh tới khách hàng thành công!')
+      setShowRequestEvidenceModal(false)
+      setEvidenceReason('')
+      setEvidenceInstructions('')
+      setEvidenceRequiredCount(1)
+      setEvidenceItemId('')
+      await openCaseDetail(selectedCase.case_code)
+      await fetchCases()
+    } catch (err: any) {
+      setActionError(err?.message || 'Lỗi khi gửi yêu cầu bổ sung hình ảnh.')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleAcceptEvidence = async () => {
+    if (!selectedCase) return
+    setActionLoading(true)
+    setActionError('')
+    try {
+      await api(`/warehouse/me/returns/${selectedCase.case_code}/accept-evidence`, {
+        method: 'POST',
+        body: JSON.stringify({
+          manager_note: 'Quản lý kho đã kiểm tra và chấp nhận bằng chứng hình ảnh của khách hàng.',
+        }),
+      })
+      setActionSuccess('Đã chấp nhận bằng chứng ảnh! Ca hoàn chuyển sang Chờ Quản lý duyệt hoàn.')
+      await openCaseDetail(selectedCase.case_code)
+      await fetchCases()
+    } catch (err: any) {
+      setActionError(err?.message || 'Lỗi khi chấp nhận bằng chứng ảnh.')
+    } finally {
+      setActionLoading(false)
+    }
+  }
 
   const fetchCases = async () => {
     setLoading(true)
@@ -688,6 +776,112 @@ export function WarehouseReturnsPage() {
                 </div>
               )}
 
+              {/* Thông báo khách đã nộp ảnh bằng chứng */}
+              {selectedCase.active_evidence_request && selectedCase.status === 'WAITING_MANAGER_REVIEW' && (
+                <div
+                  style={{
+                    padding: 16,
+                    background: '#fef3c7',
+                    border: '1px solid #fde68a',
+                    borderRadius: 12,
+                    marginBottom: 16,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: '#92400e', fontSize: 14 }}>
+                      <ImageIcon size={18} />
+                      <span>Khách hàng đã nộp hình ảnh bằng chứng</span>
+                    </div>
+                    <span style={{ fontSize: 11, color: '#78350f' }}>
+                      Thời gian nộp: {selectedCase.active_evidence_request.submitted_at ? formatDateTimeVN(selectedCase.active_evidence_request.submitted_at) : 'Vừa xong'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 13, color: '#78350f', marginBottom: 6 }}>
+                    <strong>Yêu cầu gốc:</strong> {selectedCase.active_evidence_request.reason} ({selectedCase.active_evidence_request.required_image_count} ảnh)
+                  </div>
+                  {selectedCase.active_evidence_request.customer_note && (
+                    <div style={{ fontSize: 13, color: '#78350f', marginBottom: 10 }}>
+                      <strong>Ghi chú của khách:</strong> &ldquo;{selectedCase.active_evidence_request.customer_note}&rdquo;
+                    </div>
+                  )}
+                  {/* Grid hình ảnh khách nộp */}
+                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 10 }}>
+                    {selectedCase.active_evidence_request.evidences && selectedCase.active_evidence_request.evidences.length > 0 ? (
+                      selectedCase.active_evidence_request.evidences.map((ev) => (
+                        <a
+                          key={ev.id}
+                          href={ev.file_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{
+                            display: 'block',
+                            border: '2px solid #f59e0b',
+                            borderRadius: 8,
+                            overflow: 'hidden',
+                            width: 120,
+                            height: 120,
+                            position: 'relative',
+                            boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+                          }}
+                        >
+                          <img
+                            src={ev.file_url}
+                            alt={ev.file_name}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />
+                        </a>
+                      ))
+                    ) : (
+                      <div style={{ fontSize: 12, color: '#92400e', fontStyle: 'italic' }}>
+                        Đã ghi nhận nộp bằng chứng.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Thông báo đang chờ khách gửi ảnh */}
+              {selectedCase.active_evidence_request && selectedCase.status === 'WAITING_CUSTOMER_EVIDENCE' && (
+                <div
+                  style={{
+                    padding: 14,
+                    background: '#fff7ed',
+                    border: '1px solid #fed7aa',
+                    borderRadius: 10,
+                    marginBottom: 16,
+                    fontSize: 13,
+                    color: '#9a3412',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, marginBottom: 4 }}>
+                    <Clock size={16} />
+                    <span>Đang chờ khách hàng bổ sung {selectedCase.active_evidence_request.required_image_count} hình ảnh</span>
+                  </div>
+                  <div>
+                    Lý do yêu cầu: {selectedCase.active_evidence_request.reason} • Hạn chót:{' '}
+                    {selectedCase.active_evidence_request.expires_at ? formatDateTimeVN(selectedCase.active_evidence_request.expires_at) : '3 ngày'}
+                  </div>
+                </div>
+              )}
+
+              {/* Thông báo quá hạn bổ sung ảnh */}
+              {selectedCase.status === 'CANCELLED_EVIDENCE_TIMEOUT' && (
+                <div
+                  style={{
+                    padding: 14,
+                    background: '#fef2f2',
+                    border: '1px solid #fecaca',
+                    borderRadius: 10,
+                    marginBottom: 16,
+                    fontSize: 13,
+                    color: '#991b1b',
+                    fontWeight: 600,
+                  }}
+                >
+                  ⚠️ Ca hoàn đã tự động hủy do quá thời hạn 3 ngày khách hàng không bổ sung hình ảnh theo yêu cầu.
+                </div>
+              )}
+
               {/* Grid 2 cột thông tin */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
                 {/* Thông tin khách hàng & lý do */}
@@ -893,6 +1087,31 @@ export function WarehouseReturnsPage() {
                   <span>Phân công NV</span>
                 </button>
 
+                {/* Nút Yêu cầu bổ sung hình ảnh */}
+                {['ASSIGNED_TO_WAREHOUSE', 'INSPECTING', 'WAITING_MANAGER_APPROVAL'].includes(selectedCase.status) && (
+                  <button
+                    type="button"
+                    onClick={() => setShowRequestEvidenceModal(true)}
+                    disabled={actionLoading}
+                    style={{
+                      padding: '8px 14px',
+                      borderRadius: 8,
+                      background: '#fff',
+                      border: '1px solid #0284c7',
+                      color: '#0284c7',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    <ImageIcon size={14} />
+                    <span>Yêu cầu khách bổ sung ảnh</span>
+                  </button>
+                )}
+
                 {/* 2. Nút Yêu cầu kiểm tra lại */}
                 {selectedCase.status === 'WAITING_MANAGER_APPROVAL' && (
                   <button
@@ -920,6 +1139,31 @@ export function WarehouseReturnsPage() {
               </div>
 
               <div style={{ display: 'flex', gap: 8 }}>
+                {/* Chấp nhận bằng chứng ảnh khi khách đã nộp */}
+                {selectedCase.status === 'WAITING_MANAGER_REVIEW' && (
+                  <button
+                    type="button"
+                    onClick={handleAcceptEvidence}
+                    disabled={actionLoading}
+                    style={{
+                      padding: '8px 18px',
+                      borderRadius: 8,
+                      background: '#047857',
+                      color: '#fff',
+                      border: 'none',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    <CheckCircle2 size={14} />
+                    <span>Chấp nhận bằng chứng</span>
+                  </button>
+                )}
+
                 {/* 3. Từ chối hoàn hàng */}
                 {['WAITING_MANAGER_APPROVAL', 'INSPECTING'].includes(selectedCase.status) && (
                   <button
@@ -1439,6 +1683,173 @@ export function WarehouseReturnsPage() {
                 }}
               >
                 Xác nhận phân luồng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL YÊU CẦU KHÁCH BỔ SUNG HÌNH ẢNH */}
+      {showRequestEvidenceModal && selectedCase && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(3px)',
+            zIndex: 1100,
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            padding: 20,
+          }}
+        >
+          <div
+            style={{
+              background: '#fff',
+              width: '100%',
+              maxWidth: 540,
+              borderRadius: 16,
+              overflow: 'hidden',
+              boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
+            }}
+          >
+            <div
+              style={{
+                padding: '16px 20px',
+                background: '#0f172a',
+                color: '#fff',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <ImageIcon size={18} />
+                <span>Yêu Cầu Khách Bổ Sung Hình Ảnh</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowRequestEvidenceModal(false)}
+                style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 6 }}>
+                  Số lượng ảnh bắt buộc khách phải nộp (1 - 3 ảnh):
+                </label>
+                <div style={{ display: 'flex', gap: 12 }}>
+                  {[1, 2, 3].map((count) => (
+                    <label
+                      key={count}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        fontSize: 13,
+                        cursor: 'pointer',
+                        padding: '6px 14px',
+                        borderRadius: 8,
+                        border: evidenceRequiredCount === count ? '2px solid #0284c7' : '1px solid #cbd5e1',
+                        background: evidenceRequiredCount === count ? '#f0f9ff' : '#fff',
+                        fontWeight: evidenceRequiredCount === count ? 700 : 500,
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="evidenceCount"
+                        checked={evidenceRequiredCount === count}
+                        onChange={() => setEvidenceRequiredCount(count)}
+                      />
+                      <span>{count} ảnh</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {selectedCase.items.length > 1 && (
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 6 }}>
+                    Chỉ định sản phẩm cần bằng chứng (tùy chọn):
+                  </label>
+                  <select
+                    value={evidenceItemId}
+                    onChange={(e) => setEvidenceItemId(e.target.value ? Number(e.target.value) : '')}
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13 }}
+                  >
+                    <option value="">Tất cả / Toàn bộ đơn hoàn</option>
+                    {selectedCase.items.map((it) => (
+                      <option key={it.id} value={it.id}>
+                        {it.product_name} (SL: {it.requested_quantity})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 6 }}>
+                  Lý do yêu cầu bổ sung ảnh <span style={{ color: '#dc2626' }}>*</span>:
+                </label>
+                <input
+                  type="text"
+                  placeholder="VD: Tem niêm phong mờ, bao bì hộp bị móp rách..."
+                  value={evidenceReason}
+                  onChange={(e) => setEvidenceReason(e.target.value)}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13 }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 6 }}>
+                  Hướng dẫn khách chụp ảnh chi tiết <span style={{ color: '#dc2626' }}>*</span>:
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder="VD: Chụp rõ 2 góc cạnh của tem niêm phong và đáy hộp có in rõ số lô, hạn sử dụng..."
+                  value={evidenceInstructions}
+                  onChange={(e) => setEvidenceInstructions(e.target.value)}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, resize: 'vertical' }}
+                />
+              </div>
+
+              <div style={{ padding: '10px 14px', background: '#f8fafc', borderRadius: 8, fontSize: 12, color: '#64748b' }}>
+                ⏱️ Khách hàng sẽ có thời hạn <strong>3 ngày</strong> kể từ lúc gửi để nộp đủ số ảnh. Nếu quá 3 ngày khách không gửi, đơn hoàn sẽ tự động bị hủy theo quy định.
+              </div>
+            </div>
+
+            <div style={{ padding: '14px 20px', background: '#f8fafc', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setShowRequestEvidenceModal(false)}
+                disabled={actionLoading}
+                style={{ padding: '8px 16px', borderRadius: 8, background: '#fff', border: '1px solid #cbd5e1', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                onClick={handleRequestEvidence}
+                disabled={actionLoading || !evidenceReason.trim() || !evidenceInstructions.trim()}
+                style={{
+                  padding: '8px 18px',
+                  borderRadius: 8,
+                  background: '#0284c7',
+                  color: '#fff',
+                  border: 'none',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                {actionLoading ? 'Đang gửi...' : 'Gửi yêu cầu tới khách'}
               </button>
             </div>
           </div>

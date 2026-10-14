@@ -56,6 +56,9 @@ class ReturnStatus(StrEnum):
     INSPECTING = "INSPECTING"
     INSPECTION_COMPLETED = "INSPECTION_COMPLETED"
     WAITING_MANAGER_APPROVAL = "WAITING_MANAGER_APPROVAL"
+    WAITING_CUSTOMER_EVIDENCE = "WAITING_CUSTOMER_EVIDENCE"
+    WAITING_MANAGER_REVIEW = "WAITING_MANAGER_REVIEW"
+    CANCELLED_EVIDENCE_TIMEOUT = "CANCELLED_EVIDENCE_TIMEOUT"
     REFUND_PENDING = "REFUND_PENDING"
     REFUND_PROCESSING = "REFUND_PROCESSING"
     EXCHANGE_PENDING = "EXCHANGE_PENDING"
@@ -67,6 +70,13 @@ class ReturnStatus(StrEnum):
     EXCHANGED = "EXCHANGED"
     CLOSED = "CLOSED"
     CANCELLED = "CANCELLED"
+
+
+class ReturnEvidenceRequestStatus(StrEnum):
+    OPEN = "OPEN"
+    SUBMITTED = "SUBMITTED"
+    ACCEPTED = "ACCEPTED"
+    EXPIRED = "EXPIRED"
 
 
 class ReturnMethod(StrEnum):
@@ -185,6 +195,7 @@ class ReturnRequest(Base):
     refunds: Mapped[list["Refund"]] = relationship("Refund", back_populates="return_request")
     exchange_orders: Mapped[list["ExchangeOrder"]] = relationship("ExchangeOrder", back_populates="return_request")
     warehouse_cases: Mapped[list["WarehouseReturnCase"]] = relationship("WarehouseReturnCase", back_populates="return_request", cascade="all, delete-orphan")
+    evidence_requests: Mapped[list["ReturnEvidenceRequest"]] = relationship("ReturnEvidenceRequest", back_populates="return_request", cascade="all, delete-orphan")
 
 
 class ReturnItem(Base):
@@ -274,6 +285,8 @@ class ReturnEvidence(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     warehouse_return_case_id: Mapped[int | None] = mapped_column(ForeignKey("warehouse_return_cases.id", ondelete="SET NULL"), nullable=True, index=True)
     video_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    evidence_request_id: Mapped[int | None] = mapped_column(ForeignKey("return_evidence_requests.id", ondelete="SET NULL"), nullable=True, index=True)
+    customer_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     uploaded_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -296,6 +309,43 @@ class ReturnEvidence(Base):
 
     return_request: Mapped[ReturnRequest] = relationship("ReturnRequest", back_populates="evidences")
     warehouse_case: Mapped["WarehouseReturnCase | None"] = relationship("WarehouseReturnCase", back_populates="evidences")
+    evidence_request: Mapped["ReturnEvidenceRequest | None"] = relationship("ReturnEvidenceRequest", back_populates="evidences")
+
+
+class ReturnEvidenceRequest(Base):
+    __tablename__ = "return_evidence_requests"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    request_code: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    return_request_id: Mapped[int] = mapped_column(ForeignKey("return_requests.id", ondelete="CASCADE"), index=True)
+    warehouse_return_case_id: Mapped[int | None] = mapped_column(ForeignKey("warehouse_return_cases.id", ondelete="SET NULL"), nullable=True, index=True)
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id", ondelete="RESTRICT"), index=True)
+    requested_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    customer_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    return_item_id: Mapped[int | None] = mapped_column(ForeignKey("return_items.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    reason: Mapped[str] = mapped_column(Text)
+    instructions: Mapped[str] = mapped_column(Text)
+    required_image_count: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(50), default=ReturnEvidenceRequestStatus.OPEN.value, index=True)
+
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    customer_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    # Relationships
+    return_request: Mapped["ReturnRequest"] = relationship("ReturnRequest", back_populates="evidence_requests")
+    warehouse_case: Mapped["WarehouseReturnCase | None"] = relationship("WarehouseReturnCase", back_populates="evidence_requests")
+    warehouse: Mapped["Warehouse"] = relationship("Warehouse")
+    requested_by: Mapped["User"] = relationship("User", foreign_keys=[requested_by_user_id])
+    customer: Mapped["User | None"] = relationship("User", foreign_keys=[customer_id])
+    return_item: Mapped["ReturnItem | None"] = relationship("ReturnItem", foreign_keys=[return_item_id])
+    evidences: Mapped[list["ReturnEvidence"]] = relationship("ReturnEvidence", back_populates="evidence_request")
 
 
 class ReturnStatusHistory(Base):
@@ -533,6 +583,7 @@ class WarehouseReturnCase(Base):
     evidences: Mapped[list["ReturnEvidence"]] = relationship("ReturnEvidence", back_populates="warehouse_case")
     refunds: Mapped[list["Refund"]] = relationship("Refund", back_populates="warehouse_case")
     history: Mapped[list["ReturnStatusHistory"]] = relationship("ReturnStatusHistory", back_populates="warehouse_case")
+    evidence_requests: Mapped[list["ReturnEvidenceRequest"]] = relationship("ReturnEvidenceRequest", back_populates="warehouse_case")
 
 
 class ReturnInspection(Base):
