@@ -4,14 +4,17 @@ import {
   ArrowRight,
   Ban,
   Boxes,
+  Building2,
   CheckCircle2,
   Clock,
+  DollarSign,
   Eye,
   FileCheck,
   FileText,
   Filter,
   Image as ImageIcon,
   Loader2,
+  Lock,
   Package,
   RefreshCw,
   RotateCcw,
@@ -19,6 +22,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   Truck,
+  Users,
   X,
   XCircle,
 } from 'lucide-react'
@@ -27,7 +31,9 @@ import { AdminPageHeader } from '../components/AdminPageHeader'
 import { FilterBar } from '../components/FilterBar'
 import { PaginationBar } from '../components/PaginationBar'
 import { api } from '../services/api'
+import { formatDateTimeVN } from '../utils/dateUtils'
 
+// --- Interfaces ---
 interface ReturnSummary {
   id: number
   return_code: string
@@ -75,6 +81,19 @@ interface ReturnEvidenceItem {
   evidence_type: string
 }
 
+interface ChildWarehouseCase {
+  id: number
+  case_code: string
+  warehouse_id: number
+  warehouse_code?: string
+  warehouse_name?: string
+  status: string
+  assigned_staff_name?: string
+  inspected_at?: string
+  approved_at?: string
+  items_count: number
+}
+
 interface ReturnDetailData {
   id: number
   return_code: string
@@ -99,67 +118,133 @@ interface ReturnDetailData {
   items: ReturnDetailItem[]
   timeline: ReturnTimelineItem[]
   evidences: ReturnEvidenceItem[]
+  warehouse_cases?: ChildWarehouseCase[]
+}
+
+interface ReturnsOverviewKPI {
+  total_returns: number
+  waiting_warehouse_receive: number
+  in_transit: number
+  inspecting: number
+  waiting_manager_approval: number
+  approved: number
+  rejected: number
+  refund_pending: number
+  refund_processing: number
+  refund_succeeded: number
+  refund_failed: number
+  overdue: number
+  total_refunded_amount: number
+  total_pending_refund_amount: number
+}
+
+interface WarehouseReturnStatItem {
+  warehouse_id: number
+  warehouse_code: string
+  warehouse_name: string
+  manager_name: string
+  total_cases: number
+  inspecting: number
+  waiting_approval: number
+  approved: number
+  rejected: number
+  completed: number
+  failed: number
+  overdue_sla: number
+  total_refunded_amount: number
+  avg_processing_time_hours: number
+}
+
+interface SimpleWarehouse {
+  id: number
+  code: string
+  name: string
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
   REQUESTED: { label: 'Chờ duyệt', color: '#b45309', bg: '#fef3c7' },
-  REVIEWING: { label: 'Đang xem xét', color: '#1d4ed8', bg: '#dbeafe' },
-  NEEDS_CUSTOMER_INFO: { label: 'Cần bổ sung TT', color: '#7c3aed', bg: '#ede9fe' },
+  ASSIGNED_TO_WAREHOUSE: { label: 'Chờ nhận tại kho', color: '#0369a1', bg: '#e0f2fe' },
+  WAITING_CUSTOMER_SHIPMENT: { label: 'Chờ khách gửi', color: '#c2410c', bg: '#ffedd5' },
+  IN_TRANSIT: { label: 'Đang chuyển về kho', color: '#0284c7', bg: '#e0f2fe' },
+  RECEIVED: { label: 'Đã nhận tại kho', color: '#1d4ed8', bg: '#dbeafe' },
+  INSPECTING: { label: 'Đang kiểm hàng', color: '#7c3aed', bg: '#f3e8ff' },
+  WAITING_MANAGER_APPROVAL: { label: 'Chờ QL duyệt', color: '#ea580c', bg: '#fff7ed' },
   APPROVED: { label: 'Đã phê duyệt', color: '#15803d', bg: '#dcfce7' },
-  WAITING_CUSTOMER_RETURN: { label: 'Chờ gửi hàng', color: '#c2410c', bg: '#ffedd5' },
-  RETURN_IN_TRANSIT: { label: 'Đang chuyển về kho', color: '#0369a1', bg: '#e0f2fe' },
-  RECEIVED_AT_WAREHOUSE: { label: 'Đã tới kho', color: '#4338ca', bg: '#e0e7ff' },
-  INSPECTING: { label: 'DS đang thẩm định', color: '#6d28d9', bg: '#f3e8ff' },
   REFUND_PENDING: { label: 'Chờ hoàn tiền', color: '#0e7490', bg: '#cffafe' },
+  REFUND_PROCESSING: { label: 'Đang hoàn tiền', color: '#6d28d9', bg: '#ede9fe' },
   REFUNDED: { label: 'Đã hoàn tiền', color: '#166534', bg: '#bbf7d0' },
-  REPLACING: { label: 'Đang chuẩn bị đổi', color: '#3730a3', bg: '#e0e7ff' },
-  REPLACEMENT_SHIPPED: { label: 'Đã giao đơn đổi', color: '#1e40af', bg: '#dbeafe' },
+  RESTOCKED: { label: 'Đã nhập lại kho', color: '#16a34a', bg: '#dcfce7' },
+  QUARANTINED: { label: 'Đã cách ly', color: '#a16207', bg: '#fef9c3' },
+  DISPOSED: { label: 'Đã hủy thuốc', color: '#64748b', bg: '#f1f5f9' },
   COMPLETED: { label: 'Hoàn tất', color: '#15803d', bg: '#dcfce7' },
   REJECTED: { label: 'Từ chối', color: '#b91c1c', bg: '#fee2e2' },
   CANCELLED: { label: 'Đã hủy', color: '#475569', bg: '#f1f5f9' },
 }
 
 export function ReturnsPage() {
+  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'REQUESTS'>('OVERVIEW')
+
+  // Overview states
+  const [kpi, setKpi] = useState<ReturnsOverviewKPI | null>(null)
+  const [whStats, setWhStats] = useState<WarehouseReturnStatItem[]>([])
+  const [loadingOverview, setLoadingOverview] = useState(false)
+
+  // Requests list states
   const [returns, setReturns] = useState<ReturnSummary[]>([])
   const [totalCount, setTotalCount] = useState<number>(0)
   const [loading, setLoading] = useState<boolean>(true)
   const [search, setSearch] = useState<string>('')
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [typeFilter, setTypeFilter] = useState<string>('')
-
-  // Phân trang
   const [currentPage, setCurrentPage] = useState<number>(1)
   const [pageSize, setPageSize] = useState<number>(15)
 
-  // Detail Modal State
+  // Detail Modal states
   const [selectedReturnCode, setSelectedReturnCode] = useState<string | null>(null)
   const [returnDetail, setReturnDetail] = useState<ReturnDetailData | null>(null)
   const [loadingDetail, setLoadingDetail] = useState<boolean>(false)
   const [actionLoading, setActionLoading] = useState<boolean>(false)
   const [actionError, setActionError] = useState<string>('')
+  const [actionSuccess, setActionSuccess] = useState<string>('')
 
-  // Review / Approve / Reject sub-modals
-  const [rejectReason, setRejectReason] = useState<string>('')
-  const [showRejectBox, setShowRejectBox] = useState<boolean>(false)
-  const [approveNote, setApproveNote] = useState<string>('Vui lòng đóng gói thuốc cẩn thận và gửi về kho H4Care.')
-  const [showApproveBox, setShowApproveBox] = useState<boolean>(false)
+  // Warehouses list for reassignment
+  const [warehouses, setWarehouses] = useState<SimpleWarehouse[]>([])
 
-  // Inspection state
-  const [showInspectionBox, setShowInspectionBox] = useState<boolean>(false)
-  const [inspectionItems, setInspectionItems] = useState<
-    Array<{
-      return_item_id: number
-      product_name: string
-      condition: string
-      restock_destination: string
-      accepted_quantity: number
-      rejected_quantity: number
-      notes: string
-    }>
-  >([])
-  const [generalInspectNote, setGeneralInspectNote] = useState<string>('Dược sĩ đã kiểm tra ngoại quan và tem seal GPP.')
+  // Reassign Modal
+  const [showReassignModal, setShowReassignModal] = useState(false)
+  const [reassignWhId, setReassignWhId] = useState<number | ''>('')
+  const [reassignReason, setReassignReason] = useState('')
 
-  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
+  // Admin Override Modal
+  const [showOverrideModal, setShowOverrideModal] = useState(false)
+  const [overrideStatus, setOverrideStatus] = useState('APPROVED')
+  const [overrideReason, setOverrideReason] = useState('')
+  const [overrideNotes, setOverrideNotes] = useState('')
+
+  const loadOverview = async () => {
+    setLoadingOverview(true)
+    try {
+      const [kpiRes, statsRes] = await Promise.all([
+        api<ReturnsOverviewKPI>('/admin/returns/overview'),
+        api<WarehouseReturnStatItem[]>('/admin/returns/by-warehouse'),
+      ])
+      setKpi(kpiRes)
+      setWhStats(statsRes || [])
+    } catch (err: any) {
+      console.error('Lỗi nạp KPI đổi trả toàn hệ thống:', err)
+    } finally {
+      setLoadingOverview(false)
+    }
+  }
+
+  const loadWarehouses = async () => {
+    try {
+      const res = await api<SimpleWarehouse[]>('/warehouses')
+      setWarehouses(res || [])
+    } catch {
+      // Ignore
+    }
+  }
 
   const loadReturns = async (page = currentPage, size = pageSize) => {
     setLoading(true)
@@ -185,42 +270,24 @@ export function ReturnsPage() {
   }
 
   useEffect(() => {
-    setCurrentPage(1)
-    loadReturns(1, pageSize)
-  }, [statusFilter, typeFilter])
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setCurrentPage(1)
+    if (activeTab === 'OVERVIEW') {
+      loadOverview()
+    } else {
       loadReturns(1, pageSize)
-    }, 350)
-    return () => clearTimeout(timer)
-  }, [search])
+    }
+    loadWarehouses()
+  }, [activeTab, statusFilter, typeFilter])
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
 
   const openDetail = async (code: string) => {
     setSelectedReturnCode(code)
     setLoadingDetail(true)
     setActionError('')
-    setShowRejectBox(false)
-    setShowApproveBox(false)
-    setShowInspectionBox(false)
+    setActionSuccess('')
     try {
       const detail = await api<ReturnDetailData>(`/admin/returns/${code}`)
       setReturnDetail(detail)
-      // Prepare inspection items
-      if (detail.items) {
-        setInspectionItems(
-          detail.items.map((it) => ({
-            return_item_id: it.id,
-            product_name: it.product_name,
-            condition: it.inspected_condition || 'GOOD_CONDITION',
-            restock_destination: it.restock_destination || 'SELLABLE_STOCK',
-            accepted_quantity: it.accepted_quantity > 0 ? it.accepted_quantity : it.requested_quantity,
-            rejected_quantity: it.rejected_quantity || 0,
-            notes: '',
-          }))
-        )
-      }
     } catch (err: any) {
       setActionError(err.message || 'Không thể tải chi tiết yêu cầu')
     } finally {
@@ -228,118 +295,52 @@ export function ReturnsPage() {
     }
   }
 
-  const handleReviewStatus = async (newStatus: 'REVIEWING' | 'NEEDS_CUSTOMER_INFO') => {
-    if (!selectedReturnCode) return
+  // Handle Admin Reassign Warehouse
+  const handleReassignWarehouse = async () => {
+    if (!selectedReturnCode || !reassignWhId || !reassignReason.trim()) return
     setActionLoading(true)
     setActionError('')
     try {
-      await api(`/admin/returns/${selectedReturnCode}/review`, {
+      await api(`/admin/returns/${selectedReturnCode}/reassign`, {
         method: 'POST',
         body: JSON.stringify({
-          status: newStatus,
-          admin_note: `Cập nhật trạng thái sang ${newStatus}`,
-          customer_visible_note: newStatus === 'NEEDS_CUSTOMER_INFO' ? 'Vui lòng cung cấp thêm hình ảnh sản phẩm' : undefined,
+          new_warehouse_id: Number(reassignWhId),
+          reason: reassignReason.trim(),
         }),
       })
+      setActionSuccess('Đã điều chuyển ca hoàn sang kho mới thành công!')
+      setShowReassignModal(false)
+      setReassignReason('')
       await openDetail(selectedReturnCode)
-      loadReturns()
+      await loadReturns()
     } catch (err: any) {
-      setActionError(err.message || 'Thao tác thất bại')
+      setActionError(err?.message || 'Lỗi khi điều chuyển kho.')
     } finally {
       setActionLoading(false)
     }
   }
 
-  const handleApprove = async () => {
-    if (!selectedReturnCode) return
+  // Handle Admin Override
+  const handleAdminOverride = async () => {
+    if (!selectedReturnCode || !overrideReason.trim()) return
     setActionLoading(true)
     setActionError('')
     try {
-      await api(`/admin/returns/${selectedReturnCode}/approve`, {
+      await api(`/admin/returns/${selectedReturnCode}/override`, {
         method: 'POST',
         body: JSON.stringify({
-          customer_visible_note: approveNote,
+          new_status: overrideStatus,
+          override_reason: overrideReason.trim(),
+          notes: overrideNotes.trim() || undefined,
         }),
       })
-      setShowApproveBox(false)
+      setActionSuccess('Đã thực hiện can thiệp khẩn cấp (Admin Override) thành công!')
+      setShowOverrideModal(false)
+      setOverrideReason('')
       await openDetail(selectedReturnCode)
-      loadReturns()
+      await loadReturns()
     } catch (err: any) {
-      setActionError(err.message || 'Phê duyệt thất bại')
-    } finally {
-      setActionLoading(false)
-    }
-  }
-
-  const handleReject = async () => {
-    if (!selectedReturnCode || !rejectReason.trim()) {
-      setActionError('Vui lòng nhập lý do từ chối')
-      return
-    }
-    setActionLoading(true)
-    setActionError('')
-    try {
-      await api(`/admin/returns/${selectedReturnCode}/reject`, {
-        method: 'POST',
-        body: JSON.stringify({
-          rejection_reason: rejectReason.trim(),
-        }),
-      })
-      setShowRejectBox(false)
-      await openDetail(selectedReturnCode)
-      loadReturns()
-    } catch (err: any) {
-      setActionError(err.message || 'Từ chối thất bại')
-    } finally {
-      setActionLoading(false)
-    }
-  }
-
-  const handleReceiveAtWarehouse = async () => {
-    if (!selectedReturnCode) return
-    if (!confirm('Xác nhận kho H4Care đã tiếp nhận kiện hàng đổi trả từ bưu tá?')) return
-    setActionLoading(true)
-    setActionError('')
-    try {
-      await api(`/admin/returns/${selectedReturnCode}/receive`, {
-        method: 'POST',
-        body: JSON.stringify({
-          note: 'Kho dược H4Care đã nhận kiện hàng nguyên vẹn.',
-        }),
-      })
-      await openDetail(selectedReturnCode)
-      loadReturns()
-    } catch (err: any) {
-      setActionError(err.message || 'Thao tác thất bại')
-    } finally {
-      setActionLoading(false)
-    }
-  }
-
-  const handleInspectSubmit = async () => {
-    if (!selectedReturnCode) return
-    setActionLoading(true)
-    setActionError('')
-    try {
-      await api(`/admin/returns/${selectedReturnCode}/inspect`, {
-        method: 'POST',
-        body: JSON.stringify({
-          general_inspection_note: generalInspectNote,
-          items: inspectionItems.map((it) => ({
-            return_item_id: it.return_item_id,
-            condition: it.condition,
-            restock_destination: it.restock_destination,
-            accepted_quantity: Number(it.accepted_quantity),
-            rejected_quantity: Number(it.rejected_quantity),
-            notes: it.notes,
-          })),
-        }),
-      })
-      setShowInspectionBox(false)
-      await openDetail(selectedReturnCode)
-      loadReturns()
-    } catch (err: any) {
-      setActionError(err.message || 'Lỗi thẩm định dược phẩm')
+      setActionError(err?.message || 'Lỗi khi can thiệp Admin Override.')
     } finally {
       setActionLoading(false)
     }
@@ -348,235 +349,420 @@ export function ReturnsPage() {
   return (
     <div className="admin-page-container" style={{ padding: '24px 32px' }}>
       <AdminPageHeader
-        title="Quản Lý Đổi & Trả Hàng (Returns)"
-        subtitle="Tiếp nhận, kiểm tra hồ sơ thuốc GPP, thẩm định thực tế tại kho và phân luồng nhập lại kho bán."
-        breadcrumbs={[
-          { label: 'Trang chủ', href: '/' },
-          { label: 'Hậu Mãi', href: '/returns' },
-          { label: 'Yêu cầu đổi/trả' },
-        ]}
+        title="Quản Lý Đổi Trả & Hoàn Tiền Toàn Hệ Thống"
+        subtitle="Giám sát ca đổi trả thuốc GPP, đối soát bưu phẩm hoàn tại từng chi nhánh kho, điều phối kho và kiểm soát hoàn tiền bảo mật."
+        actions={
+          <button
+            type="button"
+            onClick={activeTab === 'OVERVIEW' ? loadOverview : () => loadReturns()}
+            disabled={loadingOverview || loading}
+            className="admin-button button-secondary"
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <RefreshCw size={14} className={loadingOverview || loading ? 'spinner' : ''} />
+            <span>Làm mới dữ liệu</span>
+          </button>
+        }
       />
 
-      {/* Filter and Search Bar */}
-      <FilterBar
-        searchValue={search}
-        onSearchChange={setSearch}
-        searchPlaceholder="Tìm kiếm theo mã đổi/trả, mã đơn, tên hoặc SĐT khách..."
-        onRefresh={loadReturns}
-        isRefreshing={loading}
-        totalCount={totalCount}
-        filteredCount={returns.length}
-        unitLabel="yêu cầu"
-      >
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            style={{
-              padding: '6px 12px',
-              borderRadius: 8,
-              border: '1px solid #cbd5e1',
-              background: '#fff',
-              fontSize: 13,
-              color: '#1e293b',
-              fontWeight: 600,
-            }}
-          >
-            <option value="">Tất cả trạng thái</option>
-            <option value="REQUESTED">Chờ duyệt ban đầu</option>
-            <option value="REVIEWING">Đang xem xét hồ sơ</option>
-            <option value="NEEDS_CUSTOMER_INFO">Cần bổ sung thông tin</option>
-            <option value="APPROVED">Đã phê duyệt</option>
-            <option value="WAITING_CUSTOMER_RETURN">Chờ khách gửi hàng</option>
-            <option value="RETURN_IN_TRANSIT">Đang chuyển về kho</option>
-            <option value="RECEIVED_AT_WAREHOUSE">Đã tới kho H4Care</option>
-            <option value="INSPECTING">Dược sĩ đang thẩm định</option>
-            <option value="REFUND_PENDING">Chờ hoàn tiền</option>
-            <option value="REFUNDED">Đã hoàn tiền</option>
-            <option value="COMPLETED">Hoàn tất</option>
-            <option value="REJECTED">Đã từ chối</option>
-          </select>
+      {/* Main Tab Bar */}
+      <div style={{ display: 'flex', gap: 12, borderBottom: '2px solid #e2e8f0', marginBottom: 20 }}>
+        <button
+          type="button"
+          onClick={() => setActiveTab('OVERVIEW')}
+          style={{
+            padding: '10px 20px',
+            fontSize: 14,
+            fontWeight: 700,
+            background: 'none',
+            border: 'none',
+            borderBottom: activeTab === 'OVERVIEW' ? '3px solid #047857' : '3px solid transparent',
+            color: activeTab === 'OVERVIEW' ? '#047857' : '#64748b',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          <Building2 size={16} />
+          <span>Tổng quan ca hoàn chi nhánh & SLA</span>
+        </button>
 
-          <select
-            value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value)}
-            style={{
-              padding: '6px 12px',
-              borderRadius: 8,
-              border: '1px solid #cbd5e1',
-              background: '#fff',
-              fontSize: 13,
-              color: '#1e293b',
-              fontWeight: 600,
-            }}
-          >
-            <option value="">Tất cả phân loại</option>
-            <option value="RETURN">Trả hàng hoàn tiền (RETURN)</option>
-            <option value="EXCHANGE">Đổi sản phẩm (EXCHANGE)</option>
-          </select>
-        </div>
-      </FilterBar>
-
-      {/* Main Table */}
-      <div
-        style={{
-          background: '#ffffff',
-          borderRadius: 14,
-          border: '1px solid #e2e8f0',
-          overflow: 'hidden',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-          marginTop: 16,
-        }}
-      >
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
-            <thead>
-              <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#475569', fontWeight: 700 }}>
-                <th style={{ padding: '14px 16px' }}>Mã Đổi Trả</th>
-                <th style={{ padding: '14px 16px' }}>Mã Đơn Hàng</th>
-                <th style={{ padding: '14px 16px' }}>Khách Hàng</th>
-                <th style={{ padding: '14px 16px' }}>Phân Loại</th>
-                <th style={{ padding: '14px 16px' }}>Lý Do Trả</th>
-                <th style={{ padding: '14px 16px' }}>Trạng Thái</th>
-                <th style={{ padding: '14px 16px' }}>Vận Chuyển Kho</th>
-                <th style={{ padding: '14px 16px', textAlign: 'right' }}>Thao Tác</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={8} style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                      <RefreshCw size={16} className="spin" />
-                      <span>Đang tải danh sách đổi trả...</span>
-                    </div>
-                  </td>
-                </tr>
-              ) : returns.length === 0 ? (
-                <tr>
-                  <td colSpan={8} style={{ padding: 50, textAlign: 'center', color: '#94a3b8' }}>
-                    <RotateCcw size={32} style={{ margin: '0 auto 10px', opacity: 0.5 }} />
-                    <p style={{ margin: 0, fontWeight: 600 }}>Không tìm thấy yêu cầu đổi/trả nào phù hợp</p>
-                  </td>
-                </tr>
-              ) : (
-                returns.map((r) => {
-                  const cfg = STATUS_CONFIG[r.status] || { label: r.status, color: '#334155', bg: '#f1f5f9' }
-                  const isExchange = r.request_type === 'EXCHANGE'
-
-                  return (
-                    <tr
-                      key={r.return_code}
-                      style={{ borderBottom: '1px solid #f1f5f9', transition: 'background 0.15s' }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                    >
-                      <td style={{ padding: '14px 16px', fontWeight: 800, color: '#0f172a' }}>
-                        <span style={{ fontFamily: 'monospace', color: '#1e40af' }}>{r.return_code}</span>
-                      </td>
-                      <td style={{ padding: '14px 16px', fontWeight: 700, color: '#334155' }}>
-                        #{r.order_code}
-                      </td>
-                      <td style={{ padding: '14px 16px' }}>
-                        <div style={{ fontWeight: 700, color: '#0f172a' }}>{r.customer_name}</div>
-                        <div style={{ fontSize: 11, color: '#64748b' }}>{r.customer_phone}</div>
-                      </td>
-                      <td style={{ padding: '14px 16px' }}>
-                        <span
-                          style={{
-                            fontSize: 11,
-                            fontWeight: 700,
-                            padding: '3px 8px',
-                            borderRadius: 6,
-                            color: isExchange ? '#4338ca' : '#047857',
-                            background: isExchange ? '#e0e7ff' : '#d1fae5',
-                          }}
-                        >
-                          {isExchange ? 'ĐỔI HÀNG' : 'TRẢ HÀNG'}
-                        </span>
-                      </td>
-                      <td style={{ padding: '14px 16px', color: '#475569', maxWidth: 220 }}>
-                        <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {r.reason_text}
-                        </div>
-                        <span style={{ fontSize: 11, color: '#94a3b8' }}>{r.items_count} mặt hàng</span>
-                      </td>
-                      <td style={{ padding: '14px 16px' }}>
-                        <span
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 700,
-                            padding: '4px 10px',
-                            borderRadius: 12,
-                            color: cfg.color,
-                            background: cfg.bg,
-                            display: 'inline-block',
-                          }}
-                        >
-                          {cfg.label}
-                        </span>
-                      </td>
-                      <td style={{ padding: '14px 16px', fontSize: 12, color: '#475569' }}>
-                        {r.tracking_code ? (
-                          <div>
-                            <span style={{ fontWeight: 600, color: '#0f172a' }}>{r.carrier_name}</span>: {r.tracking_code}
-                          </div>
-                        ) : (
-                          <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>Chưa có mã vận đơn</span>
-                        )}
-                      </td>
-                      <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                        <button
-                          type="button"
-                          onClick={() => openDetail(r.return_code)}
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 6,
-                            padding: '6px 12px',
-                            borderRadius: 8,
-                            background: '#0284c7',
-                            color: '#fff',
-                            border: 'none',
-                            fontWeight: 700,
-                            fontSize: 12,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          <Eye size={13} />
-                          <span>Chi tiết</span>
-                        </button>
-                      </td>
-                    </tr>
-                  )
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-        {!loading && returns.length > 0 && (
-          <PaginationBar
-            currentPage={currentPage}
-            totalPages={totalPages}
-            pageSize={pageSize}
-            totalItems={totalCount}
-            itemName="yêu cầu đổi trả"
-            onPageChange={(p) => {
-              setCurrentPage(p)
-              loadReturns(p, pageSize)
-            }}
-            onPageSizeChange={(sz) => {
-              setPageSize(sz)
-              setCurrentPage(1)
-              loadReturns(1, sz)
-            }}
-            pageSizeOptions={[10, 15, 25, 50]}
-          />
-        )}
+        <button
+          type="button"
+          onClick={() => setActiveTab('REQUESTS')}
+          style={{
+            padding: '10px 20px',
+            fontSize: 14,
+            fontWeight: 700,
+            background: 'none',
+            border: 'none',
+            borderBottom: activeTab === 'REQUESTS' ? '3px solid #047857' : '3px solid transparent',
+            color: activeTab === 'REQUESTS' ? '#047857' : '#64748b',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          <RotateCcw size={16} />
+          <span>Danh sách yêu cầu đổi/trả ({totalCount})</span>
+        </button>
       </div>
 
-      {/* DETAIL & ACTION MODAL */}
-      {selectedReturnCode && (
+      {/* ======================================================== */}
+      {/* TAB 1: TỔNG QUAN CA HOÀN & SLA TỪNG KHO                  */}
+      {/* ======================================================== */}
+      {activeTab === 'OVERVIEW' && (
+        <div>
+          {/* 12 KPI CARDS */}
+          {kpi && (
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                gap: 14,
+                marginBottom: 24,
+              }}
+            >
+              {[
+                { label: 'Tổng số yêu cầu hoàn', val: kpi.total_returns, icon: RotateCcw, color: '#0284c7', bg: '#f0f9ff' },
+                { label: 'Chờ kho tiếp nhận', val: kpi.waiting_warehouse_receive, icon: Clock, color: '#b45309', bg: '#fef3c7' },
+                { label: 'Đang chuyển về kho', val: kpi.in_transit, icon: Truck, color: '#0284c7', bg: '#eff6ff' },
+                { label: 'Đang kiểm tra tại kho', val: kpi.inspecting, icon: FileText, color: '#7c3aed', bg: '#f3e8ff' },
+                { label: 'Chờ Quản lý kho duyệt', val: kpi.waiting_manager_approval, icon: AlertTriangle, color: '#ea580c', bg: '#fff7ed' },
+                { label: 'Đã duyệt chờ hoàn tiền', val: kpi.approved, icon: CheckCircle2, color: '#16a34a', bg: '#f0fdf4' },
+                { label: 'Đã hoàn tiền thành công', val: kpi.refund_succeeded, icon: DollarSign, color: '#15803d', bg: '#dcfce7' },
+                { label: 'Hoàn tiền thất bại', val: kpi.refund_failed, icon: AlertCircle, color: '#dc2626', bg: '#fef2f2' },
+                { label: 'Đã từ chối', val: kpi.rejected, icon: XCircle, color: '#b91c1c', bg: '#fee2e2' },
+                { label: 'Quá hạn xử lý (SLA)', val: kpi.overdue, icon: AlertTriangle, color: '#b91c1c', bg: '#fee2e2' },
+                {
+                  label: 'Tổng tiền đã hoàn',
+                  val: `${(kpi.total_refunded_amount ?? 0).toLocaleString('vi-VN')} ₫`,
+                  icon: DollarSign,
+                  color: '#15803d',
+                  bg: '#dcfce7',
+                },
+                {
+                  label: 'Tiền đang chờ hoàn',
+                  val: `${(kpi.total_pending_refund_amount ?? 0).toLocaleString('vi-VN')} ₫`,
+                  icon: DollarSign,
+                  color: '#0e7490',
+                  bg: '#cffafe',
+                },
+              ].map((item, idx) => {
+                const IconComp = item.icon
+                return (
+                  <div
+                    key={idx}
+                    style={{
+                      background: '#fff',
+                      borderRadius: 12,
+                      padding: 14,
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                      border: '1px solid #e2e8f0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 40,
+                        height: 40,
+                        borderRadius: 10,
+                        background: item.bg,
+                        color: item.color,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <IconComp size={20} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b' }}>{item.label}</div>
+                      <div style={{ fontSize: 17, fontWeight: 800, color: '#0f172a', marginTop: 2 }}>{item.val}</div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* BẢNG THEO DÕI CA HOÀN THEO TỪNG KHO */}
+          <div
+            style={{
+              background: '#fff',
+              borderRadius: 12,
+              overflow: 'hidden',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+              marginBottom: 30,
+            }}
+          >
+            <div
+              style={{
+                padding: '16px 20px',
+                borderBottom: '1px solid #e2e8f0',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#0f172a' }}>
+                Bảng Phân Bổ Ca Hoàn & Chỉ Số SLA Từng Chi Nhánh Kho
+              </h3>
+              <span style={{ fontSize: 12, color: '#64748b' }}>
+                Hàng hoàn trả về kho đã xuất • Quản lý kho trực tiếp tiếp nhận & phê duyệt
+              </span>
+            </div>
+
+            {loadingOverview ? (
+              <div style={{ padding: 48, textAlign: 'center', color: '#64748b' }}>
+                <Loader2 size={24} className="spinner" style={{ margin: '0 auto 8px' }} />
+                Đang tải dữ liệu ca hoàn từng kho...
+              </div>
+            ) : whStats.length === 0 ? (
+              <div style={{ padding: 48, textAlign: 'center', color: '#64748b' }}>
+                Không có dữ liệu ca hoàn nào.
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, textAlign: 'left' }}>
+                  <thead>
+                    <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#475569' }}>
+                      <th style={{ padding: '10px 14px' }}>Mã & Tên Kho</th>
+                      <th style={{ padding: '10px 14px' }}>Quản Lý Kho</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'center' }}>Tổng Ca Hoàn</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'center' }}>Đang Kiểm Tra</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'center' }}>Chờ QL Duyệt</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'center' }}>Đã Duyệt</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'center' }}>Đã Từ Chối</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'center' }}>Hoàn Tất</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'center' }}>Thất Bại</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'right' }}>Tiền Đã Hoàn</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'center' }}>Quá SLA</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {whStats.map((wh) => (
+                      <tr
+                        key={wh.warehouse_id}
+                        style={{ borderBottom: '1px solid #f1f5f9', transition: 'background 0.15s' }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                      >
+                        <td style={{ padding: '10px 14px' }}>
+                          <div style={{ fontWeight: 700, color: '#0f172a' }}>{wh.warehouse_name}</div>
+                          <div style={{ fontSize: 11, color: '#64748b' }}>{wh.warehouse_code}</div>
+                        </td>
+                        <td style={{ padding: '10px 14px', color: '#047857', fontWeight: 600 }}>{wh.manager_name}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center', fontWeight: 700 }}>{wh.total_cases}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center', color: '#7c3aed' }}>{wh.inspecting}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center', color: '#ea580c', fontWeight: 600 }}>
+                          {wh.waiting_approval}
+                        </td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center', color: '#16a34a' }}>{wh.approved}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center', color: '#dc2626' }}>{wh.rejected}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center', color: '#15803d', fontWeight: 600 }}>
+                          {wh.completed}
+                        </td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center', color: '#b91c1c' }}>{wh.failed}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: '#15803d' }}>
+                          {(wh.total_refunded_amount ?? 0).toLocaleString('vi-VN')} ₫
+                        </td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                          {wh.overdue_sla > 0 ? (
+                            <span style={{ color: '#b91c1c', fontWeight: 700 }}>⚠️ {wh.overdue_sla}</span>
+                          ) : (
+                            <span style={{ color: '#64748b' }}>0</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* TAB 2: DANH SÁCH YÊU CẦU ĐỔI/TRẢ (REQUESTS LIST)         */}
+      {/* ======================================================== */}
+      {activeTab === 'REQUESTS' && (
+        <div>
+          <FilterBar
+            searchValue={search}
+            onSearchChange={setSearch}
+            searchPlaceholder="Tìm kiếm theo mã đổi/trả, mã đơn, tên hoặc SĐT khách..."
+            onRefresh={() => loadReturns()}
+            isRefreshing={loading}
+            totalCount={totalCount}
+            filteredCount={returns.length}
+            unitLabel="yêu cầu"
+          >
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: 8,
+                  border: '1px solid #cbd5e1',
+                  background: '#fff',
+                  fontSize: 13,
+                  color: '#1e293b',
+                  fontWeight: 600,
+                }}
+              >
+                <option value="">Tất cả trạng thái</option>
+                <option value="REQUESTED">Chờ duyệt ban đầu</option>
+                <option value="ASSIGNED_TO_WAREHOUSE">Đã phân về kho</option>
+                <option value="IN_TRANSIT">Đang chuyển về kho</option>
+                <option value="RECEIVED">Đã tới kho</option>
+                <option value="INSPECTING">Đang kiểm hàng</option>
+                <option value="WAITING_MANAGER_APPROVAL">Chờ QL duyệt</option>
+                <option value="APPROVED">Đã phê duyệt</option>
+                <option value="REFUND_PENDING">Chờ hoàn tiền</option>
+                <option value="REFUNDED">Đã hoàn tiền</option>
+                <option value="RESTOCKED">Đã nhập kho</option>
+                <option value="COMPLETED">Hoàn tất</option>
+                <option value="REJECTED">Đã từ chối</option>
+              </select>
+
+              <select
+                value={typeFilter}
+                onChange={(e) => setTypeFilter(e.target.value)}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: 8,
+                  border: '1px solid #cbd5e1',
+                  background: '#fff',
+                  fontSize: 13,
+                  color: '#1e293b',
+                  fontWeight: 600,
+                }}
+              >
+                <option value="">Tất cả phân loại</option>
+                <option value="RETURN">Trả hàng hoàn tiền (RETURN)</option>
+                <option value="EXCHANGE">Đổi sản phẩm (EXCHANGE)</option>
+              </select>
+            </div>
+          </FilterBar>
+
+          {/* Table List */}
+          <div className="panel" style={{ padding: 0, overflow: 'hidden' }}>
+            {loading ? (
+              <div style={{ padding: 48, textAlign: 'center', color: '#64748b' }}>
+                <Loader2 size={24} className="spinner" style={{ margin: '0 auto 8px' }} />
+                Đang nạp danh sách yêu cầu...
+              </div>
+            ) : returns.length === 0 ? (
+              <div style={{ padding: 48, textAlign: 'center', color: '#64748b' }}>
+                Không có yêu cầu đổi/trả nào phù hợp.
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, textAlign: 'left' }}>
+                  <thead>
+                    <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#475569' }}>
+                      <th style={{ padding: '12px 16px' }}>Mã Yêu Cầu</th>
+                      <th style={{ padding: '12px 16px' }}>Mã Đơn Hàng</th>
+                      <th style={{ padding: '12px 16px' }}>Khách Hàng</th>
+                      <th style={{ padding: '12px 16px' }}>Phân Loại</th>
+                      <th style={{ padding: '12px 16px' }}>Trạng Thái</th>
+                      <th style={{ padding: '12px 16px' }}>Ngày Yêu Cầu</th>
+                      <th style={{ padding: '12px 16px', textAlign: 'right' }}>Thao Tác</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {returns.map((r) => {
+                      const badge = STATUS_CONFIG[r.status] || { label: r.status, color: '#475569', bg: '#f1f5f9' }
+                      return (
+                        <tr
+                          key={r.id}
+                          style={{ borderBottom: '1px solid #f1f5f9', transition: 'background 0.15s' }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                        >
+                          <td style={{ padding: '12px 16px', fontWeight: 700, color: '#0f172a' }}>{r.return_code}</td>
+                          <td style={{ padding: '12px 16px', fontWeight: 600, color: '#0284c7' }}>{r.order_code}</td>
+                          <td style={{ padding: '12px 16px' }}>
+                            <div style={{ fontWeight: 600 }}>{r.customer_name}</div>
+                            <div style={{ fontSize: 11, color: '#64748b' }}>{r.customer_phone}</div>
+                          </td>
+                          <td style={{ padding: '12px 16px' }}>
+                            <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, background: '#f1f5f9', fontWeight: 600 }}>
+                              {r.request_type}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px 16px' }}>
+                            <span
+                              style={{
+                                display: 'inline-block',
+                                padding: '4px 10px',
+                                borderRadius: 12,
+                                fontSize: 11,
+                                fontWeight: 700,
+                                background: badge.bg,
+                                color: badge.color,
+                              }}
+                            >
+                              {badge.label}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px 16px', color: '#64748b', fontSize: 12 }}>
+                            {r.requested_at ? formatDateTimeVN(r.requested_at) : '—'}
+                          </td>
+                          <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                            <button
+                              type="button"
+                              onClick={() => openDetail(r.return_code)}
+                              style={{
+                                padding: '6px 12px',
+                                background: '#0f172a',
+                                color: '#fff',
+                                border: 'none',
+                                borderRadius: 6,
+                                fontSize: 12,
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                              }}
+                            >
+                              <Eye size={12} />
+                              <span>Chi tiết</span>
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <PaginationBar
+              currentPage={currentPage}
+              totalPages={totalPages}
+              pageSize={pageSize}
+              totalItems={totalCount}
+              itemName="yêu cầu"
+              onPageChange={setCurrentPage}
+              onPageSizeChange={setPageSize}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL CHI TIẾT YÊU CẦU ĐỔI/TRẢ (DETAIL MODAL)            */}
+      {/* ======================================================== */}
+      {selectedReturnCode && returnDetail && (
         <div
           style={{
             position: 'fixed',
@@ -585,656 +771,435 @@ export function ReturnsPage() {
             backdropFilter: 'blur(3px)',
             zIndex: 1000,
             display: 'flex',
-            alignItems: 'center',
             justifyContent: 'center',
+            alignItems: 'center',
             padding: 20,
           }}
-          onClick={() => setSelectedReturnCode(null)}
         >
           <div
             style={{
               background: '#fff',
-              borderRadius: 16,
-              maxWidth: 860,
               width: '100%',
-              maxHeight: '90vh',
-              overflowY: 'auto',
-              padding: 28,
+              maxWidth: 960,
+              maxHeight: '92vh',
+              borderRadius: 16,
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
               boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
-              border: '1px solid #e2e8f0',
             }}
-            onClick={(e) => e.stopPropagation()}
           >
-            {/* Modal Header */}
+            {/* Header */}
             <div
               style={{
+                padding: '16px 24px',
+                background: '#0f172a',
+                color: '#fff',
                 display: 'flex',
                 justifyContent: 'space-between',
-                alignItems: 'flex-start',
-                borderBottom: '1px solid #f1f5f9',
-                paddingBottom: 16,
-                marginBottom: 20,
+                alignItems: 'center',
               }}
             >
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: '#0f172a' }}>
-                    Yêu cầu #{selectedReturnCode}
+                  <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>
+                    Chi Tiết Yêu Cầu Đổi/Trả: {returnDetail.return_code}
                   </h2>
-                  {returnDetail && (
-                    <span
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 700,
-                        padding: '4px 10px',
-                        borderRadius: 12,
-                        color: STATUS_CONFIG[returnDetail.status]?.color || '#334155',
-                        background: STATUS_CONFIG[returnDetail.status]?.bg || '#f1f5f9',
-                      }}
-                    >
-                      {STATUS_CONFIG[returnDetail.status]?.label || returnDetail.status}
-                    </span>
-                  )}
+                  <span
+                    style={{
+                      padding: '3px 10px',
+                      borderRadius: 12,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      background: STATUS_CONFIG[returnDetail.status]?.bg || '#fff',
+                      color: STATUS_CONFIG[returnDetail.status]?.color || '#000',
+                    }}
+                  >
+                    {STATUS_CONFIG[returnDetail.status]?.label || returnDetail.status}
+                  </span>
                 </div>
-                {returnDetail && (
-                  <p style={{ margin: '4px 0 0', fontSize: 12, color: '#64748b' }}>
-                    Đơn hàng gốc: <strong>#{returnDetail.order_code}</strong> • Khách: <strong>{returnDetail.customer_name}</strong> ({returnDetail.customer_phone})
-                  </p>
-                )}
+                <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>
+                  Mã đơn gốc: {returnDetail.order_code} • Khách: {returnDetail.customer_name} ({returnDetail.customer_phone})
+                </div>
               </div>
-
               <button
                 type="button"
                 onClick={() => setSelectedReturnCode(null)}
-                style={{
-                  background: '#f1f5f9',
-                  border: 'none',
-                  borderRadius: 8,
-                  padding: 6,
-                  cursor: 'pointer',
-                  color: '#64748b',
-                }}
+                style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
               >
-                <X size={18} />
+                <X size={20} />
               </button>
             </div>
 
-            {loadingDetail ? (
-              <div style={{ padding: 60, textAlign: 'center', color: '#64748b' }}>
-                <RefreshCw size={24} className="spin" style={{ margin: '0 auto 12px' }} />
-                <span>Đang tải hồ sơ đổi trả...</span>
-              </div>
-            ) : returnDetail ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-                {actionError && (
-                  <div
-                    style={{
-                      background: '#fef2f2',
-                      border: '1px solid #fecaca',
-                      padding: '10px 14px',
-                      borderRadius: 8,
-                      color: '#b91c1c',
-                      fontSize: 13,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                    }}
-                  >
-                    <AlertCircle size={16} />
-                    <span>{actionError}</span>
-                  </div>
-                )}
-
-                {/* Workflow Action Bar */}
+            {/* Body */}
+            <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1 }}>
+              {actionError && (
                 <div
                   style={{
-                    background: '#f8fafc',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: 12,
-                    padding: 16,
+                    padding: '12px 16px',
+                    borderRadius: 8,
+                    background: '#fef2f2',
+                    border: '1px solid #fecaca',
+                    color: '#991b1b',
+                    fontSize: 13,
+                    marginBottom: 16,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
                   }}
                 >
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#475569', textTransform: 'uppercase', marginBottom: 10 }}>
-                    Thao tác xử lý hồ sơ (Workflow Actions)
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    {returnDetail.status === 'REQUESTED' && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => handleReviewStatus('REVIEWING')}
-                          disabled={actionLoading}
-                          style={{
-                            padding: '8px 14px',
-                            borderRadius: 8,
-                            background: '#1d4ed8',
-                            color: '#fff',
-                            border: 'none',
-                            fontWeight: 700,
-                            fontSize: 12,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          Tiếp nhận xem xét (Reviewing)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleReviewStatus('NEEDS_CUSTOMER_INFO')}
-                          disabled={actionLoading}
-                          style={{
-                            padding: '8px 14px',
-                            borderRadius: 8,
-                            background: '#7c3aed',
-                            color: '#fff',
-                            border: 'none',
-                            fontWeight: 700,
-                            fontSize: 12,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          Yêu cầu thêm bằng chứng
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setShowApproveBox(true)}
-                          disabled={actionLoading}
-                          style={{
-                            padding: '8px 14px',
-                            borderRadius: 8,
-                            background: '#16a34a',
-                            color: '#fff',
-                            border: 'none',
-                            fontWeight: 700,
-                            fontSize: 12,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          Phê duyệt đổi trả
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setShowRejectBox(true)}
-                          disabled={actionLoading}
-                          style={{
-                            padding: '8px 14px',
-                            borderRadius: 8,
-                            background: '#dc2626',
-                            color: '#fff',
-                            border: 'none',
-                            fontWeight: 700,
-                            fontSize: 12,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          Từ chối yêu cầu
-                        </button>
-                      </>
-                    )}
-
-                    {returnDetail.status === 'REVIEWING' && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => setShowApproveBox(true)}
-                          disabled={actionLoading}
-                          style={{
-                            padding: '8px 14px',
-                            borderRadius: 8,
-                            background: '#16a34a',
-                            color: '#fff',
-                            border: 'none',
-                            fontWeight: 700,
-                            fontSize: 12,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          Phê duyệt đổi trả
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setShowRejectBox(true)}
-                          disabled={actionLoading}
-                          style={{
-                            padding: '8px 14px',
-                            borderRadius: 8,
-                            background: '#dc2626',
-                            color: '#fff',
-                            border: 'none',
-                            fontWeight: 700,
-                            fontSize: 12,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          Từ chối yêu cầu
-                        </button>
-                      </>
-                    )}
-
-                    {['APPROVED', 'WAITING_CUSTOMER_RETURN', 'RETURN_IN_TRANSIT'].includes(returnDetail.status) && (
-                      <button
-                        type="button"
-                        onClick={handleReceiveAtWarehouse}
-                        disabled={actionLoading}
-                        style={{
-                          padding: '8px 14px',
-                          borderRadius: 8,
-                          background: '#0284c7',
-                          color: '#fff',
-                          border: 'none',
-                          fontWeight: 700,
-                          fontSize: 12,
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 6,
-                        }}
-                      >
-                        <Truck size={14} />
-                        <span>Kho H4Care xác nhận đã nhận hàng</span>
-                      </button>
-                    )}
-
-                    {['RECEIVED_AT_WAREHOUSE', 'INSPECTING'].includes(returnDetail.status) && (
-                      <button
-                        type="button"
-                        onClick={() => setShowInspectionBox(true)}
-                        disabled={actionLoading}
-                        style={{
-                          padding: '8px 14px',
-                          borderRadius: 8,
-                          background: '#6d28d9',
-                          color: '#fff',
-                          border: 'none',
-                          fontWeight: 700,
-                          fontSize: 12,
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 6,
-                        }}
-                      >
-                        <ShieldCheck size={14} />
-                        <span>Dược sĩ Thẩm định chất lượng & Nhập kho</span>
-                      </button>
-                    )}
-                  </div>
+                  <AlertCircle size={16} />
+                  <span>{actionError}</span>
                 </div>
+              )}
 
-                {/* Sub-box: Approve form */}
-                {showApproveBox && (
-                  <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', padding: 16, borderRadius: 12 }}>
-                    <div style={{ fontWeight: 800, color: '#065f46', marginBottom: 8, fontSize: 13 }}>
-                      Xác nhận Phê duyệt yêu cầu đổi/trả:
-                    </div>
-                    <textarea
-                      value={approveNote}
-                      onChange={(e) => setApproveNote(e.target.value)}
-                      placeholder="Hướng dẫn gửi hàng cho khách..."
-                      style={{
-                        width: '100%',
-                        padding: 10,
-                        borderRadius: 8,
-                        border: '1px solid #cbd5e1',
-                        fontSize: 12,
-                        marginBottom: 10,
-                      }}
-                      rows={2}
-                    />
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button
-                        type="button"
-                        onClick={handleApprove}
-                        disabled={actionLoading}
-                        style={{
-                          padding: '6px 14px',
-                          borderRadius: 6,
-                          background: '#059669',
-                          color: '#fff',
-                          border: 'none',
-                          fontWeight: 700,
-                          fontSize: 12,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Xác nhận Duyệt
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setShowApproveBox(false)}
-                        style={{
-                          padding: '6px 14px',
-                          borderRadius: 6,
-                          background: '#fff',
-                          border: '1px solid #cbd5e1',
-                          color: '#475569',
-                          fontWeight: 600,
-                          fontSize: 12,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Hủy
-                      </button>
-                    </div>
-                  </div>
-                )}
+              {actionSuccess && (
+                <div
+                  style={{
+                    padding: '12px 16px',
+                    borderRadius: 8,
+                    background: '#f0fdf4',
+                    border: '1px solid #bbf7d0',
+                    color: '#166534',
+                    fontSize: 13,
+                    marginBottom: 16,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <CheckCircle2 size={16} />
+                  <span>{actionSuccess}</span>
+                </div>
+              )}
 
-                {/* Sub-box: Reject form */}
-                {showRejectBox && (
-                  <div style={{ background: '#fef2f2', border: '1px solid #fecaca', padding: 16, borderRadius: 12 }}>
-                    <div style={{ fontWeight: 800, color: '#991b1b', marginBottom: 8, fontSize: 13 }}>
-                      Từ chối yêu cầu đổi/trả (Lý do bắt buộc):
-                    </div>
-                    <textarea
-                      value={rejectReason}
-                      onChange={(e) => setRejectReason(e.target.value)}
-                      placeholder="Ghi rõ lý do theo quy chế dược (ví dụ: Thuốc kê đơn, đã mở seal niêm phong...)"
-                      style={{
-                        width: '100%',
-                        padding: 10,
-                        borderRadius: 8,
-                        border: '1px solid #cbd5e1',
-                        fontSize: 12,
-                        marginBottom: 10,
-                      }}
-                      rows={2}
-                    />
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button
-                        type="button"
-                        onClick={handleReject}
-                        disabled={actionLoading}
-                        style={{
-                          padding: '6px 14px',
-                          borderRadius: 6,
-                          background: '#dc2626',
-                          color: '#fff',
-                          border: 'none',
-                          fontWeight: 700,
-                          fontSize: 12,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Xác nhận Từ chối
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setShowRejectBox(false)}
-                        style={{
-                          padding: '6px 14px',
-                          borderRadius: 6,
-                          background: '#fff',
-                          border: '1px solid #cbd5e1',
-                          color: '#475569',
-                          fontWeight: 600,
-                          fontSize: 12,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Hủy
-                      </button>
-                    </div>
-                  </div>
-                )}
+              {/* Thông tin lý do */}
+              <div style={{ background: '#f8fafc', padding: 14, borderRadius: 8, border: '1px solid #e2e8f0', marginBottom: 20 }}>
+                <div><strong>Lý do gửi trả:</strong> {returnDetail.reason_text}</div>
+                {returnDetail.customer_note && <div style={{ marginTop: 4 }}><strong>Ghi chú của khách:</strong> {returnDetail.customer_note}</div>}
+              </div>
 
-                {/* Sub-box: Inspection Form */}
-                {showInspectionBox && (
-                  <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', padding: 18, borderRadius: 12 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                      <ShieldCheck size={18} style={{ color: '#6d28d9' }} />
-                      <div style={{ fontWeight: 800, color: '#5b21b6', fontSize: 14 }}>
-                        Biên Bản Thẩm Định Chất Lượng Dược Phẩm (GPP Inspection)
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 14 }}>
-                      {inspectionItems.map((it, idx) => (
-                        <div
-                          key={it.return_item_id}
-                          style={{
-                            background: '#fff',
-                            border: '1px solid #e2e8f0',
-                            borderRadius: 8,
-                            padding: 12,
-                            fontSize: 12,
-                          }}
-                        >
-                          <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: 6 }}>
-                            {idx + 1}. {it.product_name}
-                          </div>
-
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
-                            <div>
-                              <label style={{ display: 'block', color: '#64748b', fontSize: 11, marginBottom: 3 }}>
-                                Tình trạng thẩm định:
-                              </label>
-                              <select
-                                value={it.condition}
-                                onChange={(e) => {
-                                  const updated = [...inspectionItems]
-                                  updated[idx].condition = e.target.value
-                                  setInspectionItems(updated)
-                                }}
-                                style={{ width: '100%', padding: '4px 8px', borderRadius: 6, border: '1px solid #cbd5e1' }}
-                              >
-                                <option value="GOOD_CONDITION">Nguyên seal, đạt GPP</option>
-                                <option value="DAMAGED_TRANSIT">Hỏng do vận chuyển</option>
-                                <option value="DEFECTIVE_MANUFACTURER">Lỗi do nhà sản xuất</option>
-                                <option value="OPENED_UNSEALED">Đã bóc seal</option>
-                                <option value="EXPIRED">Cận/Hết hạn dùng</option>
-                                <option value="CUSTOMER_DAMAGED">Khách hàng làm hỏng</option>
-                              </select>
-                            </div>
-
-                            <div>
-                              <label style={{ display: 'block', color: '#64748b', fontSize: 11, marginBottom: 3 }}>
-                                Phân luồng tồn kho:
-                              </label>
-                              <select
-                                value={it.restock_destination}
-                                onChange={(e) => {
-                                  const updated = [...inspectionItems]
-                                  updated[idx].restock_destination = e.target.value
-                                  setInspectionItems(updated)
-                                }}
-                                style={{ width: '100%', padding: '4px 8px', borderRadius: 6, border: '1px solid #cbd5e1' }}
-                              >
-                                <option value="SELLABLE_STOCK">Nhập lại kho bán lẻ</option>
-                                <option value="QUARANTINE_AREA">Khu cách ly chờ xử lý</option>
-                                <option value="DISPOSAL">Tiêu hủy y tế</option>
-                              </select>
-                            </div>
-
-                            <div>
-                              <label style={{ display: 'block', color: '#64748b', fontSize: 11, marginBottom: 3 }}>
-                                Số lượng chấp nhận / Từ chối:
-                              </label>
-                              <div style={{ display: 'flex', gap: 6 }}>
-                                <input
-                                  type="number"
-                                  min={0}
-                                  value={it.accepted_quantity}
-                                  onChange={(e) => {
-                                    const updated = [...inspectionItems]
-                                    updated[idx].accepted_quantity = Number(e.target.value)
-                                    setInspectionItems(updated)
-                                  }}
-                                  style={{ width: 60, padding: '4px 6px', borderRadius: 6, border: '1px solid #cbd5e1' }}
-                                  title="Số lượng chấp thuận nhận lại"
-                                />
-                                <span style={{ alignSelf: 'center', color: '#94a3b8' }}>/</span>
-                                <input
-                                  type="number"
-                                  min={0}
-                                  value={it.rejected_quantity}
-                                  onChange={(e) => {
-                                    const updated = [...inspectionItems]
-                                    updated[idx].rejected_quantity = Number(e.target.value)
-                                    setInspectionItems(updated)
-                                  }}
-                                  style={{ width: 60, padding: '4px 6px', borderRadius: 6, border: '1px solid #cbd5e1' }}
-                                  title="Số lượng từ chối"
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div style={{ marginBottom: 12 }}>
-                      <label style={{ display: 'block', color: '#475569', fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
-                        Ghi chú tổng thể của Dược sĩ phụ trách chuyên môn:
-                      </label>
-                      <input
-                        type="text"
-                        value={generalInspectNote}
-                        onChange={(e) => setGeneralInspectNote(e.target.value)}
-                        style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12 }}
-                      />
-                    </div>
-
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button
-                        type="button"
-                        onClick={handleInspectSubmit}
-                        disabled={actionLoading}
-                        style={{
-                          padding: '8px 18px',
-                          borderRadius: 6,
-                          background: '#6d28d9',
-                          color: '#fff',
-                          border: 'none',
-                          fontWeight: 700,
-                          fontSize: 12,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Lưu Thẩm Định & Nhập Kho
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setShowInspectionBox(false)}
-                        style={{
-                          padding: '8px 14px',
-                          borderRadius: 6,
-                          background: '#fff',
-                          border: '1px solid #cbd5e1',
-                          color: '#475569',
-                          fontWeight: 600,
-                          fontSize: 12,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Đóng
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Items List */}
-                <div style={{ border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'hidden' }}>
-                  <div style={{ background: '#f8fafc', padding: '10px 14px', fontWeight: 700, fontSize: 12, color: '#475569' }}>
-                    SẢN PHẨM TRẢ ({returnDetail.items?.length || 0})
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    {returnDetail.items?.map((it) => (
+              {/* CA HOÀN CON THEO CHI NHÁNH KHO (WarehouseReturnCases) */}
+              {returnDetail.warehouse_cases && returnDetail.warehouse_cases.length > 0 && (
+                <div style={{ marginBottom: 20 }}>
+                  <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>
+                    Các Ca Hoàn Chi Nhánh Phụ Trách (Child Warehouse Cases)
+                  </h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {returnDetail.warehouse_cases.map((wc) => (
                       <div
-                        key={it.id}
+                        key={wc.id}
                         style={{
-                          padding: '12px 14px',
+                          background: '#f8fafc',
+                          padding: 12,
+                          borderRadius: 8,
+                          border: '1px solid #e2e8f0',
                           display: 'flex',
                           justifyContent: 'space-between',
                           alignItems: 'center',
-                          borderBottom: '1px solid #f1f5f9',
-                          fontSize: 13,
                         }}
                       >
                         <div>
-                          <div style={{ fontWeight: 700, color: '#0f172a' }}>{it.product_name}</div>
-                          <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
-                            Số lượng yêu cầu: <strong>x{it.requested_quantity}</strong> • Đơn giá: {it.unit_price?.toLocaleString('vi-VN')} đ
+                          <div style={{ fontWeight: 700, color: '#0f172a' }}>
+                            {wc.case_code} — Kho: {wc.warehouse_name || wc.warehouse_code}
                           </div>
-                          {it.inspected_condition && (
-                            <div style={{ fontSize: 11, color: '#059669', marginTop: 2 }}>
-                              ✓ Đã thẩm định: <strong>{it.inspected_condition}</strong> → Phân luồng: <strong>{it.restock_destination}</strong> (Nhận: {it.accepted_quantity})
-                            </div>
-                          )}
+                          <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                            Nhân viên kiểm hàng: <strong>{wc.assigned_staff_name || 'Chưa gán'}</strong> • Số mặt hàng: {wc.items_count}
+                          </div>
                         </div>
-                        <div style={{ fontWeight: 800, color: '#1e40af' }}>
-                          {(it.subtotal || it.unit_price * it.requested_quantity).toLocaleString('vi-VN')} đ
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Evidences */}
-                {returnDetail.evidences && returnDetail.evidences.length > 0 && (
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: '#475569', textTransform: 'uppercase', marginBottom: 8 }}>
-                      Hình ảnh / Bằng chứng khách tải lên ({returnDetail.evidences.length})
-                    </div>
-                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                      {returnDetail.evidences.map((ev) => (
-                        <a
-                          key={ev.id}
-                          href={ev.file_url}
-                          target="_blank"
-                          rel="noreferrer"
+                        <span
                           style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 6,
-                            padding: '6px 12px',
-                            background: '#f8fafc',
-                            border: '1px solid #e2e8f0',
-                            borderRadius: 8,
-                            fontSize: 12,
-                            color: '#0284c7',
-                            textDecoration: 'none',
-                            fontWeight: 600,
+                            padding: '3px 10px',
+                            borderRadius: 12,
+                            fontSize: 11,
+                            fontWeight: 700,
+                            background: STATUS_CONFIG[wc.status]?.bg || '#f1f5f9',
+                            color: STATUS_CONFIG[wc.status]?.color || '#475569',
                           }}
                         >
-                          <ImageIcon size={14} />
-                          <span>{ev.file_name}</span>
-                        </a>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Timeline */}
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#475569', textTransform: 'uppercase', marginBottom: 8 }}>
-                    Lịch sử thay đổi trạng thái (Timeline)
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {returnDetail.timeline?.map((tl) => (
-                      <div
-                        key={tl.id}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 10,
-                          fontSize: 12,
-                          background: '#f8fafc',
-                          padding: '6px 12px',
-                          borderRadius: 6,
-                        }}
-                      >
-                        <Clock size={13} style={{ color: '#94a3b8' }} />
-                        <span style={{ fontWeight: 700, color: '#1e293b' }}>{tl.to_status}</span>
-                        <span style={{ color: '#64748b' }}>bởi {tl.actor_name} ({tl.actor_role})</span>
-                        {tl.note && <span style={{ color: '#475569', fontStyle: 'italic' }}>— "{tl.note}"</span>}
-                        <span style={{ marginLeft: 'auto', fontSize: 11, color: '#94a3b8' }}>
-                          {new Date(tl.created_at).toLocaleString('vi-VN')}
+                          {STATUS_CONFIG[wc.status]?.label || wc.status}
                         </span>
                       </div>
                     ))}
                   </div>
                 </div>
+              )}
+
+              {/* Danh sách mặt hàng */}
+              <div style={{ marginBottom: 20 }}>
+                <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>
+                  Sản Phẩm Trong Yêu Cầu Đổi/Trả
+                </h3>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, border: '1px solid #e2e8f0' }}>
+                  <thead>
+                    <tr style={{ background: '#f1f5f9', color: '#475569', textAlign: 'left' }}>
+                      <th style={{ padding: '8px 12px' }}>Tên Sản Phẩm</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'center' }}>SL Khách Yêu Cầu</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'right' }}>Đơn Giá Ròng</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'right' }}>Thành Tiền</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {returnDetail.items.map((it) => (
+                      <tr key={it.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '8px 12px', fontWeight: 600 }}>{it.product_name}</td>
+                        <td style={{ padding: '8px 12px', textAlign: 'center', fontWeight: 700, color: '#0284c7' }}>
+                          {it.requested_quantity}
+                        </td>
+                        <td style={{ padding: '8px 12px', textAlign: 'right' }}>
+                          {(it.unit_price ?? 0).toLocaleString('vi-VN')} ₫
+                        </td>
+                        <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600 }}>
+                          {((it.subtotal || (it.unit_price ?? 0) * (it.requested_quantity ?? 0)) ?? 0).toLocaleString('vi-VN')} ₫
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            ) : null}
+
+              {/* Bằng chứng ảnh */}
+              {returnDetail.evidences.length > 0 && (
+                <div style={{ marginBottom: 20 }}>
+                  <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>
+                    Ảnh / Bằng Chứng Do Khách Tải Lên
+                  </h3>
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                    {returnDetail.evidences.map((ev) => (
+                      <a
+                        key={ev.id}
+                        href={ev.file_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{
+                          width: 80,
+                          height: 80,
+                          borderRadius: 8,
+                          border: '1px solid #cbd5e1',
+                          overflow: 'hidden',
+                          display: 'block',
+                        }}
+                      >
+                        <img src={ev.file_url} alt={ev.file_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer Admin Controls */}
+            <div
+              style={{
+                padding: '14px 24px',
+                background: '#f8fafc',
+                borderTop: '1px solid #e2e8f0',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <div style={{ display: 'flex', gap: 10 }}>
+                {/* Nút Điều chuyển kho */}
+                <button
+                  type="button"
+                  onClick={() => setShowReassignModal(true)}
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: 6,
+                    background: '#fff',
+                    border: '1px solid #cbd5e1',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <Building2 size={14} />
+                  <span>Điều chuyển kho</span>
+                </button>
+
+                {/* Nút Can thiệp khẩn cấp (Override) */}
+                <button
+                  type="button"
+                  onClick={() => setShowOverrideModal(true)}
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: 6,
+                    background: '#fee2e2',
+                    border: '1px solid #fecaca',
+                    color: '#991b1b',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <ShieldAlert size={14} />
+                  <span>Can thiệp khẩn cấp (Override)</span>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSelectedReturnCode(null)}
+                className="admin-button button-secondary"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL ĐIỀU CHUYỂN KHO */}
+      {showReassignModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.5)',
+            zIndex: 1100,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+          }}
+        >
+          <div style={{ background: '#fff', borderRadius: 12, width: '100%', maxWidth: 440, padding: 24 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 12px 0' }}>Điều Chuyển Ca Hoàn Sang Kho Mới</h3>
+            <p style={{ fontSize: 13, color: '#64748b', margin: '0 0 16px 0' }}>
+              Chọn chi nhánh kho mới sẽ tiếp nhận gói hàng và thẩm định dược phẩm:
+            </p>
+            <div style={{ marginBottom: 14 }}>
+              <select
+                value={reassignWhId}
+                onChange={(e) => setReassignWhId(e.target.value ? Number(e.target.value) : '')}
+                style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 14 }}
+              >
+                <option value="">-- Chọn kho mới --</option>
+                {warehouses.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name} ({w.code})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <textarea
+                rows={3}
+                value={reassignReason}
+                onChange={(e) => setReassignReason(e.target.value)}
+                placeholder="Nhập lý do điều chuyển kho bắt buộc (tối thiểu 5 ký tự)..."
+                style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13 }}
+              />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setShowReassignModal(false)}
+                className="admin-button button-secondary"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={handleReassignWarehouse}
+                disabled={!reassignWhId || reassignReason.trim().length < 5 || actionLoading}
+                style={{
+                  padding: '8px 18px',
+                  background: '#047857',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 8,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Xác nhận chuyển kho
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CAN THIỆP KHẨN CẤP (ADMIN OVERRIDE) */}
+      {showOverrideModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.5)',
+            zIndex: 1100,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+          }}
+        >
+          <div style={{ background: '#fff', borderRadius: 12, width: '100%', maxWidth: 460, padding: 24 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#b91c1c', marginBottom: 12 }}>
+              <ShieldAlert size={20} />
+              <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Can Thiệp Khẩn Cấp (Admin Override)</h3>
+            </div>
+            <p style={{ fontSize: 13, color: '#64748b', margin: '0 0 16px 0' }}>
+              Quyền hạn tối cao của Admin Tổng để ép chuyển trạng thái ca hoàn khi phát hiện sai phạm hoặc kho bị nghẽn:
+            </p>
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
+                Chọn trạng thái mới:
+              </label>
+              <select
+                value={overrideStatus}
+                onChange={(e) => setOverrideStatus(e.target.value)}
+                style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13 }}
+              >
+                <option value="APPROVED">Phê duyệt bắt buộc (APPROVED)</option>
+                <option value="REJECTED">Từ chối bắt buộc (REJECTED)</option>
+                <option value="CLOSED">Đóng hồ sơ khẩn cấp (CLOSED)</option>
+              </select>
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#991b1b', marginBottom: 6 }}>
+                Lý do can thiệp khẩn cấp (Bắt buộc ghi nhận kiểm toán):
+              </label>
+              <textarea
+                rows={3}
+                value={overrideReason}
+                onChange={(e) => setOverrideReason(e.target.value)}
+                placeholder="Nhập lý do can thiệp (tối thiểu 5 ký tự)..."
+                style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #f87171', fontSize: 13 }}
+              />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setShowOverrideModal(false)}
+                className="admin-button button-secondary"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={handleAdminOverride}
+                disabled={overrideReason.trim().length < 5 || actionLoading}
+                style={{
+                  padding: '9px 20px',
+                  background: '#b91c1c',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 8,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Xác nhận Override
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -373,7 +373,7 @@ export function RefundsPage() {
                         )}
                       </td>
                       <td style={{ padding: '14px 16px', fontWeight: 800, color: '#16a34a', fontSize: 14 }}>
-                        {ref.refund_amount.toLocaleString('vi-VN')} đ
+                        {(ref.refund_amount ?? 0).toLocaleString('vi-VN')} đ
                       </td>
                       <td style={{ padding: '14px 16px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -837,7 +837,7 @@ export function RefundsPage() {
                   <div>
                     <span style={{ color: '#64748b', fontSize: 11 }}>Số tiền hoàn:</span>
                     <div style={{ fontWeight: 800, color: '#16a34a', fontSize: 16 }}>
-                      {refundDetail.refund_amount.toLocaleString('vi-VN')} đ
+                      {(refundDetail.refund_amount ?? 0).toLocaleString('vi-VN')} đ
                     </div>
                   </div>
                   <div>

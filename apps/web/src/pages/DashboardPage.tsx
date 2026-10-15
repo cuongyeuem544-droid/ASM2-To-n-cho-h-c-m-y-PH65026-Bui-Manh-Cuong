@@ -201,7 +201,7 @@ export function DashboardPage() {
                   <i style={{ width: '8px', height: '8px', borderRadius: '50%', background: PIE_COLORS[i % PIE_COLORS.length], display: 'inline-block' }} />
                   {item.name}
                 </span>
-                <strong style={{ color: '#0f172a' }}>{item.value.toLocaleString('vi-VN')}</strong>
+                <strong style={{ color: '#0f172a' }}>{(item.value ?? 0).toLocaleString('vi-VN')}</strong>
               </span>
             ))}
           </div>

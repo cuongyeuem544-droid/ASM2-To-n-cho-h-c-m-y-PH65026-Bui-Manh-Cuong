@@ -16,8 +16,10 @@ from app.models import (
     OrderFulfillment,
     OrderItem,
     OrderItemBatchAllocation,
+    PaymentTransaction,
     PriceObservation,
     ProductSku,
+    Refund,
     StockMovement,
     StockReservation,
     Warehouse,
@@ -140,6 +142,8 @@ class FulfillmentRoutingService:
             db, shipping_city, shipping_address, lat=order.lat, lng=order.lng
         )
         today = date.today()
+        # Quyết định Q7: Ngưỡng hạn sử dụng tối thiểu 180 ngày (6 tháng) cho đơn giao khách
+        fefo_cutoff_date = today + timedelta(days=180)
 
         # 1. Map mỗi order item sang SKU chính xác (hỗ trợ multi-SKU người dùng chọn)
         item_sku_map: dict[int, ProductSku] = {}
@@ -157,7 +161,7 @@ class FulfillmentRoutingService:
                 raise HTTPException(status_code=400, detail=f"Không tìm thấy quy cách đóng gói (SKU) hợp lệ cho '{it.product_name}'.")
             item_sku_map[it.id] = sku_obj
 
-        # 2. Kiểm tra tồn khả dụng của từng sản phẩm tại từng kho (chỉ xét lô ACTIVE và còn hạn dùng)
+        # 2. Kiểm tra tồn khả dụng của từng sản phẩm tại từng kho (chỉ xét lô ACTIVE và còn hạn >= 180 ngày)
         # warehouse_id -> sku_id -> available_qty
         wh_sku_avail: dict[int, dict[int, int]] = {w.id: {} for w in ordered_warehouses}
 
@@ -171,7 +175,7 @@ class FulfillmentRoutingService:
                     WarehouseBatchStock.quantity_available > 0,
                     InventoryBatch.sku_id == sku.id,
                     InventoryBatch.status == BatchStatus.ACTIVE,
-                    InventoryBatch.expiry_date > today,
+                    InventoryBatch.expiry_date >= fefo_cutoff_date,
                 ).scalar() or 0
                 wh_sku_avail[w.id][sku.id] = int(avail)
 
@@ -193,6 +197,16 @@ class FulfillmentRoutingService:
         if single_fulfill_wh:
             # Phân bổ toàn bộ đơn hàng cho single_fulfill_wh
             logger.info(f"[ROUTING] Đơn {order.order_code}: Đáp ứng 100% tại kho {single_fulfill_wh.code}")
+            order.assigned_warehouse_id = single_fulfill_wh.id
+            order.assignment_method = "NEAREST_SINGLE"
+            order.fulfillment_status = "ALLOCATED"
+            order.assigned_at = utcnow()
+            if order.lat is not None and order.lng is not None and single_fulfill_wh.lat is not None and single_fulfill_wh.lng is not None:
+                from app.services.geo_service import calculate_haversine_distance
+                order.assignment_distance_km = round(
+                    calculate_haversine_distance(order.lat, order.lng, single_fulfill_wh.lat, single_fulfill_wh.lng), 2
+                )
+
             ff = cls._create_fulfillment(
                 db=db,
                 order=order,
@@ -218,12 +232,23 @@ class FulfillmentRoutingService:
                     )
 
             if system_shortages:
-                # Kịch bản 3: Không đủ hàng trong toàn hệ thống
-                err_detail = "Số lượng tồn kho không đủ để đáp ứng đơn hàng: " + "; ".join(system_shortages)
+                # Kịch bản 3: Không đủ hàng trong toàn hệ thống (đáp ứng điều kiện HSD >= 180 ngày)
+                err_detail = "Số lượng tồn kho (đáp ứng hạn sử dụng an toàn >= 180 ngày) không đủ: " + "; ".join(system_shortages)
                 raise HTTPException(status_code=400, detail=err_detail)
 
-            # Kịch bản 2: Tách đơn đa kho (Split Order)
-            logger.info(f"[ROUTING] Đơn {order.order_code}: Tách đơn đa kho do không có kho đơn lẻ nào đủ 100% hàng.")
+            # Kịch bản 2: Điều phối điều chuyển gom hàng (Consolidation Transfer)
+            consolidation_hub = ordered_warehouses[0]
+            logger.info(f"[ROUTING] Đơn {order.order_code}: Điều chuyển gom hàng về kho đích {consolidation_hub.code}.")
+            order.assigned_warehouse_id = consolidation_hub.id
+            order.assignment_method = "CONSOLIDATED_TRANSFER"
+            order.fulfillment_status = "WAITING_INTERNAL_TRANSFER"
+            order.assigned_at = utcnow()
+            if order.lat is not None and order.lng is not None and consolidation_hub.lat is not None and consolidation_hub.lng is not None:
+                from app.services.geo_service import calculate_haversine_distance
+                order.assignment_distance_km = round(
+                    calculate_haversine_distance(order.lat, order.lng, consolidation_hub.lat, consolidation_hub.lng), 2
+                )
+
             wh_item_alloc: dict[int, dict[int, int]] = {w.id: {} for w in ordered_warehouses}
 
             for it in items:
@@ -238,11 +263,30 @@ class FulfillmentRoutingService:
                         remaining_needed -= take
                         wh_sku_avail[w.id][sku.id] -= take
 
-            # Tạo OrderFulfillment cho từng kho có nhận phần hàng
+            # Tạo lệnh chuyển kho StockTransfer từ các kho nguồn về kho đích (Consolidation Hub)
+            from app.models.inventory import StockTransfer, StockTransferItem
+            for w in ordered_warehouses:
+                if w.id == consolidation_hub.id:
+                    continue
+                allocs = wh_item_alloc[w.id]
+                items_to_transfer = [it for it in items if allocs.get(it.id, 0) > 0]
+                if items_to_transfer:
+                    transfer = StockTransfer(
+                        transfer_code=f"TRF-{order.order_code}-{w.code[:6]}-{consolidation_hub.code[:6]}",
+                        from_warehouse_id=w.id,
+                        to_warehouse_id=consolidation_hub.id,
+                        order_id=order.id,
+                        status="IN_TRANSIT",
+                        note=f"Điều chuyển hàng phục vụ đơn hàng {order.order_code}",
+                        shipped_at=utcnow(),
+                    )
+                    db.add(transfer)
+                    db.flush()
+
+            # Tạo kiện hàng fulfillment cho từng kho
             for w in ordered_warehouses:
                 allocs = wh_item_alloc[w.id]
                 if any(qty > 0 for qty in allocs.values()):
-                    # Tạo kiện hàng cho kho này
                     carrier = "GHTK Fast" if "HCM" in w.code else "ViettelPost Express"
                     ff = cls._create_fulfillment(
                         db=db,
@@ -253,7 +297,7 @@ class FulfillmentRoutingService:
                         qty_breakdown=allocs,
                         today=today,
                         carrier_name=carrier,
-                        shipping_fee=Decimal("0.0"),  # Miễn phí vận chuyển cho kiện phụ trợ
+                        shipping_fee=Decimal("0.0"),
                     )
                     fulfillments_to_return.append(ff)
 
@@ -336,6 +380,7 @@ class FulfillmentRoutingService:
         Lấy các lô còn hạn dùng, ACTIVE, sắp xếp tăng dần theo expiry_date ASC (hạn gần nhất xuất trước).
         Khấu trừ available, tăng reserved, tạo StockReservation và OrderItemBatchAllocation.
         """
+        fefo_cutoff_date = today + timedelta(days=180)
         batch_stocks = (
             db.query(WarehouseBatchStock, InventoryBatch)
             .join(InventoryBatch, InventoryBatch.id == WarehouseBatchStock.batch_id)
@@ -343,7 +388,7 @@ class FulfillmentRoutingService:
                 WarehouseBatchStock.warehouse_id == warehouse.id,
                 InventoryBatch.sku_id == sku.id,
                 InventoryBatch.status == BatchStatus.ACTIVE,
-                InventoryBatch.expiry_date > today,
+                InventoryBatch.expiry_date >= fefo_cutoff_date,
                 WarehouseBatchStock.quantity_available > 0,
             )
             .order_by(InventoryBatch.expiry_date.asc(), InventoryBatch.id.asc())
@@ -623,3 +668,147 @@ class FulfillmentRoutingService:
 
         db.commit()
         return cancelled_order_codes
+
+    @classmethod
+    def cancel_transfer_and_refund_order(
+        cls,
+        db: Session,
+        transfer_id: int,
+        reason: str,
+        user_id: Optional[int] = None,
+    ) -> dict[str, Any]:
+        """
+        Quyết định Q6: Tự động hủy đơn hàng và hoàn tiền 100% nếu điều chuyển kho nội bộ thất bại.
+        - Hủy StockTransfer -> CANCELLED
+        - Hủy Order -> CANCELLED & Order.fulfillment_status = CANCELLED
+        - Giải phóng StockReservation của Order
+        - Sinh RefundRecord hoàn tiền 100% số tiền đơn hàng
+        - Sinh PaymentTransaction(REFUNDED)
+        - Lưu Audit log và cảnh báo hệ thống
+        """
+        from app.models import Refund
+        from app.models.inventory import StockTransfer
+
+        transfer = db.get(StockTransfer, transfer_id)
+        if not transfer:
+            raise HTTPException(status_code=404, detail="Không tìm thấy yêu cầu điều chuyển kho")
+
+        transfer.status = "CANCELLED"
+        transfer.note = (transfer.note or "") + f" | HỦY ĐIỀU CHUYỂN: {reason}"
+        now = utcnow()
+
+        order = db.get(Order, transfer.order_id) if transfer.order_id else None
+        refund_created = None
+
+        if order:
+            order.order_status = "CANCELLED"
+            order.fulfillment_status = "CANCELLED"
+
+            # Giải phóng tất cả tồn kho đã giữ chỗ cho đơn này
+            reservations = db.scalars(
+                select(StockReservation).where(
+                    StockReservation.order_id == order.id,
+                    StockReservation.status == "RESERVED",
+                )
+            ).all()
+            for res in reservations:
+                res.status = "RELEASED"
+                stock = db.scalar(
+                    select(WarehouseBatchStock).where(
+                        WarehouseBatchStock.warehouse_id == res.warehouse_id,
+                        WarehouseBatchStock.batch_id == res.batch_id,
+                    )
+                )
+                if stock:
+                    stock.quantity_reserved = max(0, stock.quantity_reserved - res.quantity)
+                    stock.quantity_available += res.quantity
+
+            # Hoàn tiền 100% nếu khách đã thanh toán hoặc đã tạo giao dịch
+            refund_amount = order.total_amount
+            refund_code = f"REF-AUTO-{order.order_code}-{int(now.timestamp()) % 100000}"
+            refund_record = Refund(
+                refund_code=refund_code,
+                order_id=order.id,
+                amount=refund_amount,
+                currency="VND",
+                refund_method=order.payment_method or "VIETQR",
+                status="SUCCEEDED",
+                reason=f"Tự động hoàn tiền 100% do điều chuyển kho nội bộ thất bại: {reason}",
+                notes=f"Đơn hàng {order.order_code} hủy tự động do sự cố vận chuyển từ kho {transfer.from_warehouse_id} tới {transfer.to_warehouse_id}.",
+                requested_at=now,
+                succeeded_at=now,
+            )
+            db.add(refund_record)
+            order.payment_status = "REFUNDED"
+
+            # Thêm PaymentTransaction hoàn tiền
+            refund_tx = PaymentTransaction(
+                order_id=order.id,
+                transaction_code=f"TXN-REF-{order.order_code}-{int(now.timestamp()) % 100000}",
+                provider=order.payment_method or "VIETQR",
+                amount=refund_amount,
+                currency="VND",
+                status="REFUNDED",
+            )
+            db.add(refund_tx)
+            refund_created = refund_code
+
+            logger.info(
+                f"[TRANSFER_FAILED_REFUND] Đơn {order.order_code}: Tự động hoàn tiền 100% {refund_amount}đ. Lý do: {reason}"
+            )
+
+        db.commit()
+        return {
+            "success": True,
+            "message": "Đã hủy điều chuyển và tự động hủy đơn hàng, hoàn tiền 100% cho khách hàng.",
+            "transfer_id": transfer_id,
+            "order_code": order.order_code if order else None,
+            "refund_code": refund_created,
+            "refund_amount": float(order.total_amount) if order else 0,
+        }
+
+    @classmethod
+    def receive_transfer_and_consolidate(
+        cls,
+        db: Session,
+        transfer_id: int,
+        user_id: Optional[int] = None,
+    ) -> dict[str, Any]:
+        """
+        Nhận hàng điều chuyển tại kho đích.
+        Cập nhật chuyển kho hoàn tất -> Chuyển trạng thái đơn hàng sang CONSOLIDATED.
+        """
+        from app.models.inventory import StockTransfer
+
+        transfer = db.get(StockTransfer, transfer_id)
+        if not transfer:
+            raise HTTPException(status_code=404, detail="Không tìm thấy yêu cầu điều chuyển kho")
+
+        transfer.status = "COMPLETED"
+        transfer.received_at = utcnow()
+
+        # Cập nhật số lượng received_quantity trên các item
+        for it in transfer.items:
+            it.received_quantity = it.quantity
+
+        order = db.get(Order, transfer.order_id) if transfer.order_id else None
+        if order:
+            pending_transfers = db.scalars(
+                select(StockTransfer).where(
+                    StockTransfer.order_id == order.id,
+                    StockTransfer.status.in_(["DRAFT", "IN_TRANSIT"]),
+                    StockTransfer.id != transfer.id,
+                )
+            ).all()
+
+            if not pending_transfers:
+                order.fulfillment_status = "CONSOLIDATED"
+                logger.info(f"[CONSOLIDATED] Đơn {order.order_code}: Hàng đã gom đủ tại kho {order.assigned_warehouse_id}. Sẵn sàng đóng gói!")
+
+        db.commit()
+        return {
+            "success": True,
+            "message": "Đã tiếp nhận hàng điều chuyển thành công",
+            "transfer_id": transfer_id,
+            "order_fulfillment_status": order.fulfillment_status if order else None,
+        }

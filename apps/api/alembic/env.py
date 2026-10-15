@@ -9,7 +9,8 @@ from app import models  # noqa: F401
 
 
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.database_url)
+if not config.get_main_option("sqlalchemy.url") or config.get_main_option("sqlalchemy.url") == "sqlite:///./pharmatrust.db":
+    config.set_main_option("sqlalchemy.url", settings.database_url)
 if config.config_file_name:
     fileConfig(config.config_file_name)
 target_metadata = Base.metadata
@@ -22,8 +23,14 @@ def run_migrations_offline():
 
 
 def run_migrations_online():
+    configuration = config.get_section(config.config_ini_section, {})
+    url_opt = config.get_main_option("sqlalchemy.url")
+    if not url_opt or url_opt == "sqlite:///./pharmatrust.db":
+        configuration["sqlalchemy.url"] = settings.database_url
+    else:
+        configuration["sqlalchemy.url"] = url_opt
     connectable = engine_from_config(
-        config.get_section(config.config_ini_section),
+        configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )

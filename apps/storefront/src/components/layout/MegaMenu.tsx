@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CATEGORIES_DATA } from "@/data/mockData";
+import { getStoreCategoriesTree } from "@/lib/api/products";
 import { Category } from "@/types";
 import {
   Pill,
@@ -50,10 +51,23 @@ const CategoryIcon: React.FC<{ iconName: string; className?: string }> = ({
 
 export const MegaMenu: React.FC<MegaMenuProps> = ({ isOpen, onClose }) => {
   const router = useRouter();
+  const [categories, setCategories] = useState<Category[]>(CATEGORIES_DATA);
   const [activeCategoryId, setActiveCategoryId] = useState<string>(CATEGORIES_DATA[0].id);
 
+  React.useEffect(() => {
+    let isMounted = true;
+    getStoreCategoriesTree().then((data) => {
+      if (isMounted && data && data.length > 0) {
+        setCategories(data);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   const activeCategory: Category =
-    CATEGORIES_DATA.find((c) => c.id === activeCategoryId) || CATEGORIES_DATA[0];
+    categories.find((c) => c.id === activeCategoryId || c.slug === activeCategoryId) || categories[0];
 
   if (!isOpen) return null;
 
@@ -87,8 +101,8 @@ export const MegaMenu: React.FC<MegaMenuProps> = ({ isOpen, onClose }) => {
                 <div className="px-3 py-2 text-[11px] font-bold tracking-wider uppercase text-slate-500">
                   Danh mục dược phẩm chuẩn GPP
                 </div>
-                {CATEGORIES_DATA.map((cat) => {
-                  const isActive = cat.id === activeCategoryId;
+                {categories.map((cat) => {
+                  const isActive = cat.id === activeCategoryId || cat.slug === activeCategoryId;
                   return (
                     <div
                       key={cat.id}

@@ -317,20 +317,20 @@ export function ExchangesPage() {
                       </td>
                       <td style={{ padding: '14px 16px', fontSize: 12 }}>
                         <div>
-                          Cũ: <strong>{ex.returned_items_value.toLocaleString('vi-VN')} đ</strong>
+                          Cũ: <strong>{(ex.returned_items_value ?? 0).toLocaleString('vi-VN')} đ</strong>
                         </div>
                         <div style={{ color: '#0369a1' }}>
-                          Mới: <strong>{ex.replacement_items_value.toLocaleString('vi-VN')} đ</strong>
+                          Mới: <strong>{(ex.replacement_items_value ?? 0).toLocaleString('vi-VN')} đ</strong>
                         </div>
                       </td>
                       <td style={{ padding: '14px 16px', fontWeight: 800, fontSize: 13 }}>
                         {diff > 0 ? (
                           <span style={{ color: '#c2410c' }}>
-                            Khách bù: +{diff.toLocaleString('vi-VN')} đ
+                            Khách bù: +{(diff ?? 0).toLocaleString('vi-VN')} đ
                           </span>
                         ) : diff < 0 ? (
                           <span style={{ color: '#059669' }}>
-                            Hoàn lại: {diff.toLocaleString('vi-VN')} đ
+                            Hoàn lại: {(diff ?? 0).toLocaleString('vi-VN')} đ
                           </span>
                         ) : (
                           <span style={{ color: '#64748b' }}>Ngang giá (0 đ)</span>
@@ -771,8 +771,8 @@ export function ExchangesPage() {
                   </div>
                   <div>
                     <span style={{ color: '#64748b', fontSize: 11 }}>Chênh lệch giá:</span>
-                    <div style={{ fontWeight: 800, fontSize: 14, color: exchangeDetail.price_difference > 0 ? '#c2410c' : '#059669' }}>
-                      {exchangeDetail.price_difference.toLocaleString('vi-VN')} đ
+                    <div style={{ fontWeight: 800, fontSize: 14, color: (exchangeDetail.price_difference ?? 0) > 0 ? '#c2410c' : '#059669' }}>
+                      {(exchangeDetail.price_difference ?? 0).toLocaleString('vi-VN')} đ
                     </div>
                   </div>
                 </div>
@@ -796,11 +796,11 @@ export function ExchangesPage() {
                       <div>
                         <div style={{ fontWeight: 700, color: '#0f172a' }}>{it.product_name}</div>
                         <div style={{ fontSize: 11, color: '#64748b' }}>
-                          Số lượng: x{it.quantity} • Đơn giá: {it.unit_price?.toLocaleString('vi-VN')} đ
+                          Số lượng: x{it.quantity} • Đơn giá: {(it.unit_price ?? 0).toLocaleString('vi-VN')} đ
                         </div>
                       </div>
                       <div style={{ fontWeight: 800, color: '#0369a1' }}>
-                        {(it.subtotal || it.unit_price * it.quantity).toLocaleString('vi-VN')} đ
+                        {((it.subtotal || (it.unit_price ?? 0) * (it.quantity ?? 1)) ?? 0).toLocaleString('vi-VN')} đ
                       </div>
                     </div>
                   ))}

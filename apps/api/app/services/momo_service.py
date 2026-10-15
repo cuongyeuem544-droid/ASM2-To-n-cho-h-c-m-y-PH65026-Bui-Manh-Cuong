@@ -305,6 +305,16 @@ class MomoPaymentService:
 
         # 6. Cập nhật trạng thái theo mã kết quả của MoMo (0 = Thành công)
         if result_code == 0:
+            # Kiểm tra số tiền: Sai một đồng cũng không tự chuyển đơn sang PAID
+            order_total = int(order.total_amount)
+            paid_amount = int(amount) if amount is not None else None
+            if paid_amount is not None and paid_amount != order_total:
+                trans.status = "UNDERPAID" if paid_amount < order_total else "OVERPAID"
+                err_msg = f"Số tiền thanh toán MoMo ({paid_amount:,} đ) không khớp với số tiền đơn hàng ({order_total:,} đ)"
+                webhook_log.process_error = err_msg
+                db.commit()
+                raise HTTPException(status_code=400, detail=err_msg)
+
             trans.status = "SUCCESS"
             trans.provider_trans_id = trans_id
             order.payment_status = "PAID"

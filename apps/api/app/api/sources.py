@@ -69,7 +69,7 @@ def run_source(
     source_id: int,
     request: Request,
     background_tasks: BackgroundTasks,
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ):
     source = db.get(DataSource, source_id)

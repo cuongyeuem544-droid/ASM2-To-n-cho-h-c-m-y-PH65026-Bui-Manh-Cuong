@@ -95,24 +95,6 @@ export default function RegisterPage() {
     return { score: 4, text: "Rất an toàn", color: "bg-emerald-500", textCol: "text-emerald-600" };
   };
 
-  const fillSampleNewAccount = () => {
-    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-    const sampleNames = ["Lê Minh Hoàng", "Vũ Phương Linh", "Đặng Quốc Anh", "Hoàng Kim Ngân", "Phạm Hải Đăng", "Bùi Thanh Trúc"];
-    const randomName = sampleNames[Math.floor(Math.random() * sampleNames.length)];
-    const samplePhone = `0977${randomSuffix}`;
-    const sampleEmail = `khachhang${randomSuffix}@pharmatrust.vn`;
-    
-    setFullName(randomName);
-    setPhone(samplePhone);
-    const formatted = formatPhoneString(samplePhone);
-    setFormattedPhone(formatted.formatted);
-    setCarrier(formatted.carrier);
-    setEmail(sampleEmail);
-    setPassword("H4carePass@2026");
-    setConfirmPassword("H4carePass@2026");
-    setErrorMessage(null);
-  };
-
   // Phone Formatter Utility
   const formatPhoneString = (inputVal: string) => {
     let val = inputVal.replace(/\D/g, "");
@@ -271,16 +253,6 @@ export default function RegisterPage() {
                   <ShieldCheck className="w-3.5 h-3.5 text-sky-600" />
                   <span>Hội viên H4CARE</span>
                 </div>
-
-                <button
-                  type="button"
-                  onClick={fillSampleNewAccount}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/90 text-sky-700 hover:bg-sky-50 border border-sky-200 text-[11px] font-bold transition-all shadow-2xs cursor-pointer"
-                  title="Điền tự động dữ liệu thành viên ngẫu nhiên để test nhanh"
-                >
-                  <Sparkles className="w-3 h-3 text-sky-600" />
-                  <span>Tạo nhanh mẫu</span>
-                </button>
               </div>
 
               <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight bg-gradient-to-r from-slate-900 via-sky-950 to-blue-900 bg-clip-text text-transparent">

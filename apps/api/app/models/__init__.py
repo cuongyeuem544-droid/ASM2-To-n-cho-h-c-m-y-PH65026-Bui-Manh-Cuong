@@ -21,6 +21,14 @@ from app.models.entities import (
     ScoreHistory,
     User,
 )
+from app.models.classification import (
+    Category,
+    ProductCategory,
+    ProductClassificationEvidence,
+    ProductClassificationHistory,
+    ProductClassificationReview,
+    ProductType,
+)
 from app.models.inventory import (
     AdministrativeUnit,
     BatchStatus,
@@ -47,6 +55,8 @@ from app.models.inventory import (
     Warehouse,
     WarehouseBatchStock,
     WarehouseLocation,
+    WarehouseImportJob,
+    WarehouseAlert,
 )
 from app.models.returns import (
     ExchangeItem,
@@ -66,6 +76,15 @@ from app.models.returns import (
     ReturnRequestType,
     ReturnStatus,
     ReturnStatusHistory,
+    WarehouseReturnCase,
+    ReturnInspection,
+    ReturnEvidenceRequest,
+    ReturnEvidenceRequestStatus,
+)
+from app.models.security_and_promotions import (
+    PasswordResetToken,
+    UserOtp,
+    Voucher,
 )
 
 __all__ = [
@@ -74,6 +93,7 @@ __all__ = [
     "BatchStatus",
     "AuditLog",
     "CanonicalProduct",
+    "Category",
     "ConfidenceScore",
     "CrawlLock",
     "CrawlRun",
@@ -97,10 +117,15 @@ __all__ = [
     "PaymentWebhookEvent",
     "PriceObservation",
     "ProductCandidate",
+    "ProductCategory",
+    "ProductClassificationEvidence",
+    "ProductClassificationHistory",
+    "ProductClassificationReview",
     "ProductIngredient",
     "ProductReview",
     "ProductSku",
     "ProductSourceField",
+    "ProductType",
     "RawDocument",
     "ReconciliationStatus",
     "Refund",
@@ -129,7 +154,14 @@ __all__ = [
     "StockTransferItem",
     "Supplier",
     "User",
+    "PasswordResetToken",
+    "UserOtp",
+    "Voucher",
     "Warehouse",
     "WarehouseBatchStock",
     "WarehouseLocation",
+    "WarehouseReturnCase",
+    "ReturnInspection",
+    "ReturnEvidenceRequest",
+    "ReturnEvidenceRequestStatus",
 ]

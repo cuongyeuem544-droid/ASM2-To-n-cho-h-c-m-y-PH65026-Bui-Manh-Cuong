@@ -11,6 +11,7 @@ from pydantic import BaseModel, HttpUrl
 from sqlalchemy import select
 
 from app.api.deps import get_current_user, require_roles
+from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models import (
     AdminAlert,

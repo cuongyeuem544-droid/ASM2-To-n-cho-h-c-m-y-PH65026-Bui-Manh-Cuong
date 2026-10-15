@@ -42,8 +42,13 @@ def create_token(subject: str, token_type: str, expires_delta: timedelta, extra:
     return jwt.encode(payload, settings.secret_key, algorithm="HS256")
 
 
-def create_access_token(subject: str, role: str) -> str:
-    return create_token(subject, "access", timedelta(minutes=settings.access_token_minutes), {"role": role})
+def create_access_token(subject: str, role: str, token_version: int = 1) -> str:
+    return create_token(
+        subject,
+        "access",
+        timedelta(minutes=settings.access_token_minutes),
+        {"role": role, "token_version": token_version},
+    )
 
 
 def create_refresh_token(subject: str) -> str:
@@ -87,4 +92,31 @@ def verify_guest_order_token(token: str | None, expected_order_code: str) -> boo
     except Exception:
         return False
 
+
+def validate_password_strength(password: str) -> tuple[bool, str]:
+    import re
+    if len(password) < 8:
+        return False, "Mật khẩu phải có tối thiểu 8 ký tự"
+    if not re.search(r"[A-Z]", password):
+        return False, "Mật khẩu phải chứa ít nhất 1 chữ cái in hoa (A-Z)"
+    if not re.search(r"[a-z]", password):
+        return False, "Mật khẩu phải chứa ít nhất 1 chữ cái in thường (a-z)"
+    if not re.search(r"\d", password):
+        return False, "Mật khẩu phải chứa ít nhất 1 chữ số (0-9)"
+    if not re.search(r"[!@#$%^&*(),.?\":{}|<>\-_=+]", password):
+        return False, "Mật khẩu phải chứa ít nhất 1 ký tự đặc biệt (!@#$%...)"
+    return True, ""
+
+
+def generate_secure_temporary_password(length: int = 12) -> str:
+    import secrets
+    import string
+    upper = secrets.choice(string.ascii_uppercase)
+    lower = secrets.choice(string.ascii_lowercase)
+    digit = secrets.choice(string.digits)
+    special = secrets.choice("!@#$%&*?")
+    remaining = [secrets.choice(string.ascii_letters + string.digits + "!@#$%&*?") for _ in range(max(length - 4, 4))]
+    all_chars = [upper, lower, digit, special] + remaining
+    secrets.SystemRandom().shuffle(all_chars)
+    return "".join(all_chars)
 

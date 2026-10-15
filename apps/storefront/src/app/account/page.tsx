@@ -33,6 +33,7 @@ import {
   Banknote,
   QrCode,
   Stethoscope,
+  AlertCircle,
 } from "lucide-react";
 import { CustomerAddressBook } from "@/components/account/CustomerAddressBook";
 import { CustomerReturnsSection } from "@/components/returns/CustomerReturnsSection";
@@ -63,7 +64,8 @@ export default function AccountPage() {
   const router = useRouter();
   const { user, isAuthenticated, isLoading, logout } = useAuth();
   const [orders, setOrders] = useState<CustomerOrder[]>([]);
-  const [loadingOrders, setLoadingOrders] = useState<boolean>(false);
+  const [ordersStatus, setOrdersStatus] = useState<"loading" | "success" | "error">("loading");
+  const [ordersError, setOrdersError] = useState<string>("");
 
   // Modal states
   const [selectedOrder, setSelectedOrder] = useState<CustomerOrder | null>(null);
@@ -105,33 +107,71 @@ export default function AccountPage() {
     }
   }, [user]);
 
-  const getAuthHeaders = () => {
-    const token = typeof window !== "undefined"
-      ? localStorage.getItem("pharmatrust_token") || localStorage.getItem("h4care_auth_token")
-      : null;
+  const getAuthToken = () => {
+    if (typeof window === "undefined") return null;
+    return (
+      localStorage.getItem("pharmatrust_access_token") ||
+      localStorage.getItem("pharmatrust_token") ||
+      localStorage.getItem("h4care_auth_token") ||
+      localStorage.getItem("access_token")
+    );
+  };
+
+  const getAuthHeaders = (): Record<string, string> => {
+    const token = getAuthToken();
     const h: Record<string, string> = {};
     if (token) h["Authorization"] = `Bearer ${token}`;
     return h;
   };
 
-  // Load customer-specific orders isolated by phone number with auth token
-  const reloadOrders = () => {
-    if (user?.phone) {
-      setLoadingOrders(true);
-      const headers = getAuthHeaders();
-      fetch(`/api/v1/store/orders/customer/${encodeURIComponent(user.phone)}`, { headers })
-        .then((res) => (res.ok ? res.json() : []))
-        .then((data) => {
-          if (Array.isArray(data)) setOrders(data);
-        })
-        .catch(() => setOrders([]))
-        .finally(() => setLoadingOrders(false));
+  // Load authenticated customer's orders strictly via JWT token
+  const reloadOrders = async () => {
+    const token = getAuthToken();
+    if (!token) {
+      if (!isLoading && !isAuthenticated) {
+        router.push("/login?redirect=/account");
+      }
+      return;
+    }
+
+    setOrdersStatus("loading");
+    setOrdersError("");
+
+    try {
+      const apiBase = process.env.NEXT_PUBLIC_API_URL || "";
+      const res = await fetch(`${apiBase}/api/v1/store/orders/me`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (res.status === 401) {
+        setOrdersStatus("error");
+        setOrdersError("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại để xem lịch sử đơn hàng.");
+        router.push("/login?redirect=/account");
+        return;
+      }
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || "Không thể tải lịch sử đơn hàng từ máy chủ.");
+      }
+
+      const data = await res.json();
+      const list = Array.isArray(data) ? data : (data.items || data.orders || []);
+      setOrders(list);
+      setOrdersStatus("success");
+    } catch (err: any) {
+      setOrdersStatus("error");
+      setOrdersError(err.message || "Lỗi khi kết nối máy chủ để tải lịch sử đơn hàng.");
     }
   };
 
   useEffect(() => {
-    reloadOrders();
-  }, [user?.phone]);
+    if (isAuthenticated) {
+      reloadOrders();
+    }
+  }, [isAuthenticated]);
 
   // Load live payment data when selectedOrder is opened
   useEffect(() => {
@@ -562,23 +602,55 @@ export default function AccountPage() {
               </div>
             </div>
 
-            {/* Orders Section - Real Isolated Orders */}
+            {/* Orders Section - Authenticated Customer Orders */}
             <div id="orders" className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs">
               <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
                 <div>
                   <h2 className="font-extrabold text-base text-slate-900">Đơn hàng gần đây</h2>
                   <p className="text-xs text-slate-500">
-                    Dữ liệu đơn hàng riêng biệt theo số điện thoại: <strong className="text-slate-700">{user.phone}</strong>
+                    Lịch sử đơn hàng cá nhân gắn liền với tài khoản của bạn.
                   </p>
                 </div>
-                <Link href="/products" className="text-xs font-bold text-brand-blue-600 hover:underline">
-                  Mua sắm tiếp →
-                </Link>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => reloadOrders()}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-brand-blue-600 hover:bg-slate-100 transition-colors"
+                    title="Làm mới lịch sử đơn hàng"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${ordersStatus === "loading" ? "animate-spin text-brand-blue-600" : ""}`} />
+                  </button>
+                  <Link href="/products" className="text-xs font-bold text-brand-blue-600 hover:underline">
+                    Mua sắm tiếp →
+                  </Link>
+                </div>
               </div>
 
-              {loadingOrders ? (
-                <div className="p-6 text-center text-xs text-slate-500">Đang tải lịch sử đơn hàng...</div>
+              {/* 1. Trạng thái Đang tải (Loading) */}
+              {ordersStatus === "loading" ? (
+                <div className="p-8 text-center text-xs text-slate-500 flex flex-col items-center justify-center gap-2">
+                  <RefreshCw className="w-5 h-5 animate-spin text-brand-blue-600" />
+                  <span>Đang tải lịch sử đơn hàng của bạn...</span>
+                </div>
+              ) : ordersStatus === "error" ? (
+                /* 2. Trạng thái Lỗi (Error with Retry) */
+                <div className="p-6 rounded-xl bg-rose-50/80 border border-rose-200/80 text-center space-y-3">
+                  <AlertCircle className="w-8 h-8 text-rose-500 mx-auto" />
+                  <div>
+                    <p className="text-xs font-bold text-rose-700">Không thể tải danh sách đơn hàng</p>
+                    <p className="text-[11px] text-rose-600 mt-0.5">{ordersError || "Đã xảy ra sự cố khi kết nối tới máy chủ."}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => reloadOrders()}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-brand-blue-600 hover:bg-brand-blue-700 text-white text-xs font-bold transition-colors shadow-xs"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Thử lại</span>
+                  </button>
+                </div>
               ) : orders.length > 0 ? (
+                /* 3. Trạng thái Có dữ liệu (Success - Data) */
                 <div className="space-y-3">
                   {orders.map((order) => (
                     <div
@@ -624,9 +696,10 @@ export default function AccountPage() {
                   ))}
                 </div>
               ) : (
+                /* 4. Trạng thái Rỗng (Success - Empty) */
                 <div className="p-6 rounded-xl bg-slate-50 border border-slate-200/60 text-center space-y-2">
                   <ShoppingBag className="w-8 h-8 text-slate-300 mx-auto" />
-                  <p className="text-xs font-semibold text-slate-600">Tài khoản này chưa có đơn hàng nào.</p>
+                  <p className="text-xs font-semibold text-slate-600">Bạn chưa có đơn hàng nào.</p>
                   <p className="text-[11px] text-slate-400">
                     Mỗi tài khoản lưu trữ lịch sử đơn hàng và điểm tích lũy hoàn toàn độc lập.
                   </p>

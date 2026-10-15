@@ -205,10 +205,15 @@ class ReturnService:
         db.add(ret_request)
         db.flush()
 
-        # 6. Gắn các sản phẩm
-        for item in validated_return_items:
-            item.return_request_id = ret_request.id
-            db.add(item)
+        # 6. Tách ca hoàn theo từng chi nhánh kho đã xuất hàng
+        from app.services.warehouse_return_service import WarehouseReturnService
+        created_cases = WarehouseReturnService.split_return_request_into_cases(
+            db=db,
+            return_request=ret_request,
+            return_items=validated_return_items,
+            order=order,
+        )
+        primary_case_id = created_cases[0].id if created_cases else None
 
         # 7. Gắn bằng chứng (nếu có)
         if evidences_payload:
@@ -217,6 +222,7 @@ class ReturnService:
                 if file_url:
                     evidence = ReturnEvidence(
                         return_request_id=ret_request.id,
+                        warehouse_return_case_id=primary_case_id,
                         file_url=file_url,
                         file_name=ev.get("file_name") or os.path.basename(file_url),
                         mime_type=ev.get("mime_type") or ev.get("file_type") or "image/jpeg",
@@ -231,11 +237,11 @@ class ReturnService:
         cls._add_status_history(
             db=db,
             return_request=ret_request,
-            from_status="INITIAL",
-            to_status=ReturnStatus.REQUESTED.value,
+            from_status=None,
+            to_status=ret_request.status,
             actor=current_user,
             actor_role="CUSTOMER" if (current_user and current_user.role == "CUSTOMER") else "GUEST",
-            note=f"Khách hàng gửi yêu cầu {request_type}: {reason_text}",
+            note=f"Khách hàng gửi yêu cầu {request_type}: {reason_text}. Đã phân bổ {len(created_cases)} ca hoàn về kho xuất hàng.",
         )
 
         # 8.1. Lưu cảnh báo nội bộ vào database (AdminAlert) để Admin nhận thông báo trên bảng điều khiển
@@ -252,6 +258,7 @@ class ReturnService:
         try:
             email_admin = EmailOutbox(
                 recipient_email=settings.smtp_user or "admin@pharmatrust.vn",
+                recipient_name="Dược sĩ Quản trị H4CARE",
                 subject=f"[H4CARE] Thông báo yêu cầu đổi/trả mới cần duyệt: {ret_request.return_code} (Đơn {order.order_code})",
                 body_html=(
                     f"<h3>Thông báo: Khách hàng vừa gửi yêu cầu đổi/trả thuốc</h3>"
@@ -268,7 +275,7 @@ class ReturnService:
                 ),
                 body_text=f"Yêu cầu đổi trả mới: {ret_request.return_code} cho đơn {order.order_code}",
                 status="PENDING",
-                reference_type="RETURN_REQUEST",
+                reference_type="RETURN_REQUEST_ALERT",
                 reference_id=ret_request.return_code,
             )
             db.add(email_admin)

@@ -103,6 +103,7 @@ class AutoCrawlScheduler:
         self.long_chau_enabled = settings.long_chau_crawl_enabled
         self.publish_mode = settings.default_publish_mode
         self.next_run_at: dict[str, datetime] = {}
+        self._last_evidence_expire_check: datetime | None = None
 
     def start(self):
         if self.is_running:
@@ -134,11 +135,28 @@ class AutoCrawlScheduler:
             try:
                 if self.auto_enabled:
                     self._check_and_trigger_sources()
+                self._check_and_expire_evidence()
             except Exception as exc:
                 logger.error(f"Lỗi vòng lặp Scheduler: {exc}")
 
             # Chờ 30 giây trước khi kiểm tra lại
             self._stop_event.wait(timeout=30)
+
+    def _check_and_expire_evidence(self):
+        """
+        Quét các yêu cầu bổ sung hình ảnh đổi trả đã quá hạn 3 ngày (chu kỳ 15 phút).
+        """
+        now = utcnow()
+        if self._last_evidence_expire_check and (now - self._last_evidence_expire_check).total_seconds() < 900:
+            return
+
+        self._last_evidence_expire_check = now
+        try:
+            with SessionLocal() as db:
+                from app.services.warehouse_return_service import WarehouseReturnService
+                WarehouseReturnService.check_and_expire_evidence_requests(db)
+        except Exception as e:
+            logger.error(f"Lỗi khi quét quá hạn bằng chứng đổi trả: {e}")
 
     def _handle_server_restart(self, db: Session):
         """

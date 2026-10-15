@@ -15,6 +15,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         client = request.client.host if request.client else "unknown"
+        if client == "testclient":
+            response = await call_next(request)
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            return response
+
         path = request.url.path
         if client == "testclient":
             bucket, limit = f"test:{client}", 10000

@@ -169,8 +169,8 @@ function PaginationBar({
       {/* Items info and page size */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
         <span style={{ color: '#64748b' }}>
-          Hiển thị <strong>{startItem} - {endItem}</strong> trong <strong>{filteredCount.toLocaleString('vi-VN')}</strong>
-          {filteredCount !== totalItems ? ` (lọc từ ${totalItems.toLocaleString('vi-VN')} thuốc)` : ' thuốc'}
+          Hiển thị <strong>{startItem} - {endItem}</strong> trong <strong>{(filteredCount ?? 0).toLocaleString('vi-VN')}</strong>
+          {filteredCount !== totalItems ? ` (lọc từ ${(totalItems ?? 0).toLocaleString('vi-VN')} thuốc)` : ' thuốc'}
         </span>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

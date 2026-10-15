@@ -183,7 +183,7 @@ class AdministrativeDataService:
         c = cls._communes_map.get(code_str)
         if c:
             return c
-        # Legacy Compatibility Layer: Xử lý mã 5-6 chữ số trước sắp xếp 2025
+        # Legacy Compatibility Layer: Xử lý mã 5 và 6 chữ số trước sắp xếp 2025
         if code_str.isdigit() and len(code_str) in (5, 6):
             if code_str == "791161":
                 c_bn = cls._communes_map.get("791492")
@@ -200,7 +200,7 @@ class AdministrativeDataService:
                     "legacyDistrictName": "Quận 1",
                     "aliases": ["Bến Nghé", "ben nghe", "Quận 1", "791161"],
                 }
-            p_code = "01" if code_str.startswith("0") else ("79" if code_str.startswith("26") or code_str.startswith("27") or code_str.startswith("79") else "")
+            p_code = "01" if (code_str.startswith("01") or (len(code_str) == 5 and code_str.startswith("0"))) else ("79" if (code_str.startswith("79") or code_str.startswith("26") or code_str.startswith("27")) else "")
             if p_code:
                 return {
                     "code": code_str,

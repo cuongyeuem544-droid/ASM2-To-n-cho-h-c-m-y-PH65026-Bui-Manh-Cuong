@@ -4,7 +4,7 @@ export interface AuthUser {
   phone: string;
   email?: string;
   avatarUrl?: string;
-  role: "ADMIN" | "DATA_REVIEWER" | "CUSTOMER" | "Hội viên" | "Hội viên Thân thiết" | "Hội viên VIP" | string;
+  role: "ADMIN" | "WAREHOUSE_MANAGER" | "WAREHOUSE_STAFF" | "CUSTOMER" | "Hội viên" | "Hội viên Thân thiết" | "Hội viên VIP" | string;
   isAdmin?: boolean;
   points?: number;
   createdAt?: string;

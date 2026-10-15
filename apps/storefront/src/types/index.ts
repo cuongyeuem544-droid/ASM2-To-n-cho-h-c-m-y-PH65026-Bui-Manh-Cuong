@@ -3,6 +3,8 @@ export interface SubCategory {
   name: string;
   slug: string;
   isPopular?: boolean;
+  badge?: string;
+  productCount?: number;
 }
 
 export interface Category {
@@ -16,6 +18,7 @@ export interface Category {
   featuredImage?: string;
   featuredTitle?: string;
   featuredSubtitle?: string;
+  productCount?: number;
 }
 
 export interface ProductSkuItem {
