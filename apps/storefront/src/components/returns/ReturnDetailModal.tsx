@@ -120,9 +120,11 @@ export function ReturnDetailModal({
 
   const fetchDetail = () => {
     setLoading(true);
-    const token = typeof window !== "undefined" ? localStorage.getItem("pharmatrust_token") : null;
+    const token = typeof window !== "undefined" ? localStorage.getItem("pharmatrust_token") || localStorage.getItem("h4care_auth_token") : null;
+    const guestToken = typeof window !== "undefined" ? localStorage.getItem("h4care_latest_order_token") : null;
     const headers: Record<string, string> = {};
     if (token) headers["Authorization"] = `Bearer ${token}`;
+    if (guestToken) headers["X-Order-Token"] = guestToken;
 
     const query = phoneVerify ? `?phone_verify=${encodeURIComponent(phoneVerify)}` : "";
     fetch(`/api/v1/returns/${encodeURIComponent(returnCode)}${query}`, { headers })
@@ -143,9 +145,11 @@ export function ReturnDetailModal({
     e.preventDefault();
     if (!trackingCode.trim()) return;
 
-    const token = typeof window !== "undefined" ? localStorage.getItem("pharmatrust_token") : null;
+    const token = typeof window !== "undefined" ? localStorage.getItem("pharmatrust_token") || localStorage.getItem("h4care_auth_token") : null;
+    const guestToken = typeof window !== "undefined" ? localStorage.getItem("h4care_latest_order_token") : null;
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (token) headers["Authorization"] = `Bearer ${token}`;
+    if (guestToken) headers["X-Order-Token"] = guestToken;
 
     setSubmittingShip(true);
     try {
@@ -171,9 +175,11 @@ export function ReturnDetailModal({
   const handleCancelRequest = async () => {
     if (!confirm("Bạn có chắc chắn muốn hủy yêu cầu đổi trả này?")) return;
 
-    const token = typeof window !== "undefined" ? localStorage.getItem("pharmatrust_token") : null;
+    const token = typeof window !== "undefined" ? localStorage.getItem("pharmatrust_token") || localStorage.getItem("h4care_auth_token") : null;
+    const guestToken = typeof window !== "undefined" ? localStorage.getItem("h4care_latest_order_token") : null;
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (token) headers["Authorization"] = `Bearer ${token}`;
+    if (guestToken) headers["X-Order-Token"] = guestToken;
 
     setCancelling(true);
     try {

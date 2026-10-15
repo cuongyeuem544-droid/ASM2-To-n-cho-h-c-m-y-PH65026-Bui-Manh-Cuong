@@ -220,7 +220,7 @@ class TestOrdersSystem(unittest.TestCase):
         # 4. Truy cập với token bảo mật hợp lệ (guest order token) -> 200 OK
         from app.core.security import create_guest_order_token
         valid_token = create_guest_order_token(order.order_code, order.customer_phone)
-        resp = self.client.get(f"/api/v1/store/orders/{order.order_code}?token={valid_token}")
+        resp = self.client.get(f"/api/v1/store/orders/{order.order_code}", headers={"X-Order-Token": valid_token})
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["order_code"], "PT-260927-9999")

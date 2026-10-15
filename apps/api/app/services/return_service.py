@@ -530,6 +530,20 @@ class ReturnService:
         if not ret:
             raise HTTPException(status_code=404, detail=f"Không tìm thấy yêu cầu '{return_code}'.")
 
+        # 1. Kiểm tra trạng thái hợp lệ trước khi nhận hàng (ngăn thao tác lặp / sai quy trình)
+        valid_receipt_statuses = [
+            ReturnStatus.REQUESTED.value,
+            ReturnStatus.REVIEWING.value,
+            ReturnStatus.APPROVED.value,
+            ReturnStatus.WAITING_CUSTOMER_RETURN.value,
+            ReturnStatus.RETURN_IN_TRANSIT.value,
+        ]
+        if ret.status not in valid_receipt_statuses:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Chỉ có thể tiếp nhận kiện hàng khi chưa hoàn tất tiếp nhận/kiểm định (Hiện tại: {ret.status}).",
+            )
+
         old_status = ret.status
         ret.status = ReturnStatus.RECEIVED.value
         ret.received_by = warehouse_user.id
@@ -563,6 +577,7 @@ class ReturnService:
         - Đánh giá tình trạng bao bì, seal, hạn sử dụng của từng sản phẩm.
         - Phân luồng tồn kho:
             + SELLABLE_STOCK: Nhập lại kho bán được (tăng quantity_available, log RETURN_RESTOCK).
+              BẮT BUỘC ĐIỀU KIỆN GSP: Chỉ áp dụng khi condition là GOOD_CONDITION hoặc SEALED.
             + QUARANTINE: Đưa vào khu vực biệt trữ cách ly (log RETURN_QUARANTINE).
             + NON_SELLABLE_DISPOSE: Hủy bỏ / tiêu hủy dược phẩm không đạt (log DISPOSAL).
         - Chuyển trạng thái sang INSPECTION_COMPLETED, sau đó tự động sang REFUND_PENDING hoặc EXCHANGE_PENDING.
@@ -571,10 +586,11 @@ class ReturnService:
         if not ret:
             raise HTTPException(status_code=404, detail=f"Không tìm thấy yêu cầu '{return_code}'.")
 
-        if ret.status not in [ReturnStatus.RECEIVED.value, ReturnStatus.INSPECTING.value, ReturnStatus.RETURN_IN_TRANSIT.value]:
+        # 1. Kiểm tra trạng thái hợp lệ trước khi kiểm định (chống thao tác lặp gây nhân đôi tồn kho)
+        if ret.status not in [ReturnStatus.RECEIVED.value, ReturnStatus.INSPECTING.value]:
             raise HTTPException(
                 status_code=400,
-                detail=f"Yêu cầu phải ở trạng thái Đã nhận hàng/Đang kiểm định để hoàn tất thẩm định (Hiện tại: {ret.status}).",
+                detail=f"Yêu cầu phải ở trạng thái Đã nhận hàng (RECEIVED) hoặc Đang kiểm định (INSPECTING) để thẩm định chất lượng (Hiện tại: {ret.status}).",
             )
 
         ret_items_map = {item.id: item for item in ret.items}
@@ -602,6 +618,27 @@ class ReturnService:
                 else (accepted_qty if destination == RestockDestination.SELLABLE_STOCK.value else 0)
             )
             insp_note = insp.get("notes")
+
+            # 2. Kiểm tra điều kiện chuyên môn GSP Dược
+            if destination == RestockDestination.SELLABLE_STOCK.value:
+                gsp_compliant_conditions = [ItemCondition.GOOD_CONDITION.value, ItemCondition.SEALED.value]
+                if condition not in gsp_compliant_conditions:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Sản phẩm '{item.product_name}' có tình trạng '{condition}', không đáp ứng tiêu chuẩn chất lượng GSP để nhập lại kho bán. Vui lòng phân luồng sang Biệt trữ (QUARANTINE) hoặc Tiêu hủy (NON_SELLABLE_DISPOSE).",
+                    )
+
+            if accepted_qty + rejected_qty > item.requested_quantity:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Tổng số lượng chấp nhận ({accepted_qty}) và loại bỏ ({rejected_qty}) vượt quá số lượng yêu cầu đổi/trả ({item.requested_quantity}) của sản phẩm '{item.product_name}'.",
+                )
+
+            if destination == RestockDestination.SELLABLE_STOCK.value and restock_qty > accepted_qty:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Số lượng nhập lại kho bán ({restock_qty}) không được lớn hơn số lượng chấp nhận ({accepted_qty}).",
+                )
 
             item.inspected_condition = condition
             item.restock_destination = destination

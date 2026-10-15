@@ -93,7 +93,6 @@ class CancelReturnRequest(BaseModel):
 @router.get("/eligibility/{order_code}")
 def check_order_eligibility(
     order_code: str,
-    token: Optional[str] = Query(None, description="Token bảo mật đơn hàng của khách vãng lai"),
     x_order_token: Optional[str] = Header(None, alias="X-Order-Token"),
     authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -109,7 +108,7 @@ def check_order_eligibility(
 
     # Xác thực quyền kiểm tra điều kiện đổi/trả
     is_staff = current_user and getattr(current_user, "role", "") in ["ADMIN", "PHARMACIST", "DATA_REVIEWER"]
-    effective_token = token or x_order_token
+    effective_token = x_order_token
     if not effective_token and authorization and authorization.startswith("Bearer "):
         bearer_val = authorization[7:].strip()
         if verify_guest_order_token(bearer_val, clean_code):
@@ -183,7 +182,6 @@ def check_order_eligibility(
 @router.post("")
 def create_return_request(
     payload: ReturnRequestCreate,
-    order_token: Optional[str] = Query(None),
     x_order_token: Optional[str] = Header(None, alias="X-Order-Token"),
     authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -198,7 +196,7 @@ def create_return_request(
         raise HTTPException(status_code=404, detail=f"Không tìm thấy đơn hàng '{clean_code}'.")
 
     is_staff = current_user and getattr(current_user, "role", "") in ["ADMIN", "PHARMACIST", "DATA_REVIEWER"]
-    effective_token = payload.order_token or order_token or x_order_token
+    effective_token = payload.order_token or x_order_token
     if not effective_token and authorization and authorization.startswith("Bearer "):
         bearer_val = authorization[7:].strip()
         if verify_guest_order_token(bearer_val, clean_code):
@@ -316,7 +314,6 @@ def get_my_return_requests(
 def get_return_detail(
     return_code: str,
     phone_verify: Optional[str] = None,
-    token: Optional[str] = Query(None, description="Token bảo mật đơn hàng của khách vãng lai"),
     x_order_token: Optional[str] = Header(None, alias="X-Order-Token"),
     authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -327,7 +324,7 @@ def get_return_detail(
     Yêu cầu bảo mật:
     - Nhân viên (ADMIN, PHARMACIST, DATA_REVIEWER): Toàn quyền tra cứu để xử lý nghiệp vụ.
     - Khách hàng đã đăng nhập (CUSTOMER): Chỉ được xem yêu cầu thuộc tài khoản của chính mình.
-    - Khách vãng lai: Bắt buộc cung cấp token đơn hàng hợp lệ (order_token/guest_access_token).
+    - Khách vãng lai: Bắt buộc cung cấp token đơn hàng hợp lệ (order_token/guest_access_token) qua Header X-Order-Token.
       Số điện thoại không phải là bằng chứng duy nhất để cấp quyền xem thông tin chi tiết.
     """
     ret = db.scalar(select(ReturnRequest).where(ReturnRequest.return_code == return_code))
@@ -340,7 +337,7 @@ def get_return_detail(
     is_staff = current_user and getattr(current_user, "role", "") in ["ADMIN", "PHARMACIST", "DATA_REVIEWER"]
     clean_order_phone = (ret.customer_phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
 
-    effective_token = token or x_order_token
+    effective_token = x_order_token
     if not effective_token and authorization and authorization.startswith("Bearer "):
         bearer_val = authorization[7:].strip()
         if verify_guest_order_token(bearer_val, order_code):
@@ -612,17 +609,55 @@ def verify_magic_bytes(data: bytes, ext: str) -> bool:
 @router.post("/upload-evidence")
 async def upload_return_evidence(
     file: UploadFile = File(...),
-    return_code: Optional[str] = Form(None),
+    return_code: str = Form(..., description="Mã yêu cầu đổi/trả bắt buộc"),
     description: Optional[str] = Form(None),
     order_token: Optional[str] = Form(None),
     x_order_token: Optional[str] = Header(None, alias="X-Order-Token"),
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_current_user),
 ):
     """
     Tải lên ảnh hoặc tài liệu bằng chứng hàng lỗi/hỏng (Lưu trữ cục bộ an toàn trong thư mục storage/returns).
-    Có kiểm tra quyền sở hữu, dung lượng tối đa 5MB, chặn file nguy hiểm và xác minh magic bytes.
+    Bắt buộc phải gắn với một return_code hợp lệ và có quyền sở hữu (ngăn chặn file mồ côi).
+    Kiểm tra dung lượng tối đa 5MB, chặn file nguy hiểm và xác minh magic bytes.
     """
+    # 0. Bắt buộc có mã return_code hợp lệ trước khi tạo file
+    clean_return_code = (return_code or "").strip()
+    if not clean_return_code:
+        raise HTTPException(
+            status_code=400,
+            detail="Mã yêu cầu đổi/trả (return_code) là bắt buộc. Không được phép tải lên tài liệu bằng chứng mồ côi.",
+        )
+
+    ret = db.scalar(select(ReturnRequest).where(ReturnRequest.return_code == clean_return_code))
+    if not ret:
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy yêu cầu đổi/trả '{clean_return_code}'.")
+
+    # Kiểm tra quyền sở hữu (Anti-IDOR)
+    is_staff = current_user and getattr(current_user, "role", "") in ["ADMIN", "PHARMACIST", "DATA_REVIEWER"]
+    is_owner = False
+    if is_staff:
+        is_owner = True
+    elif current_user and ret.user_id and current_user.id == ret.user_id:
+        is_owner = True
+
+    effective_token = x_order_token or order_token
+    if not effective_token and authorization and authorization.startswith("Bearer "):
+        bearer_val = authorization[7:].strip()
+        if ret.order and verify_guest_order_token(bearer_val, ret.order.order_code):
+            effective_token = bearer_val
+
+    if not is_owner and effective_token and ret.order:
+        if verify_guest_order_token(effective_token, ret.order.order_code):
+            is_owner = True
+
+    if not is_owner:
+        raise HTTPException(
+            status_code=403,
+            detail="Bạn không có quyền tải lên bằng chứng cho yêu cầu đổi/trả này. Vui lòng cung cấp token đơn hàng hợp lệ hoặc đăng nhập tài khoản sở hữu.",
+        )
+
     filename = file.filename or ""
     ext = os.path.splitext(filename)[1].lower()
 
@@ -660,37 +695,7 @@ async def upload_return_evidence(
             detail=f"Nội dung tệp không khớp với định dạng khai báo ({ext}). Chữ ký tệp không hợp lệ hoặc bị giả mạo.",
         )
 
-    # 5. Kiểm tra quyền sở hữu đối với return_code (nếu có)
-    ret = None
-    if return_code:
-        ret = db.scalar(select(ReturnRequest).where(ReturnRequest.return_code == return_code))
-        if not ret:
-            raise HTTPException(status_code=404, detail="Không tìm thấy yêu cầu đổi/trả.")
-
-        is_staff = current_user and getattr(current_user, "role", "") in ["ADMIN", "PHARMACIST", "DATA_REVIEWER"]
-        is_owner = False
-        if is_staff:
-            is_owner = True
-        elif current_user and ret.user_id and current_user.id == ret.user_id:
-            is_owner = True
-        elif current_user and current_user.phone:
-            clean_u_phone = (current_user.phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
-            clean_r_phone = (ret.customer_phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
-            if clean_u_phone and clean_u_phone == clean_r_phone:
-                is_owner = True
-
-        effective_token = order_token or x_order_token
-        if not is_owner and effective_token and ret.order:
-            if verify_guest_order_token(effective_token, ret.order.order_code):
-                is_owner = True
-
-        if not is_owner:
-            raise HTTPException(
-                status_code=403,
-                detail="Bạn không có quyền tải lên bằng chứng cho yêu cầu đổi/trả này.",
-            )
-
-    # 6. Lưu file an toàn
+    # 5. Lưu file an toàn
     upload_dir = Path(settings.storage_root) / "returns"
     upload_dir.mkdir(parents=True, exist_ok=True)
 
@@ -706,19 +711,19 @@ async def upload_return_evidence(
     file_size = len(content)
     file_url = f"/api/v1/returns/evidence/{unique_filename}"
 
-    if ret:
-        evidence = ReturnEvidence(
-            return_request_id=ret.id,
-            storage_key=f"returns/{unique_filename}",
-            file_url=file_url,
-            file_name=filename or unique_filename,
-            mime_type=file.content_type or ("image/jpeg" if ext in [".jpg", ".jpeg"] else "application/pdf"),
-            file_size=file_size,
-            file_category="DAMAGE_PHOTO",
-            uploaded_by=current_user.id if current_user else None,
-        )
-        db.add(evidence)
-        db.commit()
+    evidence = ReturnEvidence(
+        return_request_id=ret.id,
+        storage_key=f"returns/{unique_filename}",
+        file_url=file_url,
+        file_name=filename or unique_filename,
+        mime_type=file.content_type or ("image/jpeg" if ext in [".jpg", ".jpeg"] else "application/pdf"),
+        file_size=file_size,
+        file_category="DAMAGE_PHOTO",
+        description=description,
+        uploaded_by=current_user.id if current_user else None,
+    )
+    db.add(evidence)
+    db.commit()
 
     return {
         "success": True,
@@ -731,15 +736,15 @@ async def upload_return_evidence(
 @router.get("/evidence/{filename}")
 def get_evidence_file(
     filename: str,
-    phone: Optional[str] = Query(None),
-    order_token: Optional[str] = Query(None),
     x_order_token: Optional[str] = Header(None, alias="X-Order-Token"),
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_current_user),
 ):
     """
     Truy xuất tệp bằng chứng hình ảnh hàng lỗi có kiểm soát quyền truy cập (Access Control).
     Chỉ cho phép Admin, Dược sĩ hoặc Khách hàng sở hữu yêu cầu đổi/trả.
+    Yêu cầu truyền token qua Header X-Order-Token hoặc Authorization: Bearer, không dùng query string.
     """
     # Ngăn chặn Directory Traversal
     safe_filename = os.path.basename(filename)
@@ -766,13 +771,13 @@ def get_evidence_file(
     is_authorized = False
     if current_user and ret.user_id and current_user.id == ret.user_id:
         is_authorized = True
-    elif current_user and current_user.phone:
-        clean_u_phone = (current_user.phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
-        clean_r_phone = (ret.customer_phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
-        if clean_u_phone and clean_u_phone == clean_r_phone:
-            is_authorized = True
 
-    effective_token = order_token or x_order_token
+    effective_token = x_order_token
+    if not effective_token and authorization and authorization.startswith("Bearer "):
+        bearer_val = authorization[7:].strip()
+        if ret.order and verify_guest_order_token(bearer_val, ret.order.order_code):
+            effective_token = bearer_val
+
     if not is_authorized and effective_token and ret.order:
         if verify_guest_order_token(effective_token, ret.order.order_code):
             is_authorized = True
@@ -780,7 +785,7 @@ def get_evidence_file(
     if not is_authorized:
         raise HTTPException(
             status_code=403,
-            detail="Bạn không có quyền truy cập tệp bằng chứng này. Vui lòng cung cấp mã token đơn hàng hợp lệ hoặc đăng nhập tài khoản sở hữu.",
+            detail="Bạn không có quyền truy cập tệp bằng chứng này. Vui lòng cung cấp mã token đơn hàng hợp lệ qua Header X-Order-Token hoặc đăng nhập tài khoản sở hữu.",
         )
 
     return FileResponse(file_path)

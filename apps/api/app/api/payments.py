@@ -423,7 +423,6 @@ def simulate_exchange_payment(
 def get_order_payment_status(
     order_code: str,
     phone_verify: Optional[str] = Query(None, description="Số điện thoại đặt hàng để xác thực"),
-    token: Optional[str] = Query(None, description="Token bảo mật đơn hàng của khách vãng lai"),
     x_order_token: Optional[str] = Header(None, alias="X-Order-Token"),
     authorization: Optional[str] = Header(None),
     current_user: Optional[User] = Depends(get_optional_current_user),
@@ -435,7 +434,7 @@ def get_order_payment_status(
     """
     clean_code = order_code.strip()
 
-    effective_token = token or x_order_token
+    effective_token = x_order_token
     if not effective_token and authorization and authorization.startswith("Bearer "):
         bearer_val = authorization[7:].strip()
         if verify_guest_order_token(bearer_val, clean_code):

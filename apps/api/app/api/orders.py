@@ -321,7 +321,17 @@ def checkout_order(
             elif x_order_token and verify_guest_order_token(x_order_token, existing_order.order_code):
                 has_verified_token = True
 
-            replay_res = {
+            if not has_verified_token:
+                # Ngăn rò rỉ dữ liệu nhạy cảm (địa chỉ, mặt hàng, lô kho) khi người gọi chỉ biết idempotency key và SĐT
+                return {
+                    "status": "SUCCESS",
+                    "message": f"Đơn hàng tương ứng với idempotency key này đã được tạo thành công trước đó (Mã đơn: {existing_order.order_code}). Vui lòng cung cấp mã token đơn hàng hợp lệ hoặc đăng nhập để xem thông tin chi tiết.",
+                    "order_code": existing_order.order_code,
+                    "is_idempotent_replay": True,
+                }
+
+            token_val = x_order_token or create_guest_order_token(existing_order.order_code, existing_order.customer_phone)
+            return {
                 "status": "SUCCESS",
                 "message": f"Đơn hàng của bạn đã được ghi nhận thành công trước đó (Mã đơn: {existing_order.order_code}).",
                 "order_code": existing_order.order_code,
@@ -330,13 +340,9 @@ def checkout_order(
                 "created_at": existing_order.created_at.isoformat() if existing_order.created_at else None,
                 "fulfillments": _serialize_fulfillments(db, existing_order.id),
                 "is_idempotent_replay": True,
+                "guest_access_token": token_val,
+                "order_token": token_val,
             }
-            if has_verified_token:
-                token_val = x_order_token or create_guest_order_token(existing_order.order_code, existing_order.customer_phone)
-                replay_res["guest_access_token"] = token_val
-                replay_res["order_token"] = token_val
-
-            return replay_res
 
     name = payload.customer_name.strip()
     phone = payload.customer_phone.strip()
@@ -673,7 +679,6 @@ def checkout_order(
 @store_order_router.get("/{order_code}")
 def get_order_by_code(
     order_code: str,
-    token: Optional[str] = Query(None, description="Token bảo mật đơn hàng của khách vãng lai"),
     phone: Optional[str] = Query(None, description="Số điện thoại đặt hàng"),
     x_order_token: Optional[str] = Header(None, alias="X-Order-Token"),
     authorization: Optional[str] = Header(None),
@@ -685,7 +690,7 @@ def get_order_by_code(
     Yêu cầu bảo mật:
     - Nhân viên (ADMIN, PHARMACIST, DATA_REVIEWER): Có quyền tra cứu để hỗ trợ khách.
     - Khách hàng đã đăng nhập (CUSTOMER): Chỉ xem đơn thuộc tài khoản của chính mình (order.user_id == current_user.id).
-    - Khách vãng lai: Bắt buộc cung cấp token đơn hàng ký điện tử hợp lệ (order_token/guest_access_token).
+    - Khách vãng lai: Bắt buộc cung cấp token đơn hàng ký điện tử hợp lệ (order_token/guest_access_token) qua Header X-Order-Token.
       Số điện thoại không được dùng làm bằng chứng duy nhất để cấp quyền xem thông tin chi tiết.
     """
     clean_code = order_code.strip()
@@ -701,7 +706,7 @@ def get_order_by_code(
     is_staff = current_user and getattr(current_user, "role", "") in ["ADMIN", "PHARMACIST", "DATA_REVIEWER"]
     clean_order_phone = (order.customer_phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
 
-    effective_token = token or x_order_token
+    effective_token = x_order_token
     if not effective_token and authorization and authorization.startswith("Bearer "):
         bearer_val = authorization[7:].strip()
         if verify_guest_order_token(bearer_val, order.order_code):
@@ -1116,19 +1121,11 @@ def update_order_status(
         raise HTTPException(status_code=400, detail=f"Trạng thái không hợp lệ. Phải là một trong: {valid_statuses}")
 
     order.order_status = payload.order_status.upper()
-    if payload.payment_status:
-        req_pay = payload.payment_status.upper()
-        if req_pay == "PAID":
-            raise HTTPException(
-                status_code=400,
-                detail="Không được phép thay đổi trực tiếp payment_status sang PAID thông qua API cập nhật đơn thông thường. Chỉ cập nhật khi có bằng chứng thanh toán hợp lệ từ cổng thanh toán hoặc quy trình đối soát tài chính có kiểm toán (PaymentReconciliationService).",
-            )
-        if req_pay not in {"PENDING", "FAILED"}:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Trạng thái thanh toán '{req_pay}' không hợp lệ hoặc không được phép cập nhật qua endpoint này.",
-            )
-        order.payment_status = req_pay
+    if payload.payment_status and payload.payment_status.upper() != (order.payment_status or "").upper():
+        raise HTTPException(
+            status_code=400,
+            detail="Không được phép thay đổi trực tiếp payment_status sang PAID (hoặc bất kỳ trạng thái nào kể cả PAID, PENDING, FAILED) thông qua API cập nhật đơn thông thường. Chỉ cập nhật trạng thái thanh toán khi có webhook hợp lệ từ cổng thanh toán hoặc quy trình đối soát tài chính chuyên biệt có kiểm toán (PaymentReconciliationService).",
+        )
 
     db.commit()
     return {

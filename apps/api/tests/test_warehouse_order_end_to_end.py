@@ -1318,7 +1318,7 @@ class TestWarehouseOrderEndToEnd(unittest.TestCase):
         self.assertEqual(res.status_code, 403)
 
         token = create_guest_order_token(order.order_code, order.customer_phone)
-        res_ok = self.client.get(f"/api/v1/store/orders/{order.order_code}?token={token}")
+        res_ok = self.client.get(f"/api/v1/store/orders/{order.order_code}", headers={"X-Order-Token": token})
         self.assertEqual(res_ok.status_code, 200)
 
     def test_43_stock_movement_audit_balance_consistency(self):

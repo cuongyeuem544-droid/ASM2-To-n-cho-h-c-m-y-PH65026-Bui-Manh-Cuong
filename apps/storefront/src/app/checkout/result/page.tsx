@@ -71,7 +71,7 @@ function CheckoutResultContent() {
       try {
         const phone = searchParams.get("phone") || (typeof window !== "undefined" ? localStorage.getItem("h4care_checkout_phone") || "" : "");
         const token = typeof window !== "undefined" ? localStorage.getItem("h4care_auth_token") || localStorage.getItem("pharmatrust_token") : null;
-        const orderToken = searchParams.get("token") || (typeof window !== "undefined" ? localStorage.getItem(`h4care_order_token_${cleanOrderCode}`) || localStorage.getItem("h4care_latest_order_token") || "" : "");
+        const orderToken = (typeof window !== "undefined" ? localStorage.getItem(`h4care_order_token_${cleanOrderCode}`) || localStorage.getItem("h4care_latest_order_token") || "" : "");
 
         const headers: Record<string, string> = {};
         if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -79,7 +79,6 @@ function CheckoutResultContent() {
 
         const queryParts = [];
         if (phone) queryParts.push(`phone_verify=${encodeURIComponent(phone)}`);
-        if (orderToken) queryParts.push(`token=${encodeURIComponent(orderToken)}`);
         const queryParam = queryParts.length ? `?${queryParts.join("&")}` : "";
 
         const res = await fetch(`/api/v1/payments/orders/${cleanOrderCode}/status${queryParam}`, { headers });
@@ -107,7 +106,7 @@ function CheckoutResultContent() {
     try {
       const phone = searchParams.get("phone") || (typeof window !== "undefined" ? localStorage.getItem("h4care_checkout_phone") || "" : "");
       const token = typeof window !== "undefined" ? localStorage.getItem("h4care_auth_token") || localStorage.getItem("pharmatrust_token") : null;
-      const orderToken = searchParams.get("token") || (typeof window !== "undefined" ? localStorage.getItem(`h4care_order_token_${cleanOrderCode}`) || localStorage.getItem("h4care_latest_order_token") || "" : "");
+      const orderToken = (typeof window !== "undefined" ? localStorage.getItem(`h4care_order_token_${cleanOrderCode}`) || localStorage.getItem("h4care_latest_order_token") || "" : "");
 
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -128,7 +127,6 @@ function CheckoutResultContent() {
         // Refresh status
         const queryParts = [];
         if (phone) queryParts.push(`phone_verify=${encodeURIComponent(phone)}`);
-        if (orderToken) queryParts.push(`token=${encodeURIComponent(orderToken)}`);
         const queryParam = queryParts.length ? `?${queryParts.join("&")}` : "";
         const statusRes = await fetch(`/api/v1/payments/orders/${cleanOrderCode}/status${queryParam}`, { headers });
         if (statusRes.ok) {

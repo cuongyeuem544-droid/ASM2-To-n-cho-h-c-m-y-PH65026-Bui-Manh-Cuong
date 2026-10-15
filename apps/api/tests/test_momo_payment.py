@@ -367,7 +367,10 @@ class TestMomoPaymentSuite(unittest.TestCase):
         # Có token bảo mật hợp lệ -> 200
         from app.core.security import create_guest_order_token
         valid_token = create_guest_order_token(self.order_code, self.order.customer_phone)
-        resp = self.client.get(f"/api/v1/payments/orders/{self.order_code}/status?token={valid_token}")
+        resp = self.client.get(
+            f"/api/v1/payments/orders/{self.order_code}/status",
+            headers={"X-Order-Token": valid_token},
+        )
         self.assertEqual(resp.status_code, 200, resp.text)
         data = resp.json()
 

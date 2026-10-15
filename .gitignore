@@ -19,6 +19,8 @@ storage/raw/*
 !storage/raw/.gitkeep
 storage/uploads/*
 !storage/uploads/.gitkeep
+storage/returns/*
+!storage/returns/.gitkeep
 backups/
 *.log
 .DS_Store

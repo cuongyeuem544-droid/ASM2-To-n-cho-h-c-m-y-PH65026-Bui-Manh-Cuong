@@ -73,14 +73,17 @@ export function ReturnWizardModal({
   const [reasonCode, setReasonCode] = useState<string>("WRONG_ITEM");
   const [customerNote, setCustomerNote] = useState<string>("");
   const [phoneVerify, setPhoneVerify] = useState<string>(customerPhone || "");
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploadedImages, setUploadedImages] = useState<string[]>([]);
   const [uploadingImage, setUploadingImage] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState<boolean>(false);
 
   useEffect(() => {
-    const token = typeof window !== "undefined" ? localStorage.getItem("pharmatrust_token") : null;
+    const token = typeof window !== "undefined" ? localStorage.getItem("pharmatrust_token") || localStorage.getItem("h4care_auth_token") : null;
+    const guestToken = typeof window !== "undefined" ? localStorage.getItem(`h4care_order_token_${orderCode}`) || localStorage.getItem("h4care_latest_order_token") : null;
     const headers: Record<string, string> = {};
     if (token) headers["Authorization"] = `Bearer ${token}`;
+    if (guestToken) headers["X-Order-Token"] = guestToken;
 
     setLoading(true);
     fetch(`/api/v1/returns/eligibility/${encodeURIComponent(orderCode)}`, { headers })
@@ -106,35 +109,16 @@ export function ReturnWizardModal({
       .finally(() => setLoading(false));
   }, [orderCode]);
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
     const file = e.target.files[0];
-    setUploadingImage(true);
-
-    const formData = new FormData();
-    formData.append("file", file);
-
-    const token = typeof window !== "undefined" ? localStorage.getItem("pharmatrust_token") : null;
-    const headers: Record<string, string> = {};
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-
-    try {
-      const res = await fetch("/api/v1/returns/upload-evidence", {
-        method: "POST",
-        headers,
-        body: formData,
-      });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || "Tải ảnh thất bại.");
-      }
-      const data = await res.json();
-      setUploadedImages((prev) => [...prev, data.file_url]);
-    } catch (err: any) {
-      alert(err.message || "Lỗi tải ảnh");
-    } finally {
-      setUploadingImage(false);
+    if (file.size > 5 * 1024 * 1024) {
+      alert("Dung lượng ảnh vượt quá 5MB. Vui lòng chọn ảnh nhỏ hơn.");
+      return;
     }
+    const previewUrl = URL.createObjectURL(file);
+    setSelectedFiles((prev) => [...prev, file]);
+    setUploadedImages((prev) => [...prev, previewUrl]);
   };
 
   const calculateEstimate = () => {
@@ -175,9 +159,11 @@ export function ReturnWizardModal({
 
     const selectedReasonObj = REASONS.find((r) => r.code === reasonCode);
 
-    const token = typeof window !== "undefined" ? localStorage.getItem("pharmatrust_token") : null;
+    const token = typeof window !== "undefined" ? localStorage.getItem("pharmatrust_token") || localStorage.getItem("h4care_auth_token") : null;
+    const guestToken = typeof window !== "undefined" ? localStorage.getItem(`h4care_order_token_${orderCode}`) || localStorage.getItem("h4care_latest_order_token") : null;
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (token) headers["Authorization"] = `Bearer ${token}`;
+    if (guestToken) headers["X-Order-Token"] = guestToken;
 
     setSubmitting(true);
     try {
@@ -192,7 +178,6 @@ export function ReturnWizardModal({
           customer_note: customerNote,
           return_method: "CUSTOMER_SHIP",
           items: itemsPayload,
-          evidence_urls: uploadedImages,
           customer_phone_verify: phoneVerify.trim(),
         }),
       });
@@ -200,6 +185,24 @@ export function ReturnWizardModal({
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(data.detail || "Không thể gửi yêu cầu.");
+      }
+
+      // Upload selected evidence files with the generated return_code
+      if (selectedFiles.length > 0 && data.return_code) {
+        for (const file of selectedFiles) {
+          const formData = new FormData();
+          formData.append("file", file);
+          formData.append("return_code", data.return_code);
+          const uploadHeaders: Record<string, string> = {};
+          if (token) uploadHeaders["Authorization"] = `Bearer ${token}`;
+          if (guestToken) uploadHeaders["X-Order-Token"] = guestToken;
+
+          await fetch("/api/v1/returns/upload-evidence", {
+            method: "POST",
+            headers: uploadHeaders,
+            body: formData,
+          }).catch(() => {});
+        }
       }
 
       onSuccess(data.return_code);
