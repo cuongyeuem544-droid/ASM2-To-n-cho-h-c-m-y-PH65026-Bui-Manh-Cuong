@@ -183,6 +183,9 @@ def check_order_eligibility(
 @router.post("")
 def create_return_request(
     payload: ReturnRequestCreate,
+    order_token: Optional[str] = Query(None),
+    x_order_token: Optional[str] = Header(None, alias="X-Order-Token"),
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_current_user),
 ):
@@ -195,7 +198,13 @@ def create_return_request(
         raise HTTPException(status_code=404, detail=f"Không tìm thấy đơn hàng '{clean_code}'.")
 
     is_staff = current_user and getattr(current_user, "role", "") in ["ADMIN", "PHARMACIST", "DATA_REVIEWER"]
-    is_token_valid = verify_guest_order_token(payload.order_token, clean_code)
+    effective_token = payload.order_token or order_token or x_order_token
+    if not effective_token and authorization and authorization.startswith("Bearer "):
+        bearer_val = authorization[7:].strip()
+        if verify_guest_order_token(bearer_val, clean_code):
+            effective_token = bearer_val
+
+    is_token_valid = verify_guest_order_token(effective_token, clean_code)
 
     if not is_staff:
         if current_user and getattr(current_user, "role", "") == "CUSTOMER":
@@ -229,7 +238,7 @@ def create_return_request(
         return_method=payload.return_method,
         evidences_payload=evidences_data,
         current_user=current_user,
-        customer_phone_verify=payload.customer_phone_verify,
+        customer_phone_verify=payload.customer_phone_verify or (order.customer_phone if is_token_valid else None),
         customer_email_verify=payload.customer_email_verify,
     )
 

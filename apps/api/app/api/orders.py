@@ -5,7 +5,7 @@ from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, or_, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_user, get_optional_current_user, require_roles
@@ -521,31 +521,35 @@ def checkout_order(
         note=payload.note.strip() if payload.note else None,
         items=order_items_to_add,
     )
-    db.add(order)
-    db.flush()
+    try:
+        db.add(order)
+        db.flush()
 
-    # Điều phối kho và phân bổ lô theo FEFO
-    FulfillmentRoutingService.route_and_allocate_order(
-        db=db,
-        order=order,
-        items=order_items_to_add,
-        shipping_city=payload.shipping_city,
-        shipping_address=payload.shipping_address,
-    )
+        # Điều phối kho và phân bổ lô theo FEFO
+        FulfillmentRoutingService.route_and_allocate_order(
+            db=db,
+            order=order,
+            items=order_items_to_add,
+            shipping_city=payload.shipping_city,
+            shipping_address=payload.shipping_address,
+        )
 
-    # Ghi nhận giao dịch thanh toán khởi tạo trong PaymentTransaction
-    init_provider = "COD" if order.payment_method == "COD" else ("VIETQR" if order.payment_method in ["BANK_TRANSFER", "VIETQR"] else "MOMO")
-    initial_tx = PaymentTransaction(
-        order_id=order.id,
-        transaction_code=f"TXN-{init_provider}-{order.order_code}-{int(datetime.datetime.now().timestamp()) % 100000}",
-        provider=init_provider,
-        amount=order.total_amount,
-        currency="VND",
-        status="PENDING",
-    )
-    db.add(initial_tx)
+        # Ghi nhận giao dịch thanh toán khởi tạo trong PaymentTransaction
+        init_provider = "COD" if order.payment_method == "COD" else ("VIETQR" if order.payment_method in ["BANK_TRANSFER", "VIETQR"] else "MOMO")
+        initial_tx = PaymentTransaction(
+            order_id=order.id,
+            transaction_code=f"TXN-{init_provider}-{order.order_code}-{int(datetime.datetime.now().timestamp()) % 100000}",
+            provider=init_provider,
+            amount=order.total_amount,
+            currency="VND",
+            status="PENDING",
+        )
+        db.add(initial_tx)
 
-    db.commit()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(order)
 
     # Gửi email xác nhận đơn hàng thật (Gmail SMTP & lưu vết EmailOutbox)
@@ -754,15 +758,19 @@ def get_customer_orders(
 def list_orders(
     status: Optional[str] = None,
     search: Optional[str] = None,
+    warehouse_id: Optional[int] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
-    admin: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER, UserRole.PHARMACIST)),
 ):
     """
     Danh sách đơn hàng dành cho Admin quản lý.
     """
     query = select(Order).options(selectinload(Order.items))
+
+    if warehouse_id is not None:
+        query = query.join(OrderFulfillment, OrderFulfillment.order_id == Order.id).where(OrderFulfillment.warehouse_id == warehouse_id).distinct()
 
     if status and status.upper() != "ALL":
         query = query.where(Order.order_status == status.upper())
@@ -777,7 +785,8 @@ def list_orders(
             )
         )
 
-    total = db.scalar(select(Order).with_only_columns(Order.id).order_by(None))
+    count_query = select(func.count()).select_from(query.subquery())
+    total = db.scalar(count_query) or 0
     orders = db.scalars(
         query.order_by(desc(Order.id)).offset((page - 1) * page_size).limit(page_size)
     ).all()
@@ -799,6 +808,8 @@ def list_orders(
             }
             for o in orders
         ],
+        "total": total,
+        "total_count": total,
         "page": page,
         "page_size": page_size,
     }
@@ -808,7 +819,7 @@ def list_orders(
 def get_admin_order_detail(
     order_id: int,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER, UserRole.PHARMACIST)),
 ):
     """
     Chi tiết đơn hàng cho Admin xử lý.
@@ -867,12 +878,130 @@ class UpdateFulfillmentStatusRequest(BaseModel):
     status: str  # PENDING | PICKED | PACKED | SHIPPED | DELIVERED | CANCELLED
 
 
+@admin_order_router.get("/fulfillments")
+def list_fulfillments(
+    warehouse_id: Optional[int] = Query(None),
+    status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER, UserRole.PHARMACIST)),
+):
+    """
+    Danh sách kiện hàng kho (Fulfillments) hỗ trợ lọc theo kho, trạng thái và tìm kiếm.
+    """
+    query = (
+        select(OrderFulfillment)
+        .join(Order, OrderFulfillment.order_id == Order.id)
+        .options(
+            selectinload(OrderFulfillment.warehouse),
+            selectinload(OrderFulfillment.order),
+            selectinload(OrderFulfillment.items).selectinload(FulfillmentItem.order_item),
+        )
+    )
+
+    if warehouse_id is not None:
+        query = query.where(OrderFulfillment.warehouse_id == warehouse_id)
+
+    if status and status.upper() != "ALL":
+        query = query.where(OrderFulfillment.status == status.upper())
+
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        query = query.where(
+            or_(
+                OrderFulfillment.fulfillment_code.ilike(term),
+                OrderFulfillment.tracking_code.ilike(term),
+                Order.order_code.ilike(term),
+                Order.customer_name.ilike(term),
+                Order.customer_phone.ilike(term),
+            )
+        )
+
+    count_query = select(func.count()).select_from(query.subquery())
+    total = db.scalar(count_query) or 0
+
+    fulfillments = db.scalars(
+        query.order_by(desc(OrderFulfillment.id)).offset((page - 1) * page_size).limit(page_size)
+    ).all()
+
+    all_ff_item_ids = [it.id for ff in fulfillments for it in ff.items]
+    alloc_map: dict[int, list[dict[str, Any]]] = {}
+    if all_ff_item_ids:
+        allocations = db.scalars(
+            select(OrderItemBatchAllocation)
+            .options(selectinload(OrderItemBatchAllocation.batch))
+            .where(OrderItemBatchAllocation.fulfillment_item_id.in_(all_ff_item_ids))
+        ).all()
+        for a in allocations:
+            if a.fulfillment_item_id not in alloc_map:
+                alloc_map[a.fulfillment_item_id] = []
+            alloc_map[a.fulfillment_item_id].append({
+                "id": a.id,
+                "batch_id": a.batch_id,
+                "batch_number": a.batch.batch_number if a.batch else "",
+                "expiry_date": a.batch.expiry_date.isoformat() if (a.batch and a.batch.expiry_date) else "",
+                "allocated_quantity": a.allocated_quantity,
+                "warehouse_id": a.warehouse_id,
+            })
+
+    items = []
+    for ff in fulfillments:
+        o = ff.order
+        ff_items = []
+        for it in ff.items:
+            ff_items.append({
+                "id": it.id,
+                "fulfillment_id": it.fulfillment_id,
+                "order_item_id": it.order_item_id,
+                "product_id": it.order_item.product_id if it.order_item else None,
+                "product_name": it.order_item.product_name if it.order_item else "",
+                "product_sku": it.order_item.product_sku if it.order_item else "",
+                "quantity": it.quantity,
+                "allocations": alloc_map.get(it.id, []),
+            })
+
+        items.append({
+            "id": ff.id,
+            "fulfillment_code": ff.fulfillment_code,
+            "order_id": ff.order_id,
+            "order_code": o.order_code if o else "",
+            "customer_name": o.customer_name if o else "",
+            "customer_phone": o.customer_phone if o else "",
+            "shipping_address": o.shipping_address if o else "",
+            "shipping_city": o.shipping_city if o else "",
+            "order_status": o.order_status if o else "",
+            "payment_method": o.payment_method if o else "",
+            "payment_status": o.payment_status if o else "",
+            "warehouse_id": ff.warehouse_id,
+            "warehouse_code": ff.warehouse.code if ff.warehouse else "",
+            "warehouse_name": ff.warehouse.name if ff.warehouse else "",
+            "status": ff.status,
+            "carrier_name": ff.carrier_name,
+            "tracking_code": ff.tracking_code,
+            "shipping_fee": float(ff.shipping_fee or 0),
+            "created_at": ff.created_at.isoformat() if ff.created_at else None,
+            "shipped_at": ff.shipped_at.isoformat() if ff.shipped_at else None,
+            "delivered_at": ff.delivered_at.isoformat() if ff.delivered_at else None,
+            "items": ff_items,
+        })
+
+    return {
+        "items": items,
+        "total": total,
+        "total_count": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
 @admin_order_router.patch("/fulfillments/{fulfillment_id}/status")
 def update_fulfillment_status(
     fulfillment_id: int,
     payload: UpdateFulfillmentStatusRequest,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER, UserRole.PHARMACIST)),
 ):
     """
     Cập nhật trạng thái kiện hàng theo quy trình kho (PICKED -> PACKED -> SHIPPED -> DELIVERED -> CANCELLED).
@@ -904,7 +1033,7 @@ def update_order_status(
     order_id: int,
     payload: UpdateOrderStatusRequest,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER, UserRole.PHARMACIST)),
 ):
     """
     Cập nhật trạng thái đơn hàng (Duyệt, Giao, Hoàn thành, Hủy).

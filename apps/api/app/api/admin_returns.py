@@ -27,6 +27,7 @@ from app.api.deps import get_current_user, require_roles
 from app.db.session import get_db
 from app.models.entities import Order, User
 from app.models.enums import UserRole
+from app.models.inventory import OrderFulfillment, OrderItemBatchAllocation
 from app.models.returns import (
     ItemCondition,
     RestockDestination,
@@ -86,15 +87,30 @@ def list_admin_returns(
     status_filter: Optional[str] = Query(None, alias="status"),
     request_type: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
+    warehouse_id: Optional[int] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
-    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER, UserRole.PHARMACIST)),
 ):
     """
     Danh sách yêu cầu đổi/trả cho nhân viên & ban quản trị.
     """
     query = select(ReturnRequest).join(Order, ReturnRequest.order_id == Order.id)
+
+    if warehouse_id is not None:
+        query = (
+            query.outerjoin(ReturnItem, ReturnItem.return_request_id == ReturnRequest.id)
+            .outerjoin(OrderItemBatchAllocation, OrderItemBatchAllocation.order_item_id == ReturnItem.order_item_id)
+            .outerjoin(OrderFulfillment, OrderFulfillment.order_id == Order.id)
+            .where(
+                or_(
+                    OrderItemBatchAllocation.warehouse_id == warehouse_id,
+                    OrderFulfillment.warehouse_id == warehouse_id,
+                )
+            )
+            .distinct()
+        )
 
     if status_filter:
         query = query.where(ReturnRequest.status == status_filter)
@@ -156,7 +172,7 @@ def list_admin_returns(
 def get_admin_return_detail(
     return_code: str,
     db: Session = Depends(get_db),
-    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER, UserRole.PHARMACIST)),
 ):
     """
     Chi tiết đầy đủ của một yêu cầu đổi/trả cho ban quản trị.
@@ -303,7 +319,7 @@ def review_return(
     return_code: str,
     payload: ReviewPayload,
     db: Session = Depends(get_db),
-    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER, UserRole.PHARMACIST)),
 ):
     """
     Tiếp nhận xem xét hoặc yêu cầu khách bổ sung thông tin.
@@ -329,7 +345,7 @@ def approve_return(
     return_code: str,
     payload: ApprovePayload,
     db: Session = Depends(get_db),
-    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER, UserRole.PHARMACIST)),
 ):
     """
     Phê duyệt yêu cầu đổi/trả và hướng dẫn khách gửi hàng về kho.
@@ -355,7 +371,7 @@ def reject_return(
     return_code: str,
     payload: RejectPayload,
     db: Session = Depends(get_db),
-    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER, UserRole.PHARMACIST)),
 ):
     """
     Từ chối yêu cầu đổi/trả hàng kèm lý do giải thích.
@@ -380,7 +396,7 @@ def confirm_return_receipt(
     return_code: str,
     payload: ReceivePayload,
     db: Session = Depends(get_db),
-    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER, UserRole.PHARMACIST)),
 ):
     """
     Kho xác nhận đã nhận kiện hàng hoàn trả từ bưu tá.
@@ -404,7 +420,7 @@ def inspect_return(
     return_code: str,
     payload: InspectionPayload,
     db: Session = Depends(get_db),
-    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER, UserRole.PHARMACIST)),
 ):
     """
     Dược sĩ kiểm định chất lượng hàng hoàn và phân luồng tồn kho (Nhập kho bán / Biệt trữ / Hủy).
@@ -429,7 +445,7 @@ def close_return(
     return_code: str,
     admin_note: Optional[str] = None,
     db: Session = Depends(get_db),
-    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER, UserRole.PHARMACIST)),
 ):
     """
     Đóng hồ sơ đổi trả sau khi hoàn tiền hoặc hoàn tất đổi hàng.
@@ -457,7 +473,7 @@ def close_return(
 @router.get("/notifications/stats")
 def get_return_notifications_stats(
     db: Session = Depends(get_db),
-    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER, UserRole.PHARMACIST)),
 ):
     """
     Thống kê số lượng đơn đổi/trả chờ duyệt và danh sách các đơn mới gửi cần xử lý ngay cho Admin.

@@ -331,6 +331,7 @@ class OrderFulfillment(Base):
 
     items: Mapped[list["FulfillmentItem"]] = relationship(back_populates="fulfillment", cascade="all, delete-orphan")
     warehouse: Mapped[Warehouse] = relationship()
+    order: Mapped["Order"] = relationship("Order")
 
 
 class FulfillmentItem(Base):

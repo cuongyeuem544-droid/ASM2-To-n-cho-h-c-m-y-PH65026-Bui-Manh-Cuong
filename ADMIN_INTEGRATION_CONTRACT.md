@@ -171,3 +171,183 @@ Dùng để kiểm tra nhanh trạng thái mở bán và tồn khả dụng khi 
 - Khi khách đặt hàng theo một quy cách đóng gói cụ thể (ví dụ: `SKU-PAN-BOX-100` hoặc `SKU-PAN-SACHET-01`), hàm điều phối `route_and_allocate_order` phân bổ chính xác tồn kho theo SKU mà khách đã chọn thay vì mặc định về SKU hộp.
 - Giá tiền, chiết khấu voucher và phí vận chuyển do Backend tính toán và xác thực tại thời điểm Checkout; Frontend không quyết định giá.
 
+---
+
+## 6. TÍCH HỢP ĐIỀU PHỐI KHO, QUẢN LÝ KIỆN HÀNG FSM VÀ KHO NHẬN HÀNG HOÀN (WAREHOUSE, FULFILLMENT & RETURNS)
+**Cập nhật:** Final End-to-End Warehouse, Order & Returns Integration Repair
+
+### 6.1. Danh Sách Endpoint Mới & Nâng Cấp
+
+#### A. Danh Sách Kiện Hàng Thuộc Kho (Warehouse Fulfillment Queue)
+- **Endpoint**: `GET /api/v1/admin/warehouses/{warehouse_id}/fulfillments` (hoặc alias `/api/v1/warehouses/{warehouse_id}/fulfillments`)
+- **Quyền hạn**: `ADMIN`, `PHARMACIST`
+- **Query Parameters**:
+  - `status`: Lọc theo trạng thái kiện (`PENDING`, `PICKED`, `PACKED`, `SHIPPED`, `DELIVERED`, `CANCELLED`). Mặc định: tất cả.
+  - `page`: Số trang (mặc định: `1`).
+  - `page_size`: Số bản ghi mỗi trang (mặc định: `20`, tối đa `100`).
+  - `search`: Tìm theo mã đơn hàng, mã kiện hàng, họ tên khách hàng hoặc số điện thoại.
+- **Cấu trúc Response**:
+```json
+{
+  "warehouse": {
+    "id": 1,
+    "code": "WH-HCM-01",
+    "name": "Kho Tổng TP. Hồ Chí Minh"
+  },
+  "total": 1,
+  "page": 1,
+  "page_size": 20,
+  "items": [
+    {
+      "id": 101,
+      "fulfillment_code": "FF-ORD261015001-WH-HCM-01",
+      "order_id": 45,
+      "order_code": "ORD261015001",
+      "customer_name": "Nguyễn Văn A",
+      "customer_phone": "0912345678",
+      "shipping_address": "123 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh",
+      "status": "PENDING",
+      "carrier_name": "GHTK Fast",
+      "tracking_code": "TRACK-WH-HCM-01-101",
+      "shipping_fee": 25000,
+      "created_at": "2026-10-15T08:30:00Z",
+      "items": [
+        {
+          "fulfillment_item_id": 201,
+          "product_id": 12,
+          "product_name": "Paracetamol 500mg Hộp 100 viên",
+          "quantity": 2,
+          "batches": [
+            {
+              "batch_id": 5,
+              "batch_number": "LOT-PARA-2026A",
+              "expiry_date": "2027-12-31",
+              "allocated_quantity": 2
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+#### B. Cập Nhật Trạng Thái Kiện Hàng (Fulfillment FSM Transition)
+- **Endpoint**: `PATCH /api/v1/admin/orders/fulfillments/{fulfillment_id}/status`
+- **Quyền hạn**: `ADMIN`, `PHARMACIST`
+- **Request Body**:
+```json
+{
+  "status": "PICKED"
+}
+```
+- **Quy tắc chuyển đổi trạng thái (Strict Finite State Machine)**:
+  - `PENDING` $\rightarrow$ `PICKED` hoặc `CANCELLED`
+  - `PICKED` $\rightarrow$ `PACKED` hoặc `CANCELLED`
+  - `PACKED` $\rightarrow$ `SHIPPED` hoặc `CANCELLED`
+  - `SHIPPED` $\rightarrow$ `DELIVERED`
+  - `DELIVERED`: Trạng thái cuối, không thể thay đổi tiếp.
+  - `CANCELLED`: Trạng thái cuối, không thể phục hồi.
+  - **Idempotency**: Gửi lại cùng một trạng thái sẽ trả về HTTP 200 kèm dữ liệu hiện tại, không gây lỗi 500 và không trừ kho lần 2.
+  - **Hiệu ứng khi chuyển sang `SHIPPED`**:
+    - Khấu trừ `quantity_on_hand` và giải phóng `quantity_reserved` trong kho tương ứng.
+    - Đổi trạng thái `StockReservation` thành `FULFILLED`.
+    - Tự động ghi thẻ kho (`StockMovement`) loại `DISPATCH` với số lượng âm.
+  - **Hiệu ứng khi chuyển sang `CANCELLED`**:
+    - Tự động giải phóng toàn bộ số lượng giữ chỗ (`quantity_reserved`) hoàn lại cho `quantity_available`.
+    - Đổi trạng thái `StockReservation` thành `CANCELLED`.
+
+#### C. Danh Sách Yêu Cầu Đổi/Trả Thuộc Kho (Warehouse Returns Queue)
+- **Endpoint**: `GET /api/v1/admin/warehouses/{warehouse_id}/returns` (hoặc alias `/api/v1/warehouses/{warehouse_id}/returns`)
+- **Quyền hạn**: `ADMIN`, `PHARMACIST`
+- **Query Parameters**:
+  - `status`: Lọc theo trạng thái yêu cầu (`REQUESTED`, `APPROVED`, `RECEIVED_AT_WAREHOUSE`, `INSPECTED`, `REJECTED`, `COMPLETED`).
+  - `page`: Trang (mặc định: `1`).
+  - `page_size`: Kích thước trang (mặc định: `20`).
+- **Cấu trúc Response**:
+```json
+{
+  "warehouse": {
+    "id": 1,
+    "code": "WH-HCM-01",
+    "name": "Kho Tổng TP. Hồ Chí Minh"
+  },
+  "total": 1,
+  "page": 1,
+  "page_size": 20,
+  "items": [
+    {
+      "id": 12,
+      "return_code": "RET202610150001",
+      "order_id": 45,
+      "order_code": "ORD261015001",
+      "customer_name": "Nguyễn Văn A",
+      "customer_phone": "0912345678",
+      "type": "RETURN",
+      "status": "APPROVED",
+      "reason": "DEFECTIVE_PRODUCT",
+      "reason_detail": "Bao bì bị rách trong quá trình vận chuyển",
+      "origin_warehouse_id": 1,
+      "refund_amount": 150000,
+      "created_at": "2026-10-15T09:00:00Z",
+      "items": [
+        {
+          "id": 31,
+          "order_item_id": 201,
+          "product_name": "Paracetamol 500mg Hộp 100 viên",
+          "requested_quantity": 2,
+          "inspection_result": null,
+          "disposition": null
+        }
+      ]
+    }
+  ]
+}
+```
+
+#### D. Dược Sĩ Tiếp Nhận Hàng Hoàn Tại Kho (Receive Return)
+- **Endpoint**: `POST /api/v1/admin/returns/{return_request_id}/receive`
+- **Quyền hạn**: `ADMIN`, `PHARMACIST`
+- **Mô tả**: Chuyển trạng thái yêu cầu trả hàng từ `APPROVED` sang `RECEIVED_AT_WAREHOUSE` khi kiện hàng trả về đã đến kho vật lý.
+
+#### E. Dược Sĩ Kiểm Nghiệm & Phân Loại Hàng Hoàn (Inspect Return)
+- **Endpoint**: `POST /api/v1/admin/returns/{return_request_id}/inspect`
+- **Quyền hạn**: `ADMIN`, `PHARMACIST`
+- **Mô tả**: Đánh giá tình trạng thuốc hoàn lại và phân bổ xử lý kho theo đúng kho xuất phát điểm (`origin_warehouse_id`).
+- **Request Body**:
+```json
+{
+  "items": [
+    {
+      "return_item_id": 31,
+      "inspected_quantity": 2,
+      "inspection_result": "PASS",
+      "disposition": "RESTOCK",
+      "reason": "Hàng nguyên seal, tem bảo hành nguyên vẹn, nhập lại kho bán"
+    }
+  ],
+  "note": "Đã kiểm nghiệm đạt tiêu chuẩn GSP"
+}
+```
+- **Các giá trị Disposition hợp lệ**:
+  - `RESTOCK`: Thuốc còn nguyên vẹn, đạt chuẩn GSP $\rightarrow$ Cộng lại `quantity_on_hand` và `quantity_available` vào chính kho ban đầu. Tạo Thẻ kho `RETURN_RESTOCK`.
+  - `QUARANTINE`: Cần biệt trữ để theo dõi hoặc kiểm nghiệm thêm $\rightarrow$ Không cộng vào tồn bán lẻ, ghi nhận biên bản biệt trữ.
+  - `DISPOSE`: Hỏng, vỡ, hết hạn hoặc rách niêm phong $\rightarrow$ Ghi nhận tiêu hủy, không cộng vào tồn bán lẻ.
+
+#### F. Lọc Đơn Hàng Admin Theo Kho Điều Phối
+- **Endpoint**: `GET /api/v1/admin/orders?warehouse_id={warehouse_id}&page={page}&page_size={page_size}`
+- **Quyền hạn**: `ADMIN`, `PHARMACIST`
+- **Mô tả**: Trả về danh sách đơn hàng được phân bổ từ kho tương ứng, kèm metadata phân trang chuẩn (`total`, `page`, `page_size`, `total_pages`).
+
+### 6.2. Hướng Dẫn Áp Dụng Patch Cho Admin UI (`apps/web`)
+
+File patch đã được chuẩn bị tại: `patches/admin_warehouse_integration.patch`.
+
+#### Cách áp dụng:
+```bash
+# Kiểm tra tính tương thích trước khi áp dụng:
+git apply --check patches/admin_warehouse_integration.patch
+
+# Áp dụng patch:
+git apply patches/admin_warehouse_integration.patch
+```

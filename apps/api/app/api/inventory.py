@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_user, require_roles
@@ -12,9 +12,15 @@ from app.db.session import get_db
 from app.models import (
     AdministrativeUnit,
     CanonicalProduct,
+    FulfillmentItem,
     InventoryBatch,
+    Order,
+    OrderFulfillment,
+    OrderItemBatchAllocation,
     ProductIngredient,
     ProductSku,
+    ReturnItem,
+    ReturnRequest,
     StockAdjustment,
     StockAdjustmentItem,
     StockMovement,
@@ -38,6 +44,7 @@ def utcnow() -> datetime:
 
 router = APIRouter(prefix="/inventory", tags=["Quản lý Kho & Lô thuốc"])
 warehouses_router = APIRouter(prefix="/warehouses", tags=["Kho & Chi nhánh"])
+admin_warehouses_router = APIRouter(prefix="/admin/warehouses", tags=["Admin Quản lý Kho"])
 admin_units_router = APIRouter(prefix="/administrative-units", tags=["Địa giới hành chính"])
 
 
@@ -362,6 +369,238 @@ def get_warehouse_stocks(
             "expired_count": expired_count,
         },
         "stocks": items,
+    }
+
+
+@admin_warehouses_router.get("/{wh_id}/fulfillments")
+@warehouses_router.get("/{wh_id}/fulfillments")
+def list_warehouse_fulfillments(
+    wh_id: int,
+    status: str | None = Query(None),
+    search: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER, UserRole.PHARMACIST)),
+):
+    """
+    Danh sách các kiện hàng (OrderFulfillment) được phân bổ hoặc xử lý tại kho chỉ định.
+    Bao gồm thông tin đơn hàng, khách hàng, sản phẩm và chi tiết phân bổ lô thuốc theo FEFO.
+    """
+    wh = db.get(Warehouse, wh_id)
+    if not wh:
+        raise HTTPException(status_code=404, detail="Không tìm thấy thông tin kho hàng.")
+
+    query = (
+        select(OrderFulfillment)
+        .join(Order, OrderFulfillment.order_id == Order.id)
+        .options(
+            selectinload(OrderFulfillment.warehouse),
+            selectinload(OrderFulfillment.order),
+            selectinload(OrderFulfillment.items).selectinload(FulfillmentItem.order_item),
+        )
+        .where(OrderFulfillment.warehouse_id == wh_id)
+    )
+
+    if status and status.upper() != "ALL":
+        query = query.where(OrderFulfillment.status == status.upper())
+
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        query = query.where(
+            or_(
+                OrderFulfillment.fulfillment_code.ilike(term),
+                OrderFulfillment.tracking_code.ilike(term),
+                Order.order_code.ilike(term),
+                Order.customer_name.ilike(term),
+                Order.customer_phone.ilike(term),
+            )
+        )
+
+    count_query = select(func.count()).select_from(query.subquery())
+    total = db.scalar(count_query) or 0
+
+    fulfillments = db.scalars(
+        query.order_by(desc(OrderFulfillment.id)).offset((page - 1) * page_size).limit(page_size)
+    ).all()
+
+    all_ff_item_ids = [it.id for ff in fulfillments for it in ff.items]
+    alloc_map: dict[int, list[dict[str, Any]]] = {}
+    if all_ff_item_ids:
+        allocations = db.scalars(
+            select(OrderItemBatchAllocation)
+            .options(selectinload(OrderItemBatchAllocation.batch))
+            .where(OrderItemBatchAllocation.fulfillment_item_id.in_(all_ff_item_ids))
+        ).all()
+        for a in allocations:
+            if a.fulfillment_item_id not in alloc_map:
+                alloc_map[a.fulfillment_item_id] = []
+            alloc_map[a.fulfillment_item_id].append({
+                "id": a.id,
+                "batch_id": a.batch_id,
+                "batch_number": a.batch.batch_number if a.batch else "",
+                "expiry_date": a.batch.expiry_date.isoformat() if (a.batch and a.batch.expiry_date) else "",
+                "allocated_quantity": a.allocated_quantity,
+                "warehouse_id": a.warehouse_id,
+            })
+
+    items = []
+    for ff in fulfillments:
+        o = ff.order
+        ff_items = []
+        for it in ff.items:
+            ff_items.append({
+                "id": it.id,
+                "fulfillment_id": it.fulfillment_id,
+                "order_item_id": it.order_item_id,
+                "product_id": it.order_item.product_id if it.order_item else None,
+                "product_name": it.order_item.product_name if it.order_item else "",
+                "product_sku": it.order_item.product_sku if it.order_item else "",
+                "quantity": it.quantity,
+                "allocations": alloc_map.get(it.id, []),
+            })
+
+        items.append({
+            "id": ff.id,
+            "fulfillment_code": ff.fulfillment_code,
+            "order_id": ff.order_id,
+            "order_code": o.order_code if o else "",
+            "customer_name": o.customer_name if o else "",
+            "customer_phone": o.customer_phone if o else "",
+            "shipping_address": o.shipping_address if o else "",
+            "shipping_city": o.shipping_city if o else "",
+            "order_status": o.order_status if o else "",
+            "payment_method": o.payment_method if o else "",
+            "payment_status": o.payment_status if o else "",
+            "warehouse_id": ff.warehouse_id,
+            "warehouse_code": ff.warehouse.code if ff.warehouse else "",
+            "warehouse_name": ff.warehouse.name if ff.warehouse else "",
+            "status": ff.status,
+            "carrier_name": ff.carrier_name,
+            "tracking_code": ff.tracking_code,
+            "shipping_fee": float(ff.shipping_fee or 0),
+            "created_at": ff.created_at.isoformat() if ff.created_at else None,
+            "shipped_at": ff.shipped_at.isoformat() if ff.shipped_at else None,
+            "delivered_at": ff.delivered_at.isoformat() if ff.delivered_at else None,
+            "items": ff_items,
+        })
+
+    return {
+        "items": items,
+        "total": total,
+        "total_count": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+@admin_warehouses_router.get("/{wh_id}/returns")
+@warehouses_router.get("/{wh_id}/returns")
+def list_warehouse_returns(
+    wh_id: int,
+    status: str | None = Query(None),
+    search: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER, UserRole.PHARMACIST)),
+):
+    """
+    Danh sách các yêu cầu đổi/trả hàng liên quan đến kho chỉ định
+    (sản phẩm xuất từ kho này hoặc hàng hoàn về kho này).
+    """
+    wh = db.get(Warehouse, wh_id)
+    if not wh:
+        raise HTTPException(status_code=404, detail="Không tìm thấy thông tin kho hàng.")
+
+    query = (
+        select(ReturnRequest)
+        .join(Order, ReturnRequest.order_id == Order.id)
+        .outerjoin(ReturnItem, ReturnItem.return_request_id == ReturnRequest.id)
+        .outerjoin(OrderItemBatchAllocation, OrderItemBatchAllocation.order_item_id == ReturnItem.order_item_id)
+        .outerjoin(OrderFulfillment, OrderFulfillment.order_id == Order.id)
+        .where(
+            or_(
+                OrderItemBatchAllocation.warehouse_id == wh_id,
+                OrderFulfillment.warehouse_id == wh_id,
+            )
+        )
+        .distinct()
+        .options(
+            selectinload(ReturnRequest.order),
+            selectinload(ReturnRequest.items),
+        )
+    )
+
+    if status and status.upper() != "ALL":
+        query = query.where(ReturnRequest.status == status.upper())
+
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        query = query.where(
+            or_(
+                ReturnRequest.return_code.ilike(term),
+                ReturnRequest.customer_name.ilike(term),
+                ReturnRequest.customer_phone.ilike(term),
+                ReturnRequest.tracking_code.ilike(term),
+                Order.order_code.ilike(term),
+            )
+        )
+
+    count_query = select(func.count()).select_from(query.subquery())
+    total = db.scalar(count_query) or 0
+
+    returns = db.scalars(
+        query.order_by(desc(ReturnRequest.id)).offset((page - 1) * page_size).limit(page_size)
+    ).all()
+
+    items = []
+    for r in returns:
+        items.append({
+            "id": r.id,
+            "return_code": r.return_code,
+            "order_id": r.order_id,
+            "order_code": r.order.order_code if r.order else "",
+            "customer_name": r.customer_name,
+            "customer_phone": r.customer_phone,
+            "customer_email": r.customer_email,
+            "request_type": r.request_type,
+            "status": r.status,
+            "reason_code": r.reason_code,
+            "reason_text": r.reason_text,
+            "return_method": r.return_method,
+            "carrier_name": r.carrier_name,
+            "tracking_code": r.tracking_code,
+            "warehouse_id": wh_id,
+            "warehouse_code": wh.code,
+            "requested_at": r.requested_at.isoformat() if r.requested_at else None,
+            "received_at": r.received_at.isoformat() if r.received_at else None,
+            "inspected_at": r.inspected_at.isoformat() if r.inspected_at else None,
+            "items": [
+                {
+                    "id": it.id,
+                    "order_item_id": it.order_item_id,
+                    "product_id": it.product_id,
+                    "product_name": it.product_name,
+                    "original_quantity": it.original_quantity,
+                    "requested_quantity": it.requested_quantity,
+                    "accepted_quantity": it.accepted_quantity,
+                    "rejected_quantity": it.rejected_quantity,
+                    "restock_quantity": it.restock_quantity,
+                    "inspected_condition": it.inspected_condition,
+                    "restock_destination": it.restock_destination,
+                    "inspection_notes": it.inspection_notes,
+                }
+                for it in r.items
+            ],
+        })
+
+    return {
+        "items": items,
+        "total": total,
+        "total_count": total,
+        "page": page,
+        "page_size": page_size,
     }
 
 

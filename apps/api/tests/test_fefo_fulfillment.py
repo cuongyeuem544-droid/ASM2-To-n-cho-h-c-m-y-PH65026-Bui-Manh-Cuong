@@ -414,7 +414,17 @@ class TestFefoFulfillmentSuite(unittest.TestCase):
         self.assertEqual(stock.quantity_reserved, 5)
         self.assertEqual(stock.quantity_on_hand, 20)
 
-        # Admin chuyển trạng thái kiện sang SHIPPED
+        # Admin chuyển trạng thái kiện qua FSM: PENDING -> PICKED -> PACKED -> SHIPPED
+        self.client.patch(
+            f"/api/v1/admin/orders/fulfillments/{fulfillment_id}/status",
+            json={"status": "PICKED"},
+            headers=self.headers,
+        )
+        self.client.patch(
+            f"/api/v1/admin/orders/fulfillments/{fulfillment_id}/status",
+            json={"status": "PACKED"},
+            headers=self.headers,
+        )
         ship_resp = self.client.patch(
             f"/api/v1/admin/orders/fulfillments/{fulfillment_id}/status",
             json={"status": "SHIPPED"},

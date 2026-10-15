@@ -257,7 +257,7 @@ class FulfillmentRoutingService:
                     )
                     fulfillments_to_return.append(ff)
 
-        db.commit()
+        db.flush()
         return fulfillments_to_return
 
     @classmethod
@@ -422,9 +422,24 @@ class FulfillmentRoutingService:
             raise HTTPException(status_code=404, detail="Không tìm thấy kiện hàng")
 
         old_status = ff.status
-        valid_transitions = {"PENDING", "PICKED", "PACKED", "SHIPPED", "DELIVERED", "CANCELLED"}
-        if new_status not in valid_transitions:
-            raise HTTPException(status_code=400, detail=f"Trạng thái kiện hàng '{new_status}' không hợp lệ.")
+        if new_status == old_status:
+            return ff
+
+        valid_transitions: dict[str, set[str]] = {
+            "PENDING": {"PICKED", "CANCELLED"},
+            "PICKED": {"PACKED", "CANCELLED"},
+            "PACKED": {"SHIPPED", "CANCELLED"},
+            "SHIPPED": {"DELIVERED", "CANCELLED"},
+            "DELIVERED": set(),
+            "CANCELLED": set(),
+        }
+
+        allowed = valid_transitions.get(old_status)
+        if allowed is None or new_status not in allowed:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Không thể chuyển trạng thái kiện hàng từ '{old_status}' sang '{new_status}'."
+            )
 
         ff.status = new_status
         now = utcnow()

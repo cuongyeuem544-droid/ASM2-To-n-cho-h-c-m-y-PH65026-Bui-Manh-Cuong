@@ -83,7 +83,16 @@ class Settings(BaseSettings):
                     raise ValueError("CORS_ORIGINS JSON must be an array of strings")
                 return [item.strip() for item in decoded if item.strip()]
             return [item.strip() for item in value.split(",") if item.strip()]
-        return value
+    @field_validator("database_url", mode="after")
+    @classmethod
+    def canonicalize_sqlite_url(cls, v: str) -> str:
+        if isinstance(v, str) and (v.startswith("sqlite:///./") or v == "sqlite:///pharmatrust.db"):
+            rel_name = v.replace("sqlite:///./", "").replace("sqlite:///", "")
+            # Project root is 5 levels up: config.py -> core -> app -> api -> apps -> repo_root
+            repo_root = Path(__file__).resolve().parent.parent.parent.parent.parent
+            canonical_db = repo_root / rel_name
+            return f"sqlite:///{canonical_db.as_posix()}"
+        return v
 
     @model_validator(mode="after")
     def validate_production_security(self) -> "Settings":

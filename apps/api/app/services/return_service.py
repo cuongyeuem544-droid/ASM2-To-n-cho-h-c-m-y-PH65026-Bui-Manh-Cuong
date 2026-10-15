@@ -610,12 +610,20 @@ class ReturnService:
             item.restock_quantity = restock_qty
             item.inspection_notes = insp_note
 
+            # Xác định đúng kho xuất phát ban đầu của order_item này
+            orig_alloc = db.scalar(
+                select(OrderItemBatchAllocation).where(
+                    OrderItemBatchAllocation.order_item_id == item.order_item_id
+                ).order_by(OrderItemBatchAllocation.id.desc())
+            )
+            item_wh_id = orig_alloc.warehouse_id if orig_alloc else default_wh.id
+
             # Xử lý cập nhật tồn kho nếu có số lượng nhập lại (Restock)
             if destination == RestockDestination.SELLABLE_STOCK.value and restock_qty > 0:
                 cls._process_restock_movement(
                     db=db,
                     order_item_id=item.order_item_id,
-                    warehouse_id=default_wh.id,
+                    warehouse_id=item_wh_id,
                     quantity=restock_qty,
                     return_code=ret.return_code,
                     actor=inspector_user,
@@ -626,7 +634,7 @@ class ReturnService:
                 cls._process_restock_movement(
                     db=db,
                     order_item_id=item.order_item_id,
-                    warehouse_id=default_wh.id,
+                    warehouse_id=item_wh_id,
                     quantity=accepted_qty,
                     return_code=ret.return_code,
                     actor=inspector_user,
@@ -637,7 +645,7 @@ class ReturnService:
                 cls._process_restock_movement(
                     db=db,
                     order_item_id=item.order_item_id,
-                    warehouse_id=default_wh.id,
+                    warehouse_id=item_wh_id,
                     quantity=accepted_qty,
                     return_code=ret.return_code,
                     actor=inspector_user,

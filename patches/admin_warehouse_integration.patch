@@ -1,0 +1,73 @@
+--- a/apps/web/src/pages/OrdersPage.tsx
++++ b/apps/web/src/pages/OrdersPage.tsx
+@@ -118,6 +118,8 @@
+   const [searchQuery, setSearchQuery] = useState('')
+   const [selectedOrder, setSelectedOrder] = useState<OrderDetailData | null>(null)
+   const [loadingDetail, setLoadingDetail] = useState(false)
++  const [warehouses, setWarehouses] = useState<Array<{ id: number; name: string; code: string }>>([])
++  const [selectedWarehouse, setSelectedWarehouse] = useState<string>('ALL')
+   const [updatingId, setUpdatingId] = useState<number | null>(null)
+   const [updatingFulfillmentId, setUpdatingFulfillmentId] = useState<number | null>(null)
+   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+@@ -129,7 +131,13 @@
+   useEffect(() => {
+     setCurrentPage(1)
+     loadOrders()
+-  }, [selectedStatus])
++  }, [selectedStatus, selectedWarehouse])
++
++  useEffect(() => {
++    api<Array<{ id: number; name: string; code: string }>>('/warehouses')
++      .then((data) => setWarehouses(data || []))
++      .catch(() => {})
++  }, [])
+ 
+   const totalPages = Math.max(1, Math.ceil(orders.length / pageSize))
+   const displayedOrders = useMemo(() => {
+@@ -143,6 +151,7 @@
+       const q = new URLSearchParams()
+       if (selectedStatus !== 'ALL') q.set('status', selectedStatus)
+       if (searchQuery.trim()) q.set('search', searchQuery.trim())
++      if (selectedWarehouse !== 'ALL') q.set('warehouse_id', selectedWarehouse)
+ 
+       const res = await api<{ items: OrderSummary[] }>(`/admin/orders?${q.toString()}`)
+       setOrders(res.items || [])
+@@ -254,6 +263,16 @@
+         isRefreshing={loading}
+       >
+         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
++          <select
++            value={selectedWarehouse}
++            onChange={(e) => setSelectedWarehouse(e.target.value)}
++            style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12, background: '#fff', marginRight: 8 }}
++          >
++            <option value="ALL">Tất cả kho điều phối</option>
++            {warehouses.map((w) => (
++              <option key={w.id} value={w.id}>{w.code} - {w.name}</option>
++            ))}
++          </select>
+           {['ALL', 'PENDING', 'CONFIRMED', 'SHIPPING', 'COMPLETED', 'CANCELLED'].map((st) => (
+             <button
+               key={st}
+--- a/apps/web/src/pages/WarehousesPage.tsx
++++ b/apps/web/src/pages/WarehousesPage.tsx
+@@ -95,6 +95,9 @@
+   const [detailSearch, setDetailSearch] = useState('')
+   const [detailPage, setDetailPage] = useState(1)
+   const [detailPageSize, setDetailPageSize] = useState(25)
++  const [warehouseQueueTab, setWarehouseQueueTab] = useState<'STOCKS' | 'FULFILLMENTS' | 'RETURNS'>('STOCKS')
++  const [warehouseFulfillments, setWarehouseFulfillments] = useState<any[]>([])
++  const [warehouseReturns, setWarehouseReturns] = useState<any[]>([])
+ 
+   // Form state
+   const [code, setCode] = useState('')
+@@ -133,6 +136,9 @@
+     try {
+       const data = await api<WarehouseStockDetailResponse>(`/warehouses/${wh.id}/stocks`)
+       setDetailData(data)
++      // Tải kèm danh sách kiện hàng cần xuất và hàng hoàn trả
++      api<any>(`/admin/warehouses/${wh.id}/fulfillments`).then(res => setWarehouseFulfillments(res?.items || [])).catch(() => {})
++      api<any>(`/admin/warehouses/${wh.id}/returns`).then(res => setWarehouseReturns(res?.items || [])).catch(() => {})
+     } catch (err: any) {
+       setError(err.message || 'Không thể tải chi tiết tồn kho chi nhánh')
+     } finally {
