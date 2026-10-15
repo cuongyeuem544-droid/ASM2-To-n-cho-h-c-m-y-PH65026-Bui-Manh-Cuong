@@ -301,6 +301,13 @@ class FulfillmentRoutingService:
                     )
                     fulfillments_to_return.append(ff)
 
+        if order.assigned_warehouse_id:
+            try:
+                from app.services.warehouse_notification_service import WarehouseNotificationService
+                WarehouseNotificationService.notify_order_new(db, order, order.assigned_warehouse_id)
+            except Exception as e:
+                logger.warning(f"Failed to create ORDER_NEW notification: {e}")
+
         db.flush()
         return fulfillments_to_return
 

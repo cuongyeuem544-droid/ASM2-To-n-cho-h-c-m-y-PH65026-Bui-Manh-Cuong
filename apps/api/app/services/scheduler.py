@@ -104,6 +104,7 @@ class AutoCrawlScheduler:
         self.publish_mode = settings.default_publish_mode
         self.next_run_at: dict[str, datetime] = {}
         self._last_evidence_expire_check: datetime | None = None
+        self._last_warehouse_notif_scan: datetime | None = None
 
     def start(self):
         if self.is_running:
@@ -136,6 +137,7 @@ class AutoCrawlScheduler:
                 if self.auto_enabled:
                     self._check_and_trigger_sources()
                 self._check_and_expire_evidence()
+                self._check_and_scan_warehouse_notifications()
             except Exception as exc:
                 logger.error(f"Lỗi vòng lặp Scheduler: {exc}")
 
@@ -157,6 +159,22 @@ class AutoCrawlScheduler:
                 WarehouseReturnService.check_and_expire_evidence_requests(db)
         except Exception as e:
             logger.error(f"Lỗi khi quét quá hạn bằng chứng đổi trả: {e}")
+
+    def _check_and_scan_warehouse_notifications(self):
+        """
+        Quét định kỳ cảnh báo kho (Hạn sử dụng FEFO 60 ngày, tồn kho thấp, đơn hàng quá hạn 24h) mỗi 15 phút.
+        """
+        now = utcnow()
+        if self._last_warehouse_notif_scan and (now - self._last_warehouse_notif_scan).total_seconds() < 900:
+            return
+
+        self._last_warehouse_notif_scan = now
+        try:
+            with SessionLocal() as db:
+                from app.services.warehouse_notification_service import WarehouseNotificationService
+                WarehouseNotificationService.run_all_scans(db)
+        except Exception as e:
+            logger.error(f"Lỗi khi quét cảnh báo thông báo kho định kỳ: {e}")
 
     def _handle_server_restart(self, db: Session):
         """

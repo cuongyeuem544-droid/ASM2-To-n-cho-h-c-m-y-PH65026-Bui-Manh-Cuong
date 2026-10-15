@@ -15,7 +15,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile, status
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import desc, func, or_, select
+from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import (
@@ -53,12 +53,14 @@ from app.models import (
     WarehouseAlert,
     WarehouseBatchStock,
     WarehouseImportJob,
+    WarehouseNotification,
 )
 from app.models.enums import FulfillmentStatus, ProcessingStatus, UserRole
 from app.models.inventory import UserWarehouseMembership
 from app.schemas.auth import UserOut
 from app.services.audit import write_audit
 from app.services.fulfillment_service import FulfillmentRoutingService
+from app.services.warehouse_notification_service import WarehouseNotificationService
 
 router = APIRouter(prefix="/warehouse-portal", tags=["Cổng Quản Lý Kho & Nhân Viên Kho"])
 
@@ -567,6 +569,32 @@ def update_order_fulfillment_status(
         raise HTTPException(status_code=400, detail=f"Trạng thái '{new_status}' không hợp lệ")
 
     before_status = order.fulfillment_status
+
+    if order.order_status in ["COMPLETED", "CANCELLED"] and new_status not in ["DELIVERED", "CANCELLED"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Đơn hàng này đã ở trạng thái '{order.order_status}', không thể thay đổi tiến trình.",
+        )
+
+    # Idempotent: Nếu đơn đã ở đúng trạng thái này, trả về kết quả an toàn
+    if before_status == new_status:
+        return {
+            "success": True,
+            "order_code": order.order_code,
+            "fulfillment_status": order.fulfillment_status,
+            "order_status": order.order_status,
+            "message": f"Đơn hàng đã ở trạng thái {new_status}.",
+        }
+
+    # Chống chạy đè đơn đã được nhân viên khác xử lý trước
+    stage_order = {"ALLOCATED": 1, "WAITING_INTERNAL_TRANSFER": 1, "CONSOLIDATED": 1, "PICKING": 2, "PACKED": 3, "SHIPPED": 4, "DELIVERED": 5}
+    if new_status in stage_order and before_status in stage_order:
+        if stage_order[new_status] < stage_order[before_status]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Đơn hàng đã được nhân viên khác xử lý đến bước '{before_status}'. Không thể lùi về '{new_status}'.",
+            )
+
     order.fulfillment_status = new_status
 
     now_dt = datetime.now(UTC)
@@ -683,7 +711,7 @@ def get_warehouse_stock(
             CanonicalProduct.product_type,
             ProductSku.id.label("sku_id"),
             ProductSku.sku_code,
-            ProductSku.unit_name,
+            ProductSku.uom.label("unit_name"),
             func.coalesce(func.sum(WarehouseBatchStock.quantity_on_hand), 0).label("total_on_hand"),
             func.coalesce(func.sum(WarehouseBatchStock.quantity_available), 0).label("total_available"),
             func.coalesce(func.sum(WarehouseBatchStock.quantity_reserved), 0).label("total_reserved"),
@@ -691,7 +719,7 @@ def get_warehouse_stock(
         )
         .join(InventoryBatch, WarehouseBatchStock.batch_id == InventoryBatch.id)
         .join(ProductSku, InventoryBatch.sku_id == ProductSku.id)
-        .join(CanonicalProduct, ProductSku.product_id == CanonicalProduct.id)
+        .join(CanonicalProduct, ProductSku.canonical_product_id == CanonicalProduct.id)
         .where(WarehouseBatchStock.warehouse_id == wh.id)
         .group_by(
             CanonicalProduct.id,
@@ -700,7 +728,7 @@ def get_warehouse_stock(
             CanonicalProduct.product_type,
             ProductSku.id,
             ProductSku.sku_code,
-            ProductSku.unit_name,
+            ProductSku.uom,
         )
     )
 
@@ -771,10 +799,10 @@ def get_warehouse_batches(
         select(WarehouseBatchStock)
         .join(InventoryBatch, WarehouseBatchStock.batch_id == InventoryBatch.id)
         .join(ProductSku, InventoryBatch.sku_id == ProductSku.id)
-        .join(CanonicalProduct, ProductSku.product_id == CanonicalProduct.id)
+        .join(CanonicalProduct, ProductSku.canonical_product_id == CanonicalProduct.id)
         .where(WarehouseBatchStock.warehouse_id == wh.id)
         .options(
-            selectinload(WarehouseBatchStock.batch).selectinload(InventoryBatch.sku).selectinload(ProductSku.product)
+            selectinload(WarehouseBatchStock.batch).selectinload(InventoryBatch.sku).selectinload(ProductSku.canonical_product)
         )
     )
 
@@ -806,7 +834,7 @@ def get_warehouse_batches(
     for s in stocks:
         b = s.batch
         sku = b.sku if b else None
-        prod = sku.product if sku else None
+        prod = sku.canonical_product if sku else None
         is_near_exp = bool(b.expiry_date <= fefo_cutoff) if b else False
         is_exp = bool(b.expiry_date < today) if b else False
 
@@ -816,7 +844,7 @@ def get_warehouse_batches(
             "batch_number": b.batch_number if b else "",
             "product_name": prod.canonical_name if prod else "",
             "sku_code": sku.sku_code if sku else "",
-            "unit_name": sku.unit_name if sku else "",
+            "unit_name": sku.uom if sku else "",
             "manufacture_date": b.manufacture_date.isoformat() if b and b.manufacture_date else None,
             "expiry_date": b.expiry_date.isoformat() if b else None,
             "quantity_on_hand": s.quantity_on_hand,
@@ -2758,3 +2786,222 @@ def admin_reject_stock_adjustment(
     db.commit()
 
     return {"success": True, "message": f"Admin đã từ chối phiếu {adj.adjustment_code}"}
+
+
+# ==============================================================================
+# HỆ THỐNG THÔNG BÁO KHO (WAREHOUSE NOTIFICATIONS - RBAC & ANTI-IDOR)
+# ==============================================================================
+
+@router.get("/notifications")
+def get_warehouse_notifications(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+    is_read: Optional[bool] = None,
+    severity: Optional[str] = None,
+    notification_type: Optional[str] = None,
+    warehouse_id: Optional[int] = None,
+    current_user: User = Depends(require_warehouse_staff_or_manager),
+    db: Session = Depends(get_db),
+):
+    """
+    Lấy danh sách thông báo dành riêng cho người dùng kho (Quản lý kho hoặc Nhân viên kho).
+    Phân quyền nghiêm ngặt và chống IDOR:
+    - Quản lý kho: Xem toàn bộ thông báo thuộc kho mình phụ trách.
+    - Nhân viên kho: Chỉ nhận đơn mới (ORDER_NEW) và công việc được giao trực tiếp cho mình.
+    """
+    user, _ = current_user
+    wh = _resolve_caller_warehouse(user, db, warehouse_id)
+
+    # Nếu là Quản lý kho, kích hoạt quét tự động hạn sử dụng (FEFO 60 ngày), tồn kho và đơn quá hạn
+    if user.role in [UserRole.WAREHOUSE_MANAGER, UserRole.ADMIN]:
+        try:
+            WarehouseNotificationService.run_all_scans(db, warehouse_id=wh.id)
+        except Exception as e:
+            logger.warning(f"Error running notification scans for warehouse {wh.id}: {e}")
+
+    query = select(WarehouseNotification).where(WarehouseNotification.warehouse_id == wh.id)
+
+    # Lọc phân quyền theo vai trò
+    if user.role == UserRole.WAREHOUSE_STAFF:
+        query = query.where(
+            or_(
+                WarehouseNotification.recipient_user_id == user.id,
+                and_(
+                    WarehouseNotification.recipient_user_id.is_(None),
+                    WarehouseNotification.notification_type == "ORDER_NEW",
+                ),
+            )
+        )
+
+    if is_read is not None:
+        query = query.where(WarehouseNotification.is_read == is_read)
+    if severity and severity.upper() != "ALL":
+        query = query.where(WarehouseNotification.severity == severity.upper())
+    if notification_type and notification_type.upper() != "ALL":
+        query = query.where(WarehouseNotification.notification_type == notification_type.upper())
+
+    total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
+
+    unread_q = select(func.count()).where(
+        WarehouseNotification.warehouse_id == wh.id,
+        WarehouseNotification.is_read.is_(False),
+    )
+    if user.role == UserRole.WAREHOUSE_STAFF:
+        unread_q = unread_q.where(
+            or_(
+                WarehouseNotification.recipient_user_id == user.id,
+                and_(
+                    WarehouseNotification.recipient_user_id.is_(None),
+                    WarehouseNotification.notification_type == "ORDER_NEW",
+                ),
+            )
+        )
+    unread_total = db.scalar(unread_q) or 0
+
+    notifications = db.scalars(
+        query.order_by(WarehouseNotification.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+
+    items = []
+    for n in notifications:
+        items.append({
+            "id": n.id,
+            "warehouse_id": n.warehouse_id,
+            "recipient_user_id": n.recipient_user_id,
+            "notification_type": n.notification_type,
+            "title": n.title,
+            "message": n.message,
+            "severity": n.severity,
+            "entity_type": n.entity_type,
+            "entity_id": n.entity_id,
+            "action_url": n.action_url,
+            "is_read": n.is_read,
+            "read_at": n.read_at.isoformat() if n.read_at else None,
+            "created_at": n.created_at.isoformat() if n.created_at else None,
+        })
+
+    return {
+        "items": items,
+        "total": total,
+        "unread_total": unread_total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+@router.get("/notifications/unread-count")
+def get_warehouse_notifications_unread_count(
+    warehouse_id: Optional[int] = None,
+    current_user: User = Depends(require_warehouse_staff_or_manager),
+    db: Session = Depends(get_db),
+):
+    """
+    Endpoint phản hồi nhanh số lượng thông báo chưa đọc (phục vụ Polling 30s của chuông thông báo).
+    """
+    user, _ = current_user
+    wh = _resolve_caller_warehouse(user, db, warehouse_id)
+
+    unread_q = select(func.count()).where(
+        WarehouseNotification.warehouse_id == wh.id,
+        WarehouseNotification.is_read.is_(False),
+    )
+    if user.role == UserRole.WAREHOUSE_STAFF:
+        unread_q = unread_q.where(
+            or_(
+                WarehouseNotification.recipient_user_id == user.id,
+                and_(
+                    WarehouseNotification.recipient_user_id.is_(None),
+                    WarehouseNotification.notification_type == "ORDER_NEW",
+                ),
+            )
+        )
+    unread_count = db.scalar(unread_q) or 0
+    return {"unread_count": unread_count}
+
+
+@router.patch("/notifications/{notification_id}/read")
+def mark_warehouse_notification_as_read(
+    notification_id: int,
+    warehouse_id: Optional[int] = None,
+    current_user: User = Depends(require_warehouse_staff_or_manager),
+    db: Session = Depends(get_db),
+):
+    """
+    Đánh dấu thông báo là đã đọc.
+    Bảo vệ chống IDOR: Nếu thông báo thuộc kho khác hoặc của nhân viên khác, trả HTTP 404 hoặc 403.
+    """
+    user, _ = current_user
+    wh = _resolve_caller_warehouse(user, db, warehouse_id)
+
+    notif = db.get(WarehouseNotification, notification_id)
+    if not notif or notif.warehouse_id != wh.id:
+        raise HTTPException(status_code=404, detail="Không tìm thấy thông báo")
+
+    if user.role == UserRole.WAREHOUSE_STAFF:
+        is_my_task = notif.recipient_user_id == user.id
+        is_order_broadcast = notif.recipient_user_id is None and notif.notification_type == "ORDER_NEW"
+        if not (is_my_task or is_order_broadcast):
+            raise HTTPException(status_code=403, detail="Bạn không có quyền thao tác trên thông báo này")
+
+    notif.is_read = True
+    notif.read_at = utcnow()
+    db.commit()
+
+    return {"success": True, "id": notif.id, "is_read": True}
+
+
+@router.post("/notifications/mark-all-read")
+def mark_all_warehouse_notifications_as_read(
+    warehouse_id: Optional[int] = None,
+    current_user: User = Depends(require_warehouse_staff_or_manager),
+    db: Session = Depends(get_db),
+):
+    """
+    Đánh dấu tất cả thông báo hợp lệ của người dùng trong kho là đã đọc.
+    """
+    user, _ = current_user
+    wh = _resolve_caller_warehouse(user, db, warehouse_id)
+
+    query = select(WarehouseNotification).where(
+        WarehouseNotification.warehouse_id == wh.id,
+        WarehouseNotification.is_read.is_(False),
+    )
+    if user.role == UserRole.WAREHOUSE_STAFF:
+        query = query.where(
+            or_(
+                WarehouseNotification.recipient_user_id == user.id,
+                and_(
+                    WarehouseNotification.recipient_user_id.is_(None),
+                    WarehouseNotification.notification_type == "ORDER_NEW",
+                ),
+            )
+        )
+
+    notifications = db.scalars(query).all()
+    now_dt = utcnow()
+    for n in notifications:
+        n.is_read = True
+        n.read_at = now_dt
+
+    db.commit()
+    return {"success": True, "marked_count": len(notifications)}
+
+
+@router.post("/notifications/scan")
+def trigger_warehouse_notification_scans(
+    warehouse_id: Optional[int] = None,
+    current_user: User = Depends(require_warehouse_manager),
+    db: Session = Depends(get_db),
+):
+    """
+    Kích hoạt quét chủ động các điều kiện cảnh báo:
+    - Thuốc cận hạn 60 ngày theo FEFO (WARNING, HIGH, CRITICAL, EXPIRED)
+    - Tồn kho thấp (<= 10) và Hết hàng (== 0)
+    - Đơn hàng quá hạn (> 24h)
+    """
+    user, _ = current_user
+    wh = _resolve_caller_warehouse(user, db, warehouse_id)
+    results = WarehouseNotificationService.run_all_scans(db, warehouse_id=wh.id)
+    return {"success": True, "warehouse_code": wh.code, **results}

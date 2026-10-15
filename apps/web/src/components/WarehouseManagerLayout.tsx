@@ -24,6 +24,7 @@ import {
 import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { LiveClock } from './LiveClock'
+import { NotificationBell } from './NotificationBell'
 import { useAuth } from '../services/auth'
 import { api } from '../services/api'
 
@@ -354,6 +355,7 @@ export function WarehouseManagerLayout() {
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
             <LiveClock />
+            <NotificationBell viewAllUrl="/warehouse/alerts" />
             <a
               href="http://localhost:3000"
               target="_blank"

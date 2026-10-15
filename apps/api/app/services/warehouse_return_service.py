@@ -174,6 +174,15 @@ class WarehouseReturnService:
         # Cập nhật trạng thái yêu cầu cha sang ASSIGNED_TO_WAREHOUSE
         return_request.status = ReturnStatus.ASSIGNED_TO_WAREHOUSE.value
         db.add(return_request)
+
+        # Gửi thông báo RETURN_NEW cho từng quản lý kho phụ trách
+        for c in cases_created:
+            try:
+                from app.services.warehouse_notification_service import WarehouseNotificationService
+                WarehouseNotificationService.notify_return_new(db, return_request, c.warehouse_id)
+            except Exception as ex:
+                logger.warning(f"Failed to create RETURN_NEW notification for case {c.case_code}: {ex}")
+
         db.flush()
 
         logger.info(

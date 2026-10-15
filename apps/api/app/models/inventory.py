@@ -520,3 +520,25 @@ class WarehouseAlert(Base):
 
     warehouse: Mapped["Warehouse"] = relationship()
     reader: Mapped["User | None"] = relationship("User", foreign_keys=[read_by])
+
+
+class WarehouseNotification(Base):
+    __tablename__ = "warehouse_notifications"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id", ondelete="CASCADE"), index=True)
+    recipient_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    notification_type: Mapped[str] = mapped_column(String(50), index=True)
+    title: Mapped[str] = mapped_column(String(255))
+    message: Mapped[str] = mapped_column(Text)
+    severity: Mapped[str] = mapped_column(String(20), default="INFO")  # INFO, WARNING, HIGH, CRITICAL, EXPIRED
+    entity_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    entity_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    action_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    deduplication_key: Mapped[str | None] = mapped_column(String(150), unique=True, index=True, nullable=True)
+
+    warehouse: Mapped["Warehouse"] = relationship()
+    recipient: Mapped["User | None"] = relationship("User", foreign_keys=[recipient_user_id])

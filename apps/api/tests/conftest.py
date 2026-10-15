@@ -131,3 +131,17 @@ def manager_hn_headers(client):
     assert response.status_code == 200
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
+
+@pytest.fixture
+def staff_hcm_headers(client):
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"email": "staff.hcm@pharmatrust.vn", "password": "Staff@2026"},
+    )
+    if response.status_code != 200:
+        response = client.post(
+            "/api/v1/auth/login",
+            json={"email": "staff_hcm@pharmatrust.vn", "password": "Staff@2026"},
+        )
+    assert response.status_code == 200
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}

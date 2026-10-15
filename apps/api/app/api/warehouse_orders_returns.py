@@ -416,6 +416,18 @@ def assign_order_fulfillment_staff(
     if ful.status == "PENDING":
         ful.status = "ALLOCATED"
 
+    if ful.order and ful.warehouse_id:
+        try:
+            from app.services.warehouse_notification_service import WarehouseNotificationService
+            WarehouseNotificationService.notify_order_assigned(
+                db=db,
+                order=ful.order,
+                warehouse_id=ful.warehouse_id,
+                staff_user_id=payload.staff_id,
+            )
+        except Exception:
+            pass
+
     write_audit(
         db=db,
         action="ASSIGN_ORDER_STAFF",

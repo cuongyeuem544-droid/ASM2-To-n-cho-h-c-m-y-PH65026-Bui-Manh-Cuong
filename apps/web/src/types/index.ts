@@ -363,3 +363,19 @@ export interface WarehouseAlertItem {
   is_read: boolean
   created_at: string | null
 }
+
+export interface WarehouseNotificationItem {
+  id: number
+  warehouse_id: number
+  recipient_user_id: number | null
+  notification_type: string
+  title: string
+  message: string
+  severity: 'INFO' | 'WARNING' | 'HIGH' | 'CRITICAL' | 'EXPIRED' | string
+  entity_type: string | null
+  entity_id: string | null
+  action_url: string | null
+  is_read: boolean
+  read_at: string | null
+  created_at: string | null
+}

@@ -630,6 +630,15 @@ def submit_customer_evidence_endpoint(
         customer_note=payload.customer_note,
         phone_verify=payload.phone_verify,
     )
+
+    try:
+        from app.services.warehouse_notification_service import WarehouseNotificationService
+        ret = db.scalar(select(ReturnRequest).where(ReturnRequest.return_code == return_code))
+        if ret and req.warehouse_id:
+            WarehouseNotificationService.notify_return_evidence_added(db, ret, req.warehouse_id)
+            db.commit()
+    except Exception:
+        pass
     return {
         "success": True,
         "message": "Đã gửi hình ảnh bổ sung thành công. Hồ sơ đang chờ Quản lý kho xem xét.",

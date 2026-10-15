@@ -15,6 +15,7 @@ import {
 import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { LiveClock } from './LiveClock'
+import { NotificationBell } from './NotificationBell'
 import { useAuth } from '../services/auth'
 import { api } from '../services/api'
 
@@ -151,6 +152,7 @@ export function WarehouseStaffLayout() {
 
         {/* Right: User Station & Logout */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <NotificationBell viewAllUrl="/staff/history" bellColor="white" />
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontSize: '12px', fontWeight: 800 }}>{user?.full_name}</div>
             <div style={{ fontSize: '10px', opacity: 0.85 }}>Nhân viên đóng gói</div>

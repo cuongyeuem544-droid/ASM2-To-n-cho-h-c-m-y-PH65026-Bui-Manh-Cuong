@@ -57,6 +57,7 @@ from app.models.inventory import (
     WarehouseLocation,
     WarehouseImportJob,
     WarehouseAlert,
+    WarehouseNotification,
 )
 from app.models.returns import (
     ExchangeItem,
@@ -164,4 +165,5 @@ __all__ = [
     "ReturnInspection",
     "ReturnEvidenceRequest",
     "ReturnEvidenceRequestStatus",
+    "WarehouseNotification",
 ]
