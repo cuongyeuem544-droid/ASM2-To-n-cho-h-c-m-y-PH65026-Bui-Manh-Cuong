@@ -532,8 +532,6 @@ class ReturnService:
 
         # 1. Kiểm tra trạng thái hợp lệ trước khi nhận hàng (ngăn thao tác lặp / sai quy trình)
         valid_receipt_statuses = [
-            ReturnStatus.REQUESTED.value,
-            ReturnStatus.REVIEWING.value,
             ReturnStatus.APPROVED.value,
             ReturnStatus.WAITING_CUSTOMER_RETURN.value,
             ReturnStatus.RETURN_IN_TRANSIT.value,
@@ -541,7 +539,7 @@ class ReturnService:
         if ret.status not in valid_receipt_statuses:
             raise HTTPException(
                 status_code=400,
-                detail=f"Chỉ có thể tiếp nhận kiện hàng khi chưa hoàn tất tiếp nhận/kiểm định (Hiện tại: {ret.status}).",
+                detail=f"Chỉ có thể tiếp nhận kiện hàng khi yêu cầu đã được phê duyệt và đang vận chuyển về kho (Hiện tại: {ret.status}). Không thể tiếp nhận hàng khi phiếu còn đang chờ duyệt hoặc đang thẩm định.",
             )
 
         old_status = ret.status
@@ -593,6 +591,9 @@ class ReturnService:
                 detail=f"Yêu cầu phải ở trạng thái Đã nhận hàng (RECEIVED) hoặc Đang kiểm định (INSPECTING) để thẩm định chất lượng (Hiện tại: {ret.status}).",
             )
 
+        if not inspection_payload:
+            raise HTTPException(status_code=400, detail="Dữ liệu kiểm định sản phẩm không được để trống.")
+
         ret_items_map = {item.id: item for item in ret.items}
         order = ret.order
 
@@ -601,23 +602,66 @@ class ReturnService:
         if not default_wh:
             raise HTTPException(status_code=500, detail="Không tìm thấy kho hàng hợp lệ để nhập hàng hoàn.")
 
+        seen_item_ids: set[int] = set()
+
         for insp in inspection_payload:
             item_id = insp.get("return_item_id")
-            if item_id not in ret_items_map:
-                continue
+            if not item_id or item_id not in ret_items_map:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Sản phẩm đổi/trả (ID {item_id}) không hợp lệ hoặc không thuộc phiếu '{return_code}'.",
+                )
+
+            if item_id in seen_item_ids:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Sản phẩm #{item_id} bị trùng lặp trong dữ liệu kiểm định.",
+                )
+            seen_item_ids.add(item_id)
 
             item = ret_items_map[item_id]
-            condition = insp.get("condition", ItemCondition.GOOD_CONDITION.value)
-            destination = insp.get("restock_destination", RestockDestination.SELLABLE_STOCK.value)
-            accepted_qty = int(insp.get("accepted_quantity", item.requested_quantity))
+            condition = insp.get("condition") or ItemCondition.GOOD_CONDITION.value
+            destination = insp.get("restock_destination") or RestockDestination.SELLABLE_STOCK.value
+
+            valid_dests = [
+                RestockDestination.SELLABLE_STOCK.value,
+                RestockDestination.QUARANTINE.value,
+                RestockDestination.NON_SELLABLE_DISPOSE.value,
+            ]
+            if destination not in valid_dests:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Phân luồng kho '{destination}' không hợp lệ. Phải là một trong: {valid_dests}",
+                )
+
+            raw_accepted = insp.get("accepted_quantity")
+            accepted_qty = int(raw_accepted) if raw_accepted is not None else item.requested_quantity
             rejected_qty = int(insp.get("rejected_quantity", 0))
+
+            if accepted_qty < 0 or rejected_qty < 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Số lượng chấp nhận và loại bỏ của '{item.product_name}' không được âm.",
+                )
+
+            if accepted_qty + rejected_qty <= 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Vui lòng nhập số lượng kiểm định cho sản phẩm '{item.product_name}' (tổng số lượng phải > 0).",
+                )
+
             raw_restock = insp.get("restock_quantity")
             restock_qty = (
                 int(raw_restock)
                 if raw_restock is not None
                 else (accepted_qty if destination == RestockDestination.SELLABLE_STOCK.value else 0)
             )
-            insp_note = insp.get("notes")
+
+            if restock_qty < 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Số lượng nhập lại kho bán của '{item.product_name}' không được âm.",
+                )
 
             # 2. Kiểm tra điều kiện chuyên môn GSP Dược
             if destination == RestockDestination.SELLABLE_STOCK.value:
@@ -645,7 +689,7 @@ class ReturnService:
             item.accepted_quantity = accepted_qty
             item.rejected_quantity = rejected_qty
             item.restock_quantity = restock_qty
-            item.inspection_notes = insp_note
+            item.inspection_notes = insp.get("notes")
 
             # Xác định đúng kho xuất phát ban đầu của order_item này
             orig_alloc = db.scalar(

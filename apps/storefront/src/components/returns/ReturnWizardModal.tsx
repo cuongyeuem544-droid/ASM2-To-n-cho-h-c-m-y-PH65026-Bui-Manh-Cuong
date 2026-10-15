@@ -77,6 +77,9 @@ export function ReturnWizardModal({
   const [uploadedImages, setUploadedImages] = useState<string[]>([]);
   const [uploadingImage, setUploadingImage] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState<boolean>(false);
+  const [createdReturnCode, setCreatedReturnCode] = useState<string | null>(null);
+  const [uploadErrors, setUploadErrors] = useState<string[]>([]);
+  const [failedFiles, setFailedFiles] = useState<File[]>([]);
 
   useEffect(() => {
     const token = typeof window !== "undefined" ? localStorage.getItem("pharmatrust_token") || localStorage.getItem("h4care_auth_token") : null;
@@ -166,46 +169,76 @@ export function ReturnWizardModal({
     if (guestToken) headers["X-Order-Token"] = guestToken;
 
     setSubmitting(true);
+    setUploadErrors([]);
     try {
-      const res = await fetch("/api/v1/returns", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          order_code: orderCode,
-          request_type: requestType,
-          reason_code: reasonCode,
-          reason_text: selectedReasonObj?.text || "Yêu cầu đổi trả",
-          customer_note: customerNote,
-          return_method: "CUSTOMER_SHIP",
-          items: itemsPayload,
-          customer_phone_verify: phoneVerify.trim(),
-        }),
-      });
+      let activeReturnCode = createdReturnCode;
 
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data.detail || "Không thể gửi yêu cầu.");
+      // 1. Tạo phiếu đổi trả nếu chưa từng tạo thành công trước đó (chống tạo trùng khi retry upload ảnh)
+      if (!activeReturnCode) {
+        const res = await fetch("/api/v1/returns", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            order_code: orderCode,
+            request_type: requestType,
+            reason_code: reasonCode,
+            reason_text: selectedReasonObj?.text || "Yêu cầu đổi trả",
+            customer_note: customerNote,
+            return_method: "CUSTOMER_SHIP",
+            items: itemsPayload,
+            customer_phone_verify: phoneVerify.trim(),
+          }),
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.detail || "Không thể gửi yêu cầu.");
+        }
+        activeReturnCode = data.return_code;
+        setCreatedReturnCode(activeReturnCode);
       }
 
-      // Upload selected evidence files with the generated return_code
-      if (selectedFiles.length > 0 && data.return_code) {
-        for (const file of selectedFiles) {
+      // 2. Tải lên danh sách ảnh bằng chứng (hoặc các ảnh retry còn lỗi)
+      const filesToUpload = failedFiles.length > 0 ? failedFiles : selectedFiles;
+      if (filesToUpload.length > 0 && activeReturnCode) {
+        const currentFailed: File[] = [];
+        const errMessages: string[] = [];
+
+        for (const file of filesToUpload) {
           const formData = new FormData();
           formData.append("file", file);
-          formData.append("return_code", data.return_code);
+          formData.append("return_code", activeReturnCode);
           const uploadHeaders: Record<string, string> = {};
           if (token) uploadHeaders["Authorization"] = `Bearer ${token}`;
           if (guestToken) uploadHeaders["X-Order-Token"] = guestToken;
 
-          await fetch("/api/v1/returns/upload-evidence", {
-            method: "POST",
-            headers: uploadHeaders,
-            body: formData,
-          }).catch(() => {});
+          try {
+            const upRes = await fetch("/api/v1/returns/upload-evidence", {
+              method: "POST",
+              headers: uploadHeaders,
+              body: formData,
+            });
+            if (!upRes.ok) {
+              const errData = await upRes.json().catch(() => ({}));
+              currentFailed.push(file);
+              errMessages.push(`Ảnh "${file.name}": ${errData.detail || `Lỗi tải lên (HTTP ${upRes.status})`}`);
+            }
+          } catch (netErr: any) {
+            currentFailed.push(file);
+            errMessages.push(`Ảnh "${file.name}": Lỗi kết nối mạng`);
+          }
+        }
+
+        if (currentFailed.length > 0) {
+          setFailedFiles(currentFailed);
+          setUploadErrors(errMessages);
+          return;
         }
       }
 
-      onSuccess(data.return_code);
+      if (activeReturnCode) {
+        onSuccess(activeReturnCode);
+      }
     } catch (err: any) {
       alert(err.message || "Gặp sự cố khi gửi yêu cầu.");
     } finally {
@@ -444,7 +477,11 @@ export function ReturnWizardModal({
                     <img src={url} alt="Bằng chứng" className="w-full h-full object-cover" />
                     <button
                       type="button"
-                      onClick={() => setUploadedImages((prev) => prev.filter((_, i) => i !== idx))}
+                      onClick={() => {
+                        setUploadedImages((prev) => prev.filter((_, i) => i !== idx));
+                        setSelectedFiles((prev) => prev.filter((_, i) => i !== idx));
+                        setFailedFiles((prev) => prev.filter((_, i) => i !== idx));
+                      }}
                       className="absolute inset-0 bg-black/50 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                     >
                       <X className="w-4 h-4" />
@@ -487,6 +524,26 @@ export function ReturnWizardModal({
               </div>
             </div>
 
+            {/* Upload Errors Alert & Retry */}
+            {uploadErrors.length > 0 && (
+              <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 text-xs space-y-1.5">
+                <div className="flex items-center gap-2 font-bold">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>
+                    Phiếu #{createdReturnCode} đã được tạo thành công, nhưng một số ảnh chưa tải lên được:
+                  </span>
+                </div>
+                <ul className="list-disc list-inside text-[11px] space-y-0.5 pl-2 text-amber-700">
+                  {uploadErrors.map((msg, i) => (
+                    <li key={i}>{msg}</li>
+                  ))}
+                </ul>
+                <p className="text-[11px] text-amber-600">
+                  Bạn có thể bấm &quot;Thử lại tải ảnh&quot; hoặc &quot;Hoàn tất không cần tải thêm&quot;.
+                </p>
+              </div>
+            )}
+
             {/* Actions */}
             <div className="flex items-center justify-end gap-3 pt-2">
               <button
@@ -496,12 +553,21 @@ export function ReturnWizardModal({
               >
                 Hủy bỏ
               </button>
+              {createdReturnCode && uploadErrors.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onSuccess(createdReturnCode)}
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-bold text-xs hover:bg-slate-100 transition-colors"
+                >
+                  Hoàn tất không cần tải thêm
+                </button>
+              )}
               <button
                 type="submit"
                 disabled={submitting}
                 className="px-6 py-2.5 rounded-xl bg-brand-blue-600 hover:bg-brand-blue-700 active:bg-brand-blue-800 text-white font-extrabold text-xs transition-colors shadow-xs disabled:opacity-50 flex items-center gap-1.5"
               >
-                {submitting ? "Đang gửi yêu cầu..." : "Xác nhận gửi yêu cầu"}
+                {submitting ? "Đang xử lý..." : createdReturnCode ? "Thử lại tải ảnh" : "Xác nhận gửi yêu cầu"}
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>

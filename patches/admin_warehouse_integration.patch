@@ -52,7 +52,7 @@ index 2a3bf6d..eab9862 100644
              <button
                key={st}
 diff --git a/apps/web/src/pages/WarehousesPage.tsx b/apps/web/src/pages/WarehousesPage.tsx
-index d9f97e7..37aba69 100644
+index d9f97e7..f6a66ec 100644
 --- a/apps/web/src/pages/WarehousesPage.tsx
 +++ b/apps/web/src/pages/WarehousesPage.tsx
 @@ -15,6 +15,7 @@ import {
@@ -115,7 +115,7 @@ index d9f97e7..37aba69 100644
    // Form state
    const [code, setCode] = useState('')
    const [name, setName] = useState('')
-@@ -123,13 +169,192 @@ export function WarehousesPage() {
+@@ -123,13 +169,208 @@ export function WarehousesPage() {
      loadWarehouses()
    }, [])
  
@@ -200,19 +200,19 @@ index d9f97e7..37aba69 100644
 +  function openInspectModal(ret: any) {
 +    setInspectingReturn(ret)
 +    setInspectError(null)
-+    setPharmacistNotes('Kiểm định đạt tiêu chuẩn GSP, bao bì tem nhãn nguyên vẹn, hạn dùng an toàn.')
++    setPharmacistNotes('')
 +    const items: InspectItemForm[] = (ret.items || []).map((it: any) => {
 +      const qty = it.requested_quantity || it.original_quantity || 1
 +      return {
 +        return_item_id: it.id,
 +        product_name: it.product_name,
 +        requested_quantity: qty,
-+        condition: 'GOOD_CONDITION',
-+        restock_destination: 'SELLABLE_STOCK',
-+        accepted_quantity: qty,
++        condition: '', // Yêu cầu Dược sĩ chủ động chọn
++        restock_destination: '', // Yêu cầu Dược sĩ chủ động chọn
++        accepted_quantity: 0,
 +        rejected_quantity: 0,
-+        restock_quantity: qty,
-+        notes: 'Bao bì nguyên vẹn, tem nhãn chuẩn GSP.',
++        restock_quantity: 0,
++        notes: '',
 +      }
 +    })
 +    setInspectItems(items)
@@ -241,11 +241,23 @@ index d9f97e7..37aba69 100644
 +
 +    // Kiểm tra điều kiện chuyên môn GSP cho toàn bộ ReturnItems
 +    for (const it of inspectItems) {
++      if (!it.condition) {
++        setInspectError(`Sản phẩm '${it.product_name}': Vui lòng chọn tình trạng kiểm định Dược (GSP).`)
++        return
++      }
++      if (!it.restock_destination) {
++        setInspectError(`Sản phẩm '${it.product_name}': Vui lòng chọn phân luồng kho (Disposition).`)
++        return
++      }
 +      if (it.restock_destination === 'SELLABLE_STOCK') {
 +        if (it.condition !== 'GOOD_CONDITION' && it.condition !== 'SEALED') {
 +          setInspectError(`Sản phẩm '${it.product_name}' có tình trạng '${it.condition}', không đạt chuẩn GSP để nhập kho bán. Vui lòng chuyển sang Biệt trữ hoặc Tiêu hủy.`)
 +          return
 +        }
++      }
++      if (it.accepted_quantity + it.rejected_quantity <= 0) {
++        setInspectError(`Sản phẩm '${it.product_name}': Vui lòng nhập số lượng kiểm định (chấp nhận hoặc loại bỏ > 0).`)
++        return
 +      }
 +      if (it.accepted_quantity + it.rejected_quantity > it.requested_quantity) {
 +        setInspectError(`Sản phẩm '${it.product_name}': Tổng SL chấp nhận (${it.accepted_quantity}) và loại bỏ (${it.rejected_quantity}) vượt quá SL yêu cầu (${it.requested_quantity}).`)
@@ -254,6 +266,10 @@ index d9f97e7..37aba69 100644
 +      if (it.restock_destination === 'SELLABLE_STOCK' && it.restock_quantity > it.accepted_quantity) {
 +        setInspectError(`Sản phẩm '${it.product_name}': Số lượng nhập kho bán (${it.restock_quantity}) không được lớn hơn số lượng chấp nhận (${it.accepted_quantity}).`)
 +        return
++      }
++      if (it.restock_destination === 'SELLABLE_STOCK' && it.restock_quantity > 0) {
++        const confirmed = window.confirm(`CẢNH BÁO AN TOÀN DƯỢC GSP:\nBạn đang xác nhận nhập lại kho bán cho sản phẩm '${it.product_name}' với số lượng ${it.restock_quantity} đơn vị.\n\nHành động này sẽ tăng ngay tồn kho khả dụng để mở bán. Bạn có chắc chắn sản phẩm đạt tiêu chuẩn chất lượng lưu thông không?`)
++        if (!confirmed) return
 +      }
 +    }
 +
@@ -308,7 +324,7 @@ index d9f97e7..37aba69 100644
      try {
        const data = await api<WarehouseStockDetailResponse>(`/warehouses/${wh.id}/stocks`)
        setDetailData(data)
-@@ -697,9 +922,487 @@ export function WarehousesPage() {
+@@ -697,9 +938,487 @@ export function WarehousesPage() {
                </button>
              </div>
  
@@ -797,7 +813,7 @@ index d9f97e7..37aba69 100644
                  <div style={{ textAlign: 'center', padding: '60px 0', color: '#64748b' }}>
                    <RefreshCw size={28} className="spin" style={{ margin: '0 auto 12px', display: 'block', color: '#0284c7' }} />
                    <span>Đang tải thông tin mặt hàng thuốc và hạn dùng...</span>
-@@ -1111,6 +1814,240 @@ export function WarehousesPage() {
+@@ -1111,6 +1830,253 @@ export function WarehousesPage() {
            </div>
          </div>
        )}
@@ -879,9 +895,21 @@ index d9f97e7..37aba69 100644
 +                        </label>
 +                        <select
 +                          value={item.condition}
-+                          onChange={(e) => updateInspectItem(idx, { condition: e.target.value })}
++                          onChange={(e) => {
++                            const newCond = e.target.value
++                            const isGood = newCond === 'GOOD_CONDITION' || newCond === 'SEALED'
++                            const isDamaged = newCond === 'DAMAGED' || newCond === 'DEFECTIVE'
++                            updateInspectItem(idx, {
++                              condition: newCond,
++                              accepted_quantity: isGood ? item.requested_quantity : 0,
++                              rejected_quantity: isGood ? 0 : item.requested_quantity,
++                              restock_destination: isGood ? (item.restock_destination || 'SELLABLE_STOCK') : isDamaged ? 'NON_SELLABLE_DISPOSE' : 'QUARANTINE',
++                              restock_quantity: isGood && item.restock_destination === 'SELLABLE_STOCK' ? item.requested_quantity : 0,
++                            })
++                          }}
 +                          style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12.5px' }}
 +                        >
++                          <option value="">-- Dược sĩ chọn tình trạng --</option>
 +                          <option value="GOOD_CONDITION">ĐẠT GSP - Hàng tốt, nguyên vẹn</option>
 +                          <option value="SEALED">ĐẠT GSP - Nguyên seal nhà sản xuất</option>
 +                          <option value="OPENED">Đã mở bao bì / rách seal</option>
@@ -904,6 +932,7 @@ index d9f97e7..37aba69 100644
 +                          }}
 +                          style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12.5px' }}
 +                        >
++                          <option value="">-- Dược sĩ chọn luồng kho --</option>
 +                          <option
 +                            value="SELLABLE_STOCK"
 +                            disabled={item.condition !== 'GOOD_CONDITION' && item.condition !== 'SEALED'}

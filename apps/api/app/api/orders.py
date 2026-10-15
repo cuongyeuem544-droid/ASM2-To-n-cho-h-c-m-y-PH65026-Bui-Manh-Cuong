@@ -1110,24 +1110,97 @@ def update_order_status(
     admin: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER, UserRole.PHARMACIST)),
 ):
     """
-    Cập nhật trạng thái đơn hàng (Duyệt, Giao, Hoàn thành, Hủy).
+    Cập nhật trạng thái đơn hàng (Duyệt, Giao, Hoàn thành, Hủy) theo Finite State Machine nghiêm ngặt:
+    - Chặn cập nhật payment_status trực tiếp (phải qua cổng thanh toán / đối soát chuyên biệt).
+    - Chặn chuyển trực tiếp PENDING -> COMPLETED / SHIPPING khi các kiện hàng chưa DELIVERED.
+    - Chặn chuyển ngược trạng thái từ trạng thái kết thúc (COMPLETED, CANCELLED).
+    - Khi CANCELLED: tự động giải phóng toàn bộ tồn kho đã giữ chỗ (StockReservation) và khôi phục quantity_available.
     """
     order = db.get(Order, order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng.")
 
-    valid_statuses = {"PENDING", "CONFIRMED", "PROCESSING", "SHIPPING", "COMPLETED", "CANCELLED"}
-    if payload.order_status.upper() not in valid_statuses:
-        raise HTTPException(status_code=400, detail=f"Trạng thái không hợp lệ. Phải là một trong: {valid_statuses}")
-
-    order.order_status = payload.order_status.upper()
     if payload.payment_status and payload.payment_status.upper() != (order.payment_status or "").upper():
         raise HTTPException(
             status_code=400,
             detail="Không được phép thay đổi trực tiếp payment_status sang PAID (hoặc bất kỳ trạng thái nào kể cả PAID, PENDING, FAILED) thông qua API cập nhật đơn thông thường. Chỉ cập nhật trạng thái thanh toán khi có webhook hợp lệ từ cổng thanh toán hoặc quy trình đối soát tài chính chuyên biệt có kiểm toán (PaymentReconciliationService).",
         )
 
+    valid_statuses = {"PENDING", "CONFIRMED", "PROCESSING", "SHIPPING", "COMPLETED", "CANCELLED"}
+    target_status = payload.order_status.upper().strip()
+    if target_status not in valid_statuses:
+        raise HTTPException(status_code=400, detail=f"Trạng thái không hợp lệ. Phải là một trong: {valid_statuses}")
+
+    current_status = (order.order_status or "").upper().strip()
+    if target_status == current_status:
+        return {
+            "status": "UPDATED",
+            "message": f"Đơn hàng {order.order_code} đã ở trạng thái {current_status}.",
+            "order_id": order.id,
+            "order_status": order.order_status,
+            "payment_status": order.payment_status,
+        }
+
+    # 1. Chặn chuyển đổi từ trạng thái kết thúc (Terminal states)
+    if current_status in ["COMPLETED", "CANCELLED"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Không thể thay đổi trạng thái của đơn hàng đã ở trạng thái kết thúc '{current_status}'.",
+        )
+
+    # 2. Quy tắc chuyển trạng thái hợp lệ (FSM Forward Transitions)
+    allowed_transitions = {
+        "PENDING": {"CONFIRMED", "PROCESSING", "CANCELLED"},
+        "CONFIRMED": {"PROCESSING", "SHIPPING", "CANCELLED"},
+        "PROCESSING": {"SHIPPING", "CANCELLED"},
+        "SHIPPING": {"COMPLETED", "CANCELLED"},
+    }
+    if target_status not in allowed_transitions.get(current_status, set()):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Không thể chuyển đổi trực tiếp trạng thái đơn hàng từ '{current_status}' sang '{target_status}'. Luồng xử lý đơn hàng không hợp lệ.",
+        )
+
+    # 3. Kiểm tra tính toàn vẹn của các kiện hàng (Fulfillments Guard)
+    fulfillments = db.scalars(select(OrderFulfillment).where(OrderFulfillment.order_id == order.id)).all()
+
+    if target_status == "COMPLETED":
+        if fulfillments:
+            non_delivered = [f for f in fulfillments if f.status != "DELIVERED"]
+            if non_delivered:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Không thể hoàn tất đơn hàng khi vẫn còn kiện hàng chưa giao thành công (DELIVERED). Trạng thái hiện tại: {[f'{f.fulfillment_code}: {f.status}' for f in non_delivered]}",
+                )
+
+    elif target_status == "SHIPPING":
+        if fulfillments:
+            has_shipped = any(f.status in ["SHIPPED", "DELIVERED"] for f in fulfillments)
+            if not has_shipped:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Không thể chuyển đơn sang SHIPPING khi chưa có kiện hàng nào được xuất kho (SHIPPED). Vui lòng cập nhật trạng thái kiện hàng trước.",
+                )
+
+    elif target_status == "CANCELLED":
+        if fulfillments:
+            already_shipped = [f for f in fulfillments if f.status in ["SHIPPED", "DELIVERED"]]
+            if already_shipped:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Không thể hủy đơn hàng đã xuất kho hoặc đã giao hàng ({len(already_shipped)} kiện). Vui lòng sử dụng quy trình Đổi / Trả hàng.",
+                )
+        # Tự động giải phóng tồn kho thuốc đã giữ chỗ (FEFO) và hủy các kiện pending
+        FulfillmentRoutingService.release_order_reservations(
+            db=db,
+            order_id=order.id,
+            reason=f"ADMIN_STATUS_UPDATE_BY_{admin.email}",
+        )
+
+    order.order_status = target_status
     db.commit()
+    db.refresh(order)
+
     return {
         "status": "UPDATED",
         "message": f"Đã cập nhật trạng thái đơn {order.order_code} thành {order.order_status}.",

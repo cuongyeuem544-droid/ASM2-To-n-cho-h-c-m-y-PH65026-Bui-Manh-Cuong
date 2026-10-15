@@ -478,7 +478,6 @@ def get_order_payment_status(
 def get_transaction_status(
     transaction_code: str,
     phone_verify: Optional[str] = Query(None),
-    token: Optional[str] = Query(None),
     x_order_token: Optional[str] = Header(None, alias="X-Order-Token"),
     authorization: Optional[str] = Header(None),
     current_user: Optional[User] = Depends(get_optional_current_user),
@@ -486,6 +485,7 @@ def get_transaction_status(
 ):
     """
     Tra cứu chi tiết một giao dịch thanh toán theo mã giao dịch duy nhất.
+    Yêu cầu truyền token qua Header X-Order-Token hoặc Authorization: Bearer, không dùng query string.
     """
     trans = db.scalar(
         select(PaymentTransaction).where(
@@ -498,7 +498,7 @@ def get_transaction_status(
     if trans.order_id:
         order = db.get(Order, trans.order_id)
         if order:
-            effective_token = token or x_order_token
+            effective_token = x_order_token
             if not effective_token and authorization and authorization.startswith("Bearer "):
                 bearer_val = authorization[7:].strip()
                 if verify_guest_order_token(bearer_val, order.order_code):

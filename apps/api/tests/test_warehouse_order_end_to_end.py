@@ -934,7 +934,7 @@ class TestWarehouseOrderEndToEnd(unittest.TestCase):
         self.assertIn("items", res.json())
 
     def test_30_warehouse_confirm_receipt(self):
-        """30. Kho dược xác nhận đã nhận kiện hàng hoàn từ bưu tá (chuyển sang RECEIVED)."""
+        """30. Kho dược xác nhận đã nhận kiện hàng hoàn từ bưu tá (chuyển sang RECEIVED). Chặn tiếp nhận khi chưa được duyệt."""
         order, item = self._create_delivered_order_for_return("0977000030")
         token = create_guest_order_token(order.order_code, order.customer_phone)
 
@@ -953,6 +953,24 @@ class TestWarehouseOrderEndToEnd(unittest.TestCase):
         self.assertIn(ret_res.status_code, [200, 201])
         ret_code = ret_res.json()["return_code"]
 
+        # 1. Chặn tiếp nhận hàng hoàn khi phiếu mới ở trạng thái REQUESTED (chưa duyệt) -> 400
+        rcv_unapproved = self.client.post(
+            f"/api/v1/admin/returns/{ret_code}/receive",
+            json={"note": "Kho cố nhận hàng khi chưa duyệt"},
+            headers=self.pharmacist_headers,
+        )
+        self.assertEqual(rcv_unapproved.status_code, 400)
+        self.assertIn("Chỉ có thể tiếp nhận kiện hàng khi yêu cầu đã được phê duyệt", rcv_unapproved.json()["detail"])
+
+        # 2. Phê duyệt yêu cầu đổi/trả -> WAITING_CUSTOMER_RETURN
+        appr_res = self.client.post(
+            f"/api/v1/admin/returns/{ret_code}/approve",
+            json={"admin_note": "Dược sĩ phê duyệt nhận hàng"},
+            headers=self.pharmacist_headers,
+        )
+        self.assertEqual(appr_res.status_code, 200)
+
+        # 3. Tiếp nhận hàng sau khi duyệt -> 200 OK, RECEIVED
         rcv_res = self.client.post(
             f"/api/v1/admin/returns/{ret_code}/receive",
             json={"note": "Kho đã nhận kiện hàng từ GHTK"},
@@ -983,6 +1001,8 @@ class TestWarehouseOrderEndToEnd(unittest.TestCase):
         ret_req = self.db.scalar(select(ReturnRequest).where(ReturnRequest.return_code == ret_code))
         ret_item = ret_req.items[0]
 
+        # Phê duyệt trước khi nhận hàng
+        self.client.post(f"/api/v1/admin/returns/{ret_code}/approve", json={}, headers=self.pharmacist_headers)
         self.client.post(f"/api/v1/admin/returns/{ret_code}/receive", json={}, headers=self.pharmacist_headers)
 
         self.db.refresh(self.stock_1a)
@@ -1042,6 +1062,8 @@ class TestWarehouseOrderEndToEnd(unittest.TestCase):
         ret_code = ret_res.json()["return_code"]
         ret_req = self.db.scalar(select(ReturnRequest).where(ReturnRequest.return_code == ret_code))
 
+        # Phê duyệt trước khi nhận hàng
+        self.client.post(f"/api/v1/admin/returns/{ret_code}/approve", json={}, headers=self.pharmacist_headers)
         self.client.post(f"/api/v1/admin/returns/{ret_code}/receive", json={}, headers=self.pharmacist_headers)
 
         self.db.refresh(self.stock_1a)
@@ -1096,6 +1118,8 @@ class TestWarehouseOrderEndToEnd(unittest.TestCase):
         ret_code = ret_res.json()["return_code"]
         ret_req = self.db.scalar(select(ReturnRequest).where(ReturnRequest.return_code == ret_code))
 
+        # Phê duyệt trước khi nhận hàng
+        self.client.post(f"/api/v1/admin/returns/{ret_code}/approve", json={}, headers=self.pharmacist_headers)
         self.client.post(f"/api/v1/admin/returns/{ret_code}/receive", json={}, headers=self.pharmacist_headers)
 
         insp_res = self.client.post(
@@ -1158,6 +1182,8 @@ class TestWarehouseOrderEndToEnd(unittest.TestCase):
         ret_code = ret_res.json()["return_code"]
         ret_req = self.db.scalar(select(ReturnRequest).where(ReturnRequest.return_code == ret_code))
 
+        # Phê duyệt trước khi nhận hàng
+        self.client.post(f"/api/v1/admin/returns/{ret_code}/approve", json={}, headers=self.pharmacist_headers)
         self.client.post(f"/api/v1/admin/returns/{ret_code}/receive", json={}, headers=self.pharmacist_headers)
 
         self.db.refresh(self.stock_2)

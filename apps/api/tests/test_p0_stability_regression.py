@@ -814,7 +814,241 @@ class TestP0StabilityRegression(unittest.TestCase):
         self.assertEqual(data_unauth["order_code"], order_code)
         self.assertTrue(data_unauth["is_idempotent_replay"])
 
+    def test_16_order_lifecycle_fsm_integrity_and_cancellation_reservation_release(self):
+        """BUG-P0-02: Strict order lifecycle FSM guards against direct skips and releases stock on cancellation."""
+        from app.core.security import create_access_token
+        from app.models import Order, OrderFulfillment
+        import uuid
+
+        admin_token = create_access_token("1", "ADMIN")
+        admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+        # 1. Checkout an order with reservation
+        payload = {
+            "customer_name": "FSM Test Customer",
+            "customer_phone": "0988112233",
+            "shipping_address": "123 Đường FSM, Q.1, TP.HCM",
+            "shipping_city": "TP. Hồ Chí Minh",
+            "province_code": "79",
+            "district_code": "760",
+            "ward_code": "26734",
+            "lat": 10.7769,
+            "lng": 106.7009,
+            "is_verified": True,
+            "payment_method": "COD",
+            "items": [{"product_id": 9901, "sku_id": self.sku.id, "quantity": 2}],
+        }
+        res_chk = self.client.post("/api/v1/store/orders/checkout", json=payload)
+        self.assertEqual(res_chk.status_code, 200)
+        order_code = res_chk.json()["order_code"]
+        order = self.db.query(Order).filter_by(order_code=order_code).first()
+        order_id = order.id
+
+        # 2. Attempt direct jump PENDING -> COMPLETED -> 400 Bad Request
+        res_comp = self.client.patch(
+            f"/api/v1/admin/orders/{order_id}/status",
+            json={"order_status": "COMPLETED"},
+            headers=admin_headers,
+        )
+        self.assertEqual(res_comp.status_code, 400)
+        self.assertIn("Không thể chuyển đổi trực tiếp", res_comp.json()["detail"])
+
+        # 3. Attempt direct jump PENDING -> SHIPPING -> 400 Bad Request
+        res_ship = self.client.patch(
+            f"/api/v1/admin/orders/{order_id}/status",
+            json={"order_status": "SHIPPING"},
+            headers=admin_headers,
+        )
+        self.assertEqual(res_ship.status_code, 400)
+
+        # 4. Cancel the order from PENDING -> releases reserved stock and cancels fulfillments
+        self.db.refresh(self.stock)
+        avail_before = self.stock.quantity_available
+        res_cancel = self.client.patch(
+            f"/api/v1/admin/orders/{order_id}/status",
+            json={"order_status": "CANCELLED"},
+            headers=admin_headers,
+        )
+        self.assertEqual(res_cancel.status_code, 200)
+        self.assertEqual(res_cancel.json()["order_status"], "CANCELLED")
+
+        self.db.refresh(self.stock)
+        self.assertEqual(self.stock.quantity_available, avail_before + 2)
+
+        # 5. Cannot transition backward from terminal CANCELLED state
+        res_reopen = self.client.patch(
+            f"/api/v1/admin/orders/{order_id}/status",
+            json={"order_status": "PENDING"},
+            headers=admin_headers,
+        )
+        self.assertEqual(res_reopen.status_code, 400)
+        self.assertIn("trạng thái kết thúc", res_reopen.json()["detail"])
+
+    def test_17_return_inspection_strict_validation(self):
+        """BUG-P0-03: ReturnItem inspection strictly validates payload and rejects silent continues or corrupt quantities."""
+        from app.core.security import create_access_token
+        from app.models.returns import ReturnRequest, ReturnItem, ReturnRequestType, ReturnStatus, ItemCondition, RestockDestination
+        import uuid
+
+        admin_token = create_access_token("1", "ADMIN")
+        admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+        # Create delivered order & approved return
+        order = Order(
+            order_code=f"PT-INSP-{uuid.uuid4().hex[:6]}",
+            customer_name="Khách Kiểm Định GSP",
+            customer_phone="0933445566",
+            shipping_address="456 Hai Bà Trưng, TP.HCM",
+            payment_method="COD",
+            payment_status="PAID",
+            order_status="DELIVERED",
+            total_amount=Decimal("120000.0"),
+        )
+        self.db.add(order)
+        self.db.commit()
+
+        order_item = OrderItem(
+            order_id=order.id,
+            product_id=self.prod.id,
+            product_name=self.prod.canonical_name,
+            product_sku=self.sku.sku_code,
+            price=Decimal("120000.0"),
+            quantity=1,
+            subtotal=Decimal("120000.0"),
+        )
+        self.db.add(order_item)
+        self.db.commit()
+
+        ret = ReturnRequest(
+            return_code=f"RET-INSP-{uuid.uuid4().hex[:6]}",
+            order_id=order.id,
+            request_type=ReturnRequestType.RETURN,
+            status=ReturnStatus.APPROVED,
+            reason_code="DAMAGED",
+            reason_text="Hỏng bao bì",
+            customer_name=order.customer_name,
+            customer_phone=order.customer_phone,
+        )
+        self.db.add(ret)
+        self.db.commit()
+
+        it = ReturnItem(
+            return_request_id=ret.id,
+            order_item_id=order_item.id,
+            product_id=self.prod.id,
+            sku_id=self.sku.id,
+            product_name="Thuốc Kháng Sinh P0 Test 500mg",
+            original_quantity=1,
+            requested_quantity=1,
+            unit_price_at_purchase=Decimal("120000.0"),
+            allocated_discount=Decimal("0.0"),
+            net_paid_amount=Decimal("120000.0"),
+            requested_refund_amount=Decimal("120000.0"),
+            customer_reason="Hỏng bao bì",
+            condition_reported=ItemCondition.DAMAGED,
+        )
+        self.db.add(it)
+        self.db.commit()
+
+        # Warehouse receives return
+        rcv = self.client.post(f"/api/v1/admin/returns/{ret.return_code}/receive", json={}, headers=admin_headers)
+        self.assertEqual(rcv.status_code, 200)
+
+        # 1. Empty payload rejected -> 400
+        res_empty = self.client.post(f"/api/v1/admin/returns/{ret.return_code}/inspect", json={"items": []}, headers=admin_headers)
+        self.assertEqual(res_empty.status_code, 400)
+
+        # 2. Fake return_item_id rejected -> 400 (no silent continue)
+        res_fake_id = self.client.post(
+            f"/api/v1/admin/returns/{ret.return_code}/inspect",
+            json={"items": [{"return_item_id": 999999, "condition": "GOOD_CONDITION", "accepted_quantity": 1}]},
+            headers=admin_headers,
+        )
+        self.assertEqual(res_fake_id.status_code, 400)
+        self.assertIn("không hợp lệ hoặc không thuộc phiếu", res_fake_id.json()["detail"])
+
+        # 3. Duplicate return_item_id rejected -> 400
+        res_dup = self.client.post(
+            f"/api/v1/admin/returns/{ret.return_code}/inspect",
+            json={
+                "items": [
+                    {"return_item_id": it.id, "condition": "GOOD_CONDITION", "restock_destination": "QUARANTINE", "accepted_quantity": 1},
+                    {"return_item_id": it.id, "condition": "GOOD_CONDITION", "restock_destination": "QUARANTINE", "accepted_quantity": 1},
+                ]
+            },
+            headers=admin_headers,
+        )
+        self.assertEqual(res_dup.status_code, 400)
+        self.assertIn("trùng lặp", res_dup.json()["detail"])
+
+        # 4. Negative quantities rejected -> 422 or 400
+        res_neg = self.client.post(
+            f"/api/v1/admin/returns/{ret.return_code}/inspect",
+            json={"items": [{"return_item_id": it.id, "accepted_quantity": -1, "rejected_quantity": 1}]},
+            headers=admin_headers,
+        )
+        self.assertIn(res_neg.status_code, [400, 422])
+
+        # 5. Non-compliant condition to SELLABLE_STOCK rejected -> 400
+        res_bad_cond = self.client.post(
+            f"/api/v1/admin/returns/{ret.return_code}/inspect",
+            json={"items": [{"return_item_id": it.id, "condition": "DAMAGED", "restock_destination": "SELLABLE_STOCK", "accepted_quantity": 1}]},
+            headers=admin_headers,
+        )
+        self.assertEqual(res_bad_cond.status_code, 400)
+        self.assertIn("không đáp ứng tiêu chuẩn chất lượng GSP", res_bad_cond.json()["detail"])
+
+    def test_18_no_token_in_query_params_and_header_token_required(self):
+        """BUG-P1-02: GET /payments/transactions/{code}/status rejects query token and mandates X-Order-Token header."""
+        from app.core.security import create_guest_order_token
+        from app.models import Order, PaymentTransaction
+        import uuid
+
+        # Create order and payment transaction
+        order = Order(
+            order_code=f"PT-TRANS-{uuid.uuid4().hex[:6]}",
+            customer_name="Trần Giao Dịch",
+            customer_phone="0911223344",
+            shipping_address="789 Nguyễn Huệ, TP.HCM",
+            payment_method="VIETQR",
+            payment_status="PENDING",
+            order_status="PENDING",
+            total_amount=Decimal("150000.0"),
+        )
+        self.db.add(order)
+        self.db.commit()
+
+        tx_code = f"TX-SEC-{uuid.uuid4().hex[:8]}"
+        trans = PaymentTransaction(
+            transaction_code=tx_code,
+            order_id=order.id,
+            provider="VIETQR",
+            amount=Decimal("150000.0"),
+            status="PENDING",
+        )
+        self.db.add(trans)
+        self.db.commit()
+
+        token = create_guest_order_token(order.order_code, order.customer_phone)
+
+        # 1. Accessing transaction status with NO token -> 403 Forbidden
+        res_no_tok = self.client.get(f"/api/v1/payments/transactions/{tx_code}/status")
+        self.assertEqual(res_no_tok.status_code, 403)
+
+        # 2. Accessing transaction status with query param token -> 403 Forbidden (query token removed)
+        res_query_tok = self.client.get(f"/api/v1/payments/transactions/{tx_code}/status?token={token}")
+        self.assertEqual(res_query_tok.status_code, 403)
+
+        # 3. Accessing transaction status with X-Order-Token Header -> 200 OK
+        res_header_tok = self.client.get(
+            f"/api/v1/payments/transactions/{tx_code}/status",
+            headers={"X-Order-Token": token},
+        )
+        self.assertEqual(res_header_tok.status_code, 200)
+        self.assertEqual(res_header_tok.json()["transaction_code"], tx_code)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
