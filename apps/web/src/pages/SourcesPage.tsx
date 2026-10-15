@@ -113,7 +113,7 @@ const SOURCE_TYPES: Record<string, string> = {
               <p>{source.base_url || 'Nguồn nhập tệp, không có URL thu thập'}</p>
               <div className="source-footer">
                 <span><ShieldCheck size={15} /> Chuẩn robots.txt: <b>{source.robots_status}</b></span>
-                {source.base_url && user?.role !== 'VIEWER' && (
+                {source.base_url && user?.role === 'ADMIN' && (
                   <button onClick={() => run(source)}>
                     <Play size={15} /> Thu thập ngay
                   </button>

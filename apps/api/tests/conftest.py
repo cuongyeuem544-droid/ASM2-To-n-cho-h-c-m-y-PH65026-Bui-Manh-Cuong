@@ -24,6 +24,7 @@ import app.models  # noqa: F401, E402
 from app.db.session import SessionLocal, engine  # noqa: E402
 from app.main import app  # noqa: E402
 from app.seed import seed_administrative_units, seed_demo_products, seed_sources, seed_users  # noqa: E402
+from app.services.category_service import seed_standard_categories_and_types  # noqa: E402
 
 # Đảm bảo môi trường kiểm thử được bật simulator và sandbox keys
 settings.enable_payment_simulator = True
@@ -51,8 +52,13 @@ def database():
         seed_users(db)
         seed_sources(db)
         seed_administrative_units(db)
+        seed_standard_categories_and_types(db)
         db.commit()
         seed_demo_products(db)
+        db.commit()
+        from app.services.warehouse_seeder import seed_warehouses_and_managers, seed_distributed_inventory
+        seed_warehouses_and_managers(db)
+        seed_distributed_inventory(db)
         db.commit()
     yield
     Base.metadata.drop_all(engine)
@@ -95,3 +101,47 @@ def viewer_headers(client):
     return {"Authorization": f"Bearer {token}"}
 
 
+
+@pytest.fixture
+def manager_hcm_headers(client):
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"email": "manager_hcm@pharmatrust.vn", "password": "Warehouse@2026"},
+    )
+    if response.status_code != 200:
+        response = client.post(
+            "/api/v1/auth/login",
+            json={"email": "manager_hcm@pharmatrust.vn", "password": "Warehouse@2026!"},
+        )
+    assert response.status_code == 200
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+@pytest.fixture
+def manager_hn_headers(client):
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"email": "manager_hn@pharmatrust.vn", "password": "Warehouse@2026"},
+    )
+    if response.status_code != 200:
+        response = client.post(
+            "/api/v1/auth/login",
+            json={"email": "manager_hn@pharmatrust.vn", "password": "Warehouse@2026!"},
+        )
+    assert response.status_code == 200
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+@pytest.fixture
+def staff_hcm_headers(client):
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"email": "staff.hcm@pharmatrust.vn", "password": "Staff@2026"},
+    )
+    if response.status_code != 200:
+        response = client.post(
+            "/api/v1/auth/login",
+            json={"email": "staff_hcm@pharmatrust.vn", "password": "Staff@2026"},
+        )
+    assert response.status_code == 200
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}

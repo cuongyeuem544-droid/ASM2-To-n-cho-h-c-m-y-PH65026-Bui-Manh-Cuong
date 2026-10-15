@@ -9,6 +9,7 @@ import {
   ExternalLink,
   FileInput,
   FlaskConical,
+  FolderTree,
   Globe,
   History,
   Layers,
@@ -40,8 +41,8 @@ import { api } from '../services/api'
 
 const ROLE_NAMES: Record<string, string> = {
   ADMIN: 'Quản trị viên',
-  DATA_REVIEWER: 'Kiểm duyệt viên',
-  VIEWER: 'Nhân viên tra cứu',
+  WAREHOUSE_MANAGER: 'Quản lý kho',
+  WAREHOUSE_STAFF: 'Nhân viên kho',
   CUSTOMER: 'Khách hàng',
 }
 
@@ -63,6 +64,8 @@ const navGroups: NavGroup[] = [
     items: [
       { to: '/', label: 'Tổng quan hệ thống', icon: LayoutDashboard },
       { to: '/products', label: 'Hồ sơ thuốc & Duyệt bán', icon: Boxes },
+      { to: '/categories', label: 'Cây danh mục & Bán hàng', icon: FolderTree },
+      { to: '/classification/queue', label: 'Duyệt phân loại Y tế', icon: ShieldCheck },
       { to: '/orders', label: 'Quản lý đơn hàng', icon: ShoppingBag },
       { to: '/reviews', label: 'Đánh giá & Nhận xét', icon: MessageSquare },
       { to: '/campaigns', label: 'Chiến dịch mùa bệnh', icon: ThermometerSnowflake },
@@ -130,7 +133,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const prevCountRef = useRef<number>(0)
 
   useEffect(() => {
-    if (!user || (user.role !== 'ADMIN' && user.role !== 'DATA_REVIEWER')) return
+    if (!user || user.role !== 'ADMIN') return
 
     const fetchStats = async () => {
       try {
@@ -280,6 +283,11 @@ export function Layout({ children }: { children: ReactNode }) {
           <div className="user-info">
             <strong title={user?.full_name}>{user?.full_name}</strong>
             <span>{ROLE_NAMES[user?.role || ''] || user?.role}</span>
+            {user?.warehouse_name && (
+              <span className="text-[11px] text-emerald-400 font-medium block truncate max-w-[140px]" title={user.warehouse_name}>
+                📍 {user.warehouse_name}
+              </span>
+            )}
           </div>
           <button
             type="button"
@@ -310,11 +318,17 @@ export function Layout({ children }: { children: ReactNode }) {
             </div>
             {renderHealthIndicator()}
             <LiveClock />
+            {user?.warehouse_name && (
+              <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium" title={user.warehouse_name}>
+                <Building2 size={13} />
+                <span className="truncate max-w-[200px]">Đang quản lý: {user.warehouse_name}</span>
+              </div>
+            )}
           </div>
 
           <div className="header-right">
             {/* Notification Bell for Returns / Alerts */}
-            {(user?.role === 'ADMIN' || user?.role === 'DATA_REVIEWER') && (
+            {user?.role === 'ADMIN' && (
               <div className="admin-notif-container">
                 <button
                   type="button"

@@ -61,8 +61,8 @@ export function PaginationBar({
       {/* Items info and page size */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
         <span style={{ color: '#64748b' }}>
-          Hiển thị <strong>{startItem} - {endItem}</strong> trong <strong>{count.toLocaleString('vi-VN')}</strong> {itemName}
-          {filteredCount !== undefined && filteredCount !== totalItems ? ` (lọc từ ${totalItems.toLocaleString('vi-VN')} tổng)` : ''}
+          Hiển thị <strong>{startItem} - {endItem}</strong> trong <strong>{(count ?? 0).toLocaleString('vi-VN')}</strong> {itemName}
+          {filteredCount !== undefined && filteredCount !== totalItems ? ` (lọc từ ${(totalItems ?? 0).toLocaleString('vi-VN')} tổng)` : ''}
         </span>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

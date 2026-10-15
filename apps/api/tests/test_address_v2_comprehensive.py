@@ -35,7 +35,7 @@ class TestAddressV2Comprehensive(unittest.TestCase):
                 email="customer_a_phase1@pharmatrust.vn",
                 full_name="Khách Hàng A",
                 phone="0901234567",
-                role=UserRole.VIEWER,
+                role=UserRole.CUSTOMER,
                 password_hash="hashed_pw_a",
                 is_active=True,
             )
@@ -53,7 +53,7 @@ class TestAddressV2Comprehensive(unittest.TestCase):
                 email="customer_b_phase1@pharmatrust.vn",
                 full_name="Khách Hàng B",
                 phone="0987654321",
-                role=UserRole.VIEWER,
+                role=UserRole.CUSTOMER,
                 password_hash="hashed_pw_b",
                 is_active=True,
             )

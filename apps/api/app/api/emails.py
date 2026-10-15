@@ -53,7 +53,7 @@ def list_email_outbox(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    current_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
     [ADMIN / MANAGER] Xem danh sách lịch sử gửi email và trạng thái gửi (SENT, FAILED, PENDING).
@@ -89,7 +89,7 @@ def list_email_outbox(
 def get_email_outbox_detail(
     outbox_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    current_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
     [ADMIN / MANAGER] Xem chi tiết nội dung email HTML và văn bản thô để đối soát.
@@ -119,7 +119,7 @@ def get_email_outbox_detail(
 def resend_outbox_email(
     outbox_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    current_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
     [ADMIN / MANAGER] Thử gửi lại bức thư trong hàng đợi (Retry Resend).

@@ -27,8 +27,9 @@ from app.services.scoring import calculate_product_score
 
 DEMO_USERS = [
     ("admin@pharmatrust.vn", "Admin@123456", "Quản trị viên", UserRole.ADMIN),
-    ("reviewer@pharmatrust.vn", "Reviewer@123456", "Người kiểm tra dữ liệu", UserRole.DATA_REVIEWER),
-    ("viewer@pharmatrust.vn", "Viewer@123456", "Người xem", UserRole.VIEWER),
+    ("manager_hn@pharmatrust.vn", "Warehouse@2026", "Quản lý kho Hà Nội", UserRole.WAREHOUSE_MANAGER),
+    ("staff_hn@pharmatrust.vn", "Staff@2026", "Nhân viên kho Hà Nội", UserRole.WAREHOUSE_STAFF),
+    ("buyer@pharmatrust.vn", "Buyer@123456", "Người mua hàng", UserRole.CUSTOMER),
 ]
 
 

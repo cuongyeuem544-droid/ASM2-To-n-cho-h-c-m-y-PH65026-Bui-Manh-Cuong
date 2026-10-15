@@ -352,11 +352,11 @@ class VietQrService:
             db.commit()
             return {"resultCode": 0, "message": "Giao dịch đã được ghi nhận thành công từ trước (Idempotent Hit)."}
 
-        # Kiểm tra số tiền chuyển khoản
+        # Kiểm tra số tiền chuyển khoản: Sai một đồng cũng không tự chuyển đơn sang PAID
         order_total = int(order.total_amount)
-        if received_amount > 0 and received_amount < order_total:
-            trans.status = "UNDERPAID"
-            err_msg = f"Số tiền chuyển khoản ({received_amount:,} đ) ít hơn tổng đơn hàng ({order_total:,} đ)"
+        if received_amount != order_total:
+            trans.status = "UNDERPAID" if received_amount < order_total else "OVERPAID"
+            err_msg = f"Số tiền chuyển khoản ({received_amount:,} đ) không khớp với tổng đơn hàng ({order_total:,} đ)"
             webhook_log.process_error = err_msg
             db.commit()
             raise HTTPException(status_code=400, detail=err_msg)

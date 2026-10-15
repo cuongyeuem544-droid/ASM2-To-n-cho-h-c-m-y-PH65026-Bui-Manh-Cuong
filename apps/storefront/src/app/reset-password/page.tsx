@@ -26,10 +26,11 @@ function ResetPasswordContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const target = searchParams.get("target") || "";
+  const resetToken = searchParams.get("token") || target;
   const shouldReduceMotion = useReducedMotion();
 
-  const [password, setPassword] = useState<string>("H4careNew@2026");
-  const [confirmPassword, setConfirmPassword] = useState<string>("H4careNew@2026");
+  const [password, setPassword] = useState<string>("");
+  const [confirmPassword, setConfirmPassword] = useState<string>("");
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState<boolean>(false);
   const [focusedField, setFocusedField] = useState<string | null>(null);
@@ -62,10 +63,16 @@ function ResetPasswordContent() {
     [isMobile, shouldReduceMotion]
   );
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
+    if (!resetToken) {
+      setErrorMessage("Thiếu mã đặt lại mật khẩu (Token). Vui lòng yêu cầu cấp lại mã OTP.");
+      return;
+    }
     if (password.length < 6) {
       setErrorMessage("Mật khẩu mới tối thiểu 6 ký tự.");
       return;
@@ -76,13 +83,27 @@ function ResetPasswordContent() {
     }
 
     setIsSubmitting(true);
-    setTimeout(() => {
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/auth/password-reset/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reset_token: resetToken, new_password: password }),
+      });
       setIsSubmitting(false);
-      setIsSuccess(true);
-      setTimeout(() => {
-        router.push("/login");
-      }, 850);
-    }, 450);
+
+      if (res.ok) {
+        setIsSuccess(true);
+        setTimeout(() => {
+          router.push("/login");
+        }, 850);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setErrorMessage(data.detail || "Không thể đặt lại mật khẩu. Token không hợp lệ hoặc đã hết hạn.");
+      }
+    } catch (e) {
+      setIsSubmitting(false);
+      setErrorMessage("Không thể kết nối đến máy chủ. Vui lòng kiểm tra lại dịch vụ backend.");
+    }
   };
 
   const getStrength = (pass: string) => {

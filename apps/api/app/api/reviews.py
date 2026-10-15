@@ -184,10 +184,10 @@ def admin_list_reviews(
     limit: int = 50,
     offset: int = 0,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    current_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
-    [ADMIN / DATA_REVIEWER] Xem toàn bộ danh sách đánh giá của khách hàng trên toàn sàn.
+    [ADMIN] Xem toàn bộ danh sách đánh giá của khách hàng trên toàn sàn.
     """
     stmt = select(ProductReview)
     if product_id is not None:
@@ -233,10 +233,10 @@ def admin_toggle_review_status(
     review_id: int,
     payload: UpdateReviewStatusRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    current_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
-    [ADMIN / DATA_REVIEWER] Bật hoặc ẩn đánh giá khỏi giao diện người dùng (kiểm duyệt nội dung).
+    [ADMIN] Bật hoặc ẩn đánh giá khỏi giao diện người dùng (kiểm duyệt nội dung).
     """
     review = db.scalar(select(ProductReview).where(ProductReview.id == review_id))
     if not review:

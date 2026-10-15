@@ -16,7 +16,7 @@ from __future__ import annotations
 import os
 import shutil
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, List, Optional
@@ -37,6 +37,8 @@ from app.models.returns import (
     ExchangeOrder,
     Refund,
     ReturnEvidence,
+    ReturnEvidenceRequest,
+    ReturnEvidenceRequestStatus,
     ReturnItem,
     ReturnMethod,
     ReturnRequest,
@@ -47,6 +49,16 @@ from app.models.returns import (
 from app.services.refund_calculation_service import RefundCalculationService
 from app.services.return_policy_service import ReturnPolicyService
 from app.services.return_service import ReturnService
+from app.services.warehouse_return_service import WarehouseReturnService
+
+
+def to_utc(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
 
 router = APIRouter(prefix="/returns", tags=["Customer Returns & Exchanges"])
 
@@ -86,6 +98,19 @@ class CancelReturnRequest(BaseModel):
     phone_verify: Optional[str] = None
     order_token: Optional[str] = None
 
+
+
+class EvidenceItemInput(BaseModel):
+    file_url: str
+    file_name: str
+    mime_type: Optional[str] = "image/jpeg"
+    file_size: Optional[int] = 0
+
+
+class CustomerSubmitEvidencePayload(BaseModel):
+    images: List[EvidenceItemInput] = Field(..., min_length=1, max_length=3)
+    customer_note: Optional[str] = None
+    phone_verify: Optional[str] = None
 
 
 # --- Endpoints ---
@@ -495,6 +520,131 @@ def get_return_detail(
             "shipping_fee_refund": float(refund_estimate["shipping_fee_refund"]),
             "final_refund": float(refund_estimate["final_refund_amount"]),
         },
+        "active_evidence_request": (
+            lambda req: {
+                "id": req.id,
+                "request_code": req.request_code,
+                "return_item_id": req.return_item_id,
+                "product_name": req.return_item.product_name if req.return_item else None,
+                "reason": req.reason,
+                "instructions": req.instructions,
+                "required_image_count": req.required_image_count,
+                "status": req.status,
+                "requested_at": req.requested_at.isoformat() if req.requested_at else None,
+                "expires_at": req.expires_at.isoformat() if req.expires_at else None,
+                "remaining_seconds": max(0, int((to_utc(req.expires_at) - datetime.now(UTC)).total_seconds())) if req.expires_at else 0,
+                "is_expired": (to_utc(req.expires_at) <= datetime.now(UTC)) or (req.status == "EXPIRED") if req.expires_at else (req.status == "EXPIRED"),
+                "submitted_at": req.submitted_at.isoformat() if req.submitted_at else None,
+                "customer_note": req.customer_note,
+                "evidences": [
+                    {
+                        "id": ev.id,
+                        "file_url": ev.file_url,
+                        "file_name": ev.file_name,
+                        "created_at": ev.created_at.isoformat() if ev.created_at else None,
+                    }
+                    for ev in req.evidences
+                ],
+            } if req else None
+        )(
+            WarehouseReturnService.get_customer_evidence_request(
+                db=db,
+                return_code=return_code,
+                user=current_user,
+                phone_verify=phone_verify,
+            )
+        ),
+    }
+
+
+@router.get("/{return_code}/evidence-request")
+def get_customer_evidence_request_endpoint(
+    return_code: str,
+    phone_verify: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
+):
+    """
+    Khách hàng xem yêu cầu bổ sung ảnh, hạn chót còn lại và danh sách ảnh đã nộp.
+    """
+    req = WarehouseReturnService.get_customer_evidence_request(
+        db=db,
+        return_code=return_code,
+        user=current_user,
+        phone_verify=phone_verify,
+    )
+    if not req:
+        return {"has_active_request": False, "request": None}
+
+    now = datetime.now(UTC)
+    remaining_seconds = max(0, int((to_utc(req.expires_at) - now).total_seconds())) if req.expires_at else 0
+
+    return {
+        "has_active_request": True,
+        "request": {
+            "id": req.id,
+            "request_code": req.request_code,
+            "return_code": return_code,
+            "return_item_id": req.return_item_id,
+            "product_name": req.return_item.product_name if req.return_item else None,
+            "reason": req.reason,
+            "instructions": req.instructions,
+            "required_image_count": req.required_image_count,
+            "status": req.status,
+            "requested_at": req.requested_at.isoformat() if req.requested_at else None,
+            "expires_at": req.expires_at.isoformat() if req.expires_at else None,
+            "remaining_seconds": remaining_seconds,
+            "is_expired": remaining_seconds == 0 or req.status == "EXPIRED",
+            "submitted_at": req.submitted_at.isoformat() if req.submitted_at else None,
+            "customer_note": req.customer_note,
+            "evidences": [
+                {
+                    "id": ev.id,
+                    "file_url": ev.file_url,
+                    "file_name": ev.file_name,
+                    "created_at": ev.created_at.isoformat() if ev.created_at else None,
+                }
+                for ev in req.evidences
+            ],
+        },
+    }
+
+
+@router.post("/{return_code}/evidence/submit")
+@router.post("/{return_code}/evidence")
+def submit_customer_evidence_endpoint(
+    return_code: str,
+    payload: CustomerSubmitEvidencePayload,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
+):
+    """
+    Khách hàng nộp đúng số lượng ảnh bổ sung theo yêu cầu.
+    """
+    images_dicts = [img.model_dump() for img in payload.images]
+    req = WarehouseReturnService.submit_customer_evidence(
+        db=db,
+        return_code=return_code,
+        user=current_user,
+        images=images_dicts,
+        customer_note=payload.customer_note,
+        phone_verify=payload.phone_verify,
+    )
+
+    try:
+        from app.services.warehouse_notification_service import WarehouseNotificationService
+        ret = db.scalar(select(ReturnRequest).where(ReturnRequest.return_code == return_code))
+        if ret and req.warehouse_id:
+            WarehouseNotificationService.notify_return_evidence_added(db, ret, req.warehouse_id)
+            db.commit()
+    except Exception:
+        pass
+    return {
+        "success": True,
+        "message": "Đã gửi hình ảnh bổ sung thành công. Hồ sơ đang chờ Quản lý kho xem xét.",
+        "request_code": req.request_code,
+        "status": req.status,
+        "submitted_at": req.submitted_at.isoformat() if req.submitted_at else None,
     }
 
 

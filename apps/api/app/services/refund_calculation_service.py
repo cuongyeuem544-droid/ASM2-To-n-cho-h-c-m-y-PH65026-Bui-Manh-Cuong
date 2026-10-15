@@ -28,12 +28,27 @@ class RefundCalculationService:
     """
 
     @classmethod
-    def calculate_net_unit_price(cls, order: Order, item: OrderItem) -> Decimal:
+    def calculate_net_unit_price(
+        cls,
+        order: Order | None = None,
+        item: OrderItem | None = None,
+        *,
+        listed_unit_price: Decimal | None = None,
+        total_paid_goods_amount: Decimal | None = None,
+        total_listed_goods_amount: Decimal | None = None,
+    ) -> Decimal:
         """
         Tính đơn giá ròng thực trả (Net Unit Price) của 1 sản phẩm trong đơn,
         sau khi đã phân bổ đều chiết khấu / giảm giá đơn hàng theo tỷ lệ giá trị.
         """
-        if item.quantity <= 0:
+        if listed_unit_price is not None:
+            if not total_listed_goods_amount or total_listed_goods_amount <= Decimal("0"):
+                return listed_unit_price.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            paid = total_paid_goods_amount or Decimal("0")
+            ratio = min(Decimal("1.0"), paid / total_listed_goods_amount)
+            return (listed_unit_price * ratio).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        if not order or not item or item.quantity <= 0:
             return Decimal("0.0")
 
         # Tổng giá trị niêm yết của tất cả sản phẩm trong đơn

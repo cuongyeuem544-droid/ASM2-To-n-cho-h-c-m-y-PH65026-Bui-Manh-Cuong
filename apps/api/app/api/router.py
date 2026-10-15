@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 from app.api import (
+    admin_classification,
     admin_exchanges,
     admin_refunds,
     admin_returns,
@@ -14,6 +15,7 @@ from app.api import (
     imports,
     inventory,
     locations,
+    me,
     orders,
     payments,
     products,
@@ -22,6 +24,8 @@ from app.api import (
     sources,
     storefront,
     chat,
+    warehouse_orders_returns,
+    warehouse_portal,
 )
 
 
@@ -57,5 +61,11 @@ api_router.include_router(admin_returns.router)
 api_router.include_router(admin_refunds.router)
 api_router.include_router(admin_exchanges.router)
 api_router.include_router(chat.router)
+api_router.include_router(admin_classification.router)
+api_router.include_router(me.me_router)
+api_router.include_router(warehouse_portal.router)
+api_router.include_router(warehouse_orders_returns.manager_router)
+api_router.include_router(warehouse_orders_returns.staff_router)
+api_router.include_router(warehouse_orders_returns.compat_portal_router)
 
 

@@ -41,6 +41,9 @@ class ProductSummary(ORMModel):
     near_expiry_count: int | None = None
     active_ingredient: str | None = None
     rx_otc_status: RxOtcStatus
+    product_type: str | None = None
+    prescription_status: str | None = None
+    category_slug: str | None = None
     regulatory_status: RegulatoryStatus
     overall_score: int
     confidence_label: ConfidenceLabel

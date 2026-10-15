@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:3b"
     ai_provider: str = "rule_based"
+    demo_mode: bool = True
+    enable_crawler: bool = False
 
     # Cấu hình tự động cào 24/7 và kiểm duyệt (Mặc định TẮT khỏi luồng chính)
     auto_crawl_enabled: bool = False
@@ -78,6 +80,15 @@ class Settings(BaseSettings):
     smtp_tls: bool = True
     smtp_ssl: bool = False
     smtp_enabled: bool = True
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def resolve_database_url(cls, value):
+        if isinstance(value, str) and value.startswith("sqlite:///./"):
+            repo_root = Path(__file__).resolve().parents[4]
+            db_file = repo_root / value.removeprefix("sqlite:///./")
+            return f"sqlite:///{db_file.as_posix()}"
+        return value
 
     @field_validator("cors_origins", mode="before")
     @classmethod

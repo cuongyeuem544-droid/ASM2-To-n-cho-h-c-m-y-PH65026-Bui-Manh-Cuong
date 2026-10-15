@@ -71,6 +71,26 @@ export default function DeliveryRealMap({
       zoomControl: false,
     });
 
+    // Defensive patch: Prevent Leaflet unmount race condition
+    // When map is destroyed or unmounted during zoom/pan transitions, Leaflet's
+    // _onZoomTransitionEnd timer still executes and calls getPosition(this._mapPane),
+    // which throws "TypeError: Cannot read properties of undefined (reading '_leaflet_pos')".
+    const origGetMapPanePos = (map as any)._getMapPanePos;
+    (map as any)._getMapPanePos = function () {
+      if (!this._mapPane) {
+        return new L.Point(0, 0);
+      }
+      return origGetMapPanePos ? origGetMapPanePos.call(this) : new L.Point(0, 0);
+    };
+
+    const origOnZoomTransitionEnd = (map as any)._onZoomTransitionEnd;
+    (map as any)._onZoomTransitionEnd = function () {
+      if (!this._mapPane || !(this as any)._animatingZoom) return;
+      if (origOnZoomTransitionEnd) {
+        origOnZoomTransitionEnd.call(this);
+      }
+    };
+
     // Add OpenStreetMap Standard Tile Layer
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution:
@@ -97,8 +117,18 @@ export default function DeliveryRealMap({
     setMapInitialized(true);
 
     return () => {
-      map.remove();
-      mapInstanceRef.current = null;
+      if (mapInstanceRef.current) {
+        const m = mapInstanceRef.current as any;
+        m._animatingZoom = false;
+        try {
+          m.stop();
+          m.off();
+          m.remove();
+        } catch (err) {
+          // Ignore DOM unmount detachment errors
+        }
+        mapInstanceRef.current = null;
+      }
     };
   }, []);
 
@@ -153,7 +183,6 @@ export default function DeliveryRealMap({
       } else {
         customerMarkerRef.current.setLatLng(custLatLng);
       }
-      map.panTo(custLatLng, { animate: true });
     } else {
       if (customerMarkerRef.current) {
         customerMarkerRef.current.remove();
@@ -258,10 +287,18 @@ export default function DeliveryRealMap({
       polylineRef.current = poly;
 
       // Fit bounds to display both customer pin & nearest warehouse comfortably
-      const bounds = L.latLngBounds(lineCoords);
-      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
+      try {
+        const bounds = L.latLngBounds(lineCoords);
+        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16, animate: false });
+      } catch (err) {
+        // Safe fallback if container size is pending
+      }
     } else if (customerCoords) {
-      map.setView([customerCoords.lat, customerCoords.lng], 15);
+      try {
+        map.setView([customerCoords.lat, customerCoords.lng], 15, { animate: false });
+      } catch (err) {
+        // Safe fallback if container size is pending
+      }
     }
   }, [customerCoords, nearestWarehouse, allWarehouses, mapInitialized]);
 

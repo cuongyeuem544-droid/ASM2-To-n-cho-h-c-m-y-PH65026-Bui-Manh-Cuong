@@ -73,7 +73,7 @@ def list_admin_refunds(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
-    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
     Danh sách phiếu hoàn tiền phục vụ đối soát kế toán.
@@ -139,7 +139,7 @@ def list_admin_refunds(
 def get_admin_refund_detail(
     refund_code: str,
     db: Session = Depends(get_db),
-    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
     Chi tiết phiếu hoàn tiền và các lần thử giao dịch qua cổng (Refund Attempts).
@@ -192,7 +192,7 @@ def get_admin_refund_detail(
 def create_manual_refund(
     payload: CreateRefundPayload,
     db: Session = Depends(get_db),
-    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
     Tạo mới phiếu hoàn tiền theo yêu cầu.
@@ -235,7 +235,7 @@ def process_manual_bank(
     refund_code: str,
     payload: ManualBankPayload,
     db: Session = Depends(get_db),
-    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
     Kế toán xác nhận đã chuyển khoản ngân hàng hoàn tất (cung cấp mã UNC và link chứng từ).
@@ -260,7 +260,7 @@ def process_manual_bank(
 def trigger_momo_refund(
     refund_code: str,
     db: Session = Depends(get_db),
-    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
     Kích hoạt hoàn tiền trực tuyến qua API MoMo V2.
@@ -278,7 +278,7 @@ def update_reconciliation(
     refund_code: str,
     payload: ReconcilePayload,
     db: Session = Depends(get_db),
-    admin_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.DATA_REVIEWER)),
+    admin_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
     Cập nhật trạng thái đối soát kế toán (MATCHED / MISMATCH / NEEDS_REVIEW).

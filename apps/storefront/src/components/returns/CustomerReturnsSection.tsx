@@ -72,7 +72,9 @@ export function CustomerReturnsSection({ userPhone, userName }: CustomerReturnsS
     }
     setLoading(true);
     try {
-      const token = typeof window !== "undefined" ? localStorage.getItem("pharmatrust_token") : null;
+      const token = typeof window !== "undefined"
+        ? (localStorage.getItem("pharmatrust_access_token") || localStorage.getItem("pharmatrust_token") || localStorage.getItem("access_token"))
+        : null;
       const headers: Record<string, string> = {};
       if (token) headers["Authorization"] = `Bearer ${token}`;
 

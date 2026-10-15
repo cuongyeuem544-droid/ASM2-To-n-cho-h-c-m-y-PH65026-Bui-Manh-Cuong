@@ -9,6 +9,7 @@ import re
 import sys
 from datetime import date, timedelta
 from decimal import Decimal
+from pathlib import Path
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -39,9 +40,8 @@ from app.services.search_service import init_fts_table, reindex_all_products
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("pharmatrust.seed_storefront")
 
-JSON_PATH = os.path.expanduser(r"~/.gemini/antigravity/brain/4311d90f-56c3-441c-ad2a-eb73f688e249/scratch/products.json")
-if not os.path.exists(JSON_PATH):
-    JSON_PATH = os.path.abspath(r"C:\Users\AD\.gemini\antigravity\brain\4311d90f-56c3-441c-ad2a-eb73f688e249\scratch\products.json")
+REPO_ROOT = Path(__file__).resolve().parents[2]
+JSON_PATH = REPO_ROOT / "data" / "seed_products.json"
 
 
 
