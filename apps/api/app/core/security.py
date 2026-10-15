@@ -56,3 +56,35 @@ def decode_token(token: str, expected_type: str) -> dict[str, Any]:
         raise jwt.InvalidTokenError("Loại token không hợp lệ")
     return payload
 
+
+def create_guest_order_token(order_code: str, phone: str, expires_days: int = 30) -> str:
+    """
+    Tạo token ký điện tử HS256 dành riêng cho khách vãng lai để thao tác trên đơn hàng.
+    """
+    clean_code = order_code.strip()
+    clean_phone = phone.strip()
+    return create_token(
+        subject=clean_code,
+        token_type="guest_order",
+        expires_delta=timedelta(days=expires_days),
+        extra={"order_code": clean_code, "phone": clean_phone},
+    )
+
+
+def verify_guest_order_token(token: str | None, expected_order_code: str) -> bool:
+    """
+    Xác thực chữ ký và tính hợp lệ của token đơn hàng khách vãng lai.
+    """
+    if not token or not str(token).strip():
+        return False
+    try:
+        clean_tok = str(token).strip()
+        if clean_tok.startswith("Bearer "):
+            clean_tok = clean_tok[7:].strip()
+        payload = decode_token(clean_tok, expected_type="guest_order")
+        order_in_token = payload.get("order_code") or payload.get("sub")
+        return bool(order_in_token and str(order_in_token).strip() == expected_order_code.strip())
+    except Exception:
+        return False
+
+

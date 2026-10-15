@@ -501,6 +501,8 @@ export default function CartPage() {
         is_verified: fulfillmentType === "DELIVERY" ? true : true,
         district_code: fulfillmentType === "DELIVERY" ? (currentVerified?.districtName || currentVerified?.districtCode) : undefined,
         ward_code: fulfillmentType === "DELIVERY" ? (currentVerified?.communeCode || currentVerified?.wardCode) : undefined,
+        voucher_code: appliedVoucher || undefined,
+        shipping_fee: effectiveShippingFee,
       };
 
       const token = typeof window !== "undefined" ? localStorage.getItem("pharmatrust_token") : null;
@@ -533,15 +535,25 @@ export default function CartPage() {
         throw new Error(msg);
       }
 
+      // Lưu trữ token bảo mật đơn hàng của khách vãng lai
+      const guestOrderToken = data.guest_access_token || data.order_token || "";
+      if (typeof window !== "undefined" && guestOrderToken) {
+        localStorage.setItem(`h4care_order_token_${data.order_code}`, guestOrderToken);
+        localStorage.setItem("h4care_latest_order_token", guestOrderToken);
+      }
+
       // Handle MoMo Sandbox payment
       if (paymentMethod === "MOMO") {
-        const returnUrl = typeof window !== "undefined" ? `${window.location.origin}/checkout/result?phone=${encodeURIComponent(finalCustomerPhone || "")}` : "";
+        const returnUrl = typeof window !== "undefined"
+          ? `${window.location.origin}/checkout/result?order_code=${encodeURIComponent(data.order_code)}&token=${encodeURIComponent(guestOrderToken)}&phone=${encodeURIComponent(finalCustomerPhone || "")}`
+          : "";
         if (typeof window !== "undefined" && finalCustomerPhone) {
           localStorage.setItem("h4care_checkout_phone", finalCustomerPhone);
         }
         try {
           const payHeaders: Record<string, string> = { "Content-Type": "application/json" };
           if (token) payHeaders["Authorization"] = `Bearer ${token}`;
+          if (guestOrderToken) payHeaders["X-Order-Token"] = guestOrderToken;
 
           const momoRes = await fetch("/api/v1/payments/momo/create", {
             method: "POST",
@@ -550,6 +562,7 @@ export default function CartPage() {
               order_code: data.order_code,
               return_url: returnUrl,
               phone_verify: finalCustomerPhone,
+              order_token: guestOrderToken,
             }),
           });
           const momoData = await momoRes.json();
@@ -617,10 +630,15 @@ export default function CartPage() {
       try {
         const token = typeof window !== "undefined" ? localStorage.getItem("pharmatrust_token") : null;
         const savedPhone = typeof window !== "undefined" ? localStorage.getItem("h4care_checkout_phone") || customerPhone : customerPhone;
+        const orderToken = typeof window !== "undefined" ? localStorage.getItem(`h4care_order_token_${momoModal.orderCode}`) || localStorage.getItem("h4care_latest_order_token") || "" : "";
         const payHeaders: Record<string, string> = {};
         if (token) payHeaders["Authorization"] = `Bearer ${token}`;
-        const phoneParam = savedPhone ? `?phone_verify=${encodeURIComponent(savedPhone)}` : "";
-        const res = await fetch(`/api/v1/payments/orders/${momoModal.orderCode}/status${phoneParam}`, { headers: payHeaders });
+        if (orderToken) payHeaders["X-Order-Token"] = orderToken;
+        const queryParams = [];
+        if (savedPhone) queryParams.push(`phone_verify=${encodeURIComponent(savedPhone)}`);
+        if (orderToken) queryParams.push(`token=${encodeURIComponent(orderToken)}`);
+        const queryStr = queryParams.length ? `?${queryParams.join("&")}` : "";
+        const res = await fetch(`/api/v1/payments/orders/${momoModal.orderCode}/status${queryStr}`, { headers: payHeaders });
         if (res.ok) {
           const data = await res.json();
           if (data.payment_status === "PAID") {

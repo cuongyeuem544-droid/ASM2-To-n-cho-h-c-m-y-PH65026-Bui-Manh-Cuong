@@ -103,13 +103,13 @@ class FulfillmentRoutingService:
         if not sku:
             prod = db.get(CanonicalProduct, product_id)
             price_row = db.query(PriceObservation.observed_price).filter(PriceObservation.product_id == product_id).first()
-            base_p = Decimal(str(price_row[0])) if (price_row and price_row[0]) else Decimal("50000.0")
+            base_p = Decimal(str(price_row[0])) if (price_row and price_row[0]) else Decimal("0.0")
 
             clean_code = str(prod.registration_number).strip().replace(" ", "-") if (prod and prod.registration_number) else f"{product_id:04d}"
             sku = ProductSku(
                 canonical_product_id=product_id,
                 sku_code=f"SKU-{clean_code}-BOX",
-                barcode=f"893{product_id:09d}",
+                barcode=None,  # Không tự sinh barcode giả 893... khi không có dữ liệu đối chiếu
                 uom=(prod.dosage_form if prod else None) or "Hộp",
                 conversion_rate=1,
                 base_price=base_p,

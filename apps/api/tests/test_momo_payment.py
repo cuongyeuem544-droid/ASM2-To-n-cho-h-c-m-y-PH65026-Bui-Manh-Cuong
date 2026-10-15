@@ -193,10 +193,13 @@ class TestMomoPaymentSuite(unittest.TestCase):
             "deeplink": "momo://app?action=payWithApp",
         }
 
+        from app.core.security import create_guest_order_token
+        valid_token = create_guest_order_token(self.order_code, self.order.customer_phone)
         payload = {
             "order_code": self.order_code,
             "return_url": "http://localhost:3000/checkout/result",
             "phone_verify": self.order.customer_phone,
+            "order_token": valid_token,
         }
 
         # 1. Khi gateway phản hồi thành công (resultCode=0)
@@ -353,12 +356,18 @@ class TestMomoPaymentSuite(unittest.TestCase):
 
     def test_06_query_payment_status(self):
         """Tra cứu trạng thái thanh toán đơn hàng qua API với kiểm tra xác thực."""
-        # Không có số điện thoại -> 403
+        # Không có số điện thoại hoặc token -> 403
         resp_unauth = self.client.get(f"/api/v1/payments/orders/{self.order_code}/status")
         self.assertEqual(resp_unauth.status_code, 403)
 
-        # Có số điện thoại khớp -> 200
-        resp = self.client.get(f"/api/v1/payments/orders/{self.order_code}/status?phone_verify={self.order.customer_phone}")
+        # Chỉ có số điện thoại (không có token) -> 403 Forbidden
+        resp_phone_only = self.client.get(f"/api/v1/payments/orders/{self.order_code}/status?phone_verify={self.order.customer_phone}")
+        self.assertEqual(resp_phone_only.status_code, 403)
+
+        # Có token bảo mật hợp lệ -> 200
+        from app.core.security import create_guest_order_token
+        valid_token = create_guest_order_token(self.order_code, self.order.customer_phone)
+        resp = self.client.get(f"/api/v1/payments/orders/{self.order_code}/status?token={valid_token}")
         self.assertEqual(resp.status_code, 200, resp.text)
         data = resp.json()
 

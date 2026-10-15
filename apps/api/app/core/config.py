@@ -3,7 +3,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -84,6 +84,24 @@ class Settings(BaseSettings):
                 return [item.strip() for item in decoded if item.strip()]
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
+
+    @model_validator(mode="after")
+    def validate_production_security(self) -> "Settings":
+        env = (self.app_env or "").lower().strip()
+        if env in {"production", "prod", "staging"}:
+            if (
+                not self.secret_key
+                or self.secret_key == "development-only-secret-change-me-please"
+                or len(self.secret_key) < 32
+            ):
+                raise ValueError(
+                    "BẢO MẬT SẢN PHẨM: Môi trường production/staging bắt buộc phải cung cấp SECRET_KEY bảo mật từ biến môi trường (tối thiểu 32 ký tự), không được dùng secret mặc định."
+                )
+            if self.enable_payment_simulator:
+                raise ValueError(
+                    "BẢO MẬT SẢN PHẨM: Tuyệt đối không được kích hoạt ENABLE_PAYMENT_SIMULATOR=True trên môi trường production/staging."
+                )
+        return self
 
     @property
     def is_smtp_configured(self) -> bool:

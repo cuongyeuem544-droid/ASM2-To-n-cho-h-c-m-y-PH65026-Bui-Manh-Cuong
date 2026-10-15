@@ -185,6 +185,10 @@ def setup_aftersales_data(client, admin_headers):
 
         db.commit()
 
+        from app.core.security import create_guest_order_token
+        deliv_token = create_guest_order_token(order_delivered.order_code, "0912345678")
+        pend_token = create_guest_order_token(order_pending.order_code, "0912345678")
+
         return {
             "warehouse_id": wh.id,
             "product_id": prod.id,
@@ -195,18 +199,27 @@ def setup_aftersales_data(client, admin_headers):
             "order_delivered_id": order_delivered.id,
             "order_item_id": order_item.id,
             "order_pending_code": order_pending.order_code,
+            "deliv_token": deliv_token,
+            "pend_token": pend_token,
         }
 
 
 def test_return_eligibility_delivered_vs_pending(client: TestClient, setup_aftersales_data):
     """
     Kiểm tra điều kiện đổi trả: Đơn DELIVERED đủ điều kiện, đơn PENDING không đủ điều kiện.
+    Chặn IDOR nếu không có token hoặc quyền hợp lệ.
     """
     deliv_code = setup_aftersales_data["order_delivered_code"]
     pend_code = setup_aftersales_data["order_pending_code"]
+    deliv_token = setup_aftersales_data["deliv_token"]
+    pend_token = setup_aftersales_data["pend_token"]
 
-    # 1. Đơn DELIVERED
-    resp = client.get(f"/api/v1/returns/eligibility/{deliv_code}")
+    # 0. Truy cập không token -> 403 Forbidden
+    resp_unauth = client.get(f"/api/v1/returns/eligibility/{deliv_code}")
+    assert resp_unauth.status_code == 403
+
+    # 1. Đơn DELIVERED với token hợp lệ -> 200 OK
+    resp = client.get(f"/api/v1/returns/eligibility/{deliv_code}?token={deliv_token}")
     assert resp.status_code == 200
     data = resp.json()
     assert data["order_code"] == deliv_code
@@ -215,8 +228,8 @@ def test_return_eligibility_delivered_vs_pending(client: TestClient, setup_after
     assert data["items"][0]["returnable_quantity"] == 3
     assert data["items"][0]["is_eligible"] is True
 
-    # 2. Đơn PENDING
-    resp_pend = client.get(f"/api/v1/returns/eligibility/{pend_code}")
+    # 2. Đơn PENDING với token hợp lệ -> 200 OK nhưng can_request_return = False
+    resp_pend = client.get(f"/api/v1/returns/eligibility/{pend_code}?token={pend_token}")
     assert resp_pend.status_code == 200
     data_pend = resp_pend.json()
     assert data_pend["can_request_return"] is False
@@ -229,6 +242,7 @@ def test_create_return_request_and_partial_quantity(client: TestClient, setup_af
     """
     deliv_code = setup_aftersales_data["order_delivered_code"]
     item_id = setup_aftersales_data["order_item_id"]
+    deliv_token = setup_aftersales_data["deliv_token"]
 
     # 1. Khách gửi yêu cầu trả 1 hộp
     payload = {
@@ -246,6 +260,7 @@ def test_create_return_request_and_partial_quantity(client: TestClient, setup_af
             }
         ],
         "customer_phone_verify": "0912345678",
+        "order_token": deliv_token,
     }
     resp = client.post("/api/v1/returns", json=payload)
     assert resp.status_code == 200
@@ -255,7 +270,7 @@ def test_create_return_request_and_partial_quantity(client: TestClient, setup_af
     assert return_code.startswith("RET-")
 
     # 2. Kiểm tra lại điều kiện đổi trả: số lượng còn lại phải là 3 - 1 = 2
-    resp_check = client.get(f"/api/v1/returns/eligibility/{deliv_code}")
+    resp_check = client.get(f"/api/v1/returns/eligibility/{deliv_code}?token={deliv_token}")
     assert resp_check.status_code == 200
     check_data = resp_check.json()
     assert check_data["items"][0]["returned_quantity"] == 1
@@ -274,6 +289,7 @@ def test_create_return_request_and_partial_quantity(client: TestClient, setup_af
             }
         ],
         "customer_phone_verify": "0912345678",
+        "order_token": deliv_token,
     }
     resp_invalid = client.post("/api/v1/returns", json=invalid_payload)
     assert resp_invalid.status_code == 400
@@ -287,6 +303,7 @@ def test_full_return_workflow_with_inspection_and_restock(client: TestClient, se
     """
     deliv_code = setup_aftersales_data["order_delivered_code"]
     item_id = setup_aftersales_data["order_item_id"]
+    deliv_token = setup_aftersales_data["deliv_token"]
 
     # 1. Tạo request
     create_payload = {
@@ -298,6 +315,7 @@ def test_full_return_workflow_with_inspection_and_restock(client: TestClient, se
             {"order_item_id": item_id, "requested_quantity": 1}
         ],
         "customer_phone_verify": "0912345678",
+        "order_token": deliv_token,
     }
     res_create = client.post("/api/v1/returns", json=create_payload)
     return_code = res_create.json()["return_code"]
@@ -323,7 +341,7 @@ def test_full_return_workflow_with_inspection_and_restock(client: TestClient, se
     # 4. Khách hàng gửi hàng & cập nhật mã vận đơn (SHIPPING -> RETURN_IN_TRANSIT)
     res_ship = client.post(
         f"/api/v1/returns/{return_code}/shipping",
-        json={"carrier_name": "GHTK Fast", "tracking_code": "GHTK-RET-998877"},
+        json={"carrier_name": "GHTK Fast", "tracking_code": "GHTK-RET-998877", "order_token": deliv_token},
     )
     assert res_ship.status_code == 200
     assert res_ship.json()["status"] == "RETURN_IN_TRANSIT"
@@ -451,6 +469,7 @@ def test_exchange_workflow_price_difference(client: TestClient, setup_aftersales
     deliv_code = setup_aftersales_data["order_delivered_code"]
     item_id = setup_aftersales_data["order_item_id"]
     prod_id = setup_aftersales_data["product_id"]
+    deliv_token = setup_aftersales_data["deliv_token"]
 
     # 1. Khách gửi yêu cầu ĐỔI HÀNG (request_type = EXCHANGE)
     ex_payload = {
@@ -460,6 +479,7 @@ def test_exchange_workflow_price_difference(client: TestClient, setup_aftersales
         "reason_text": "Khách muốn đổi sang hộp lớn hơn",
         "items": [{"order_item_id": item_id, "requested_quantity": 1}],
         "customer_phone_verify": "0912345678",
+        "order_token": deliv_token,
     }
     res_ex_req = client.post("/api/v1/returns", json=ex_payload)
     assert res_ex_req.status_code == 200
@@ -467,7 +487,7 @@ def test_exchange_workflow_price_difference(client: TestClient, setup_aftersales
 
     # Duyệt & nhận hàng & kiểm định
     client.post(f"/api/v1/admin/returns/{return_code}/approve", headers=admin_headers, json={})
-    client.post(f"/api/v1/returns/{return_code}/shipping", json={"carrier_name": "GHTK", "tracking_code": "GHTK-EX-123"})
+    client.post(f"/api/v1/returns/{return_code}/shipping", json={"carrier_name": "GHTK", "tracking_code": "GHTK-EX-123", "order_token": deliv_token})
     client.post(f"/api/v1/admin/returns/{return_code}/receive", headers=admin_headers, json={})
 
     detail_res = client.get(f"/api/v1/admin/returns/{return_code}", headers=admin_headers)
@@ -541,6 +561,7 @@ def test_return_rejection_workflow(client: TestClient, setup_aftersales_data, ad
     """
     deliv_code = setup_aftersales_data["order_delivered_code"]
     item_id = setup_aftersales_data["order_item_id"]
+    deliv_token = setup_aftersales_data["deliv_token"]
 
     res_create = client.post(
         "/api/v1/returns",
@@ -551,6 +572,7 @@ def test_return_rejection_workflow(client: TestClient, setup_aftersales_data, ad
             "reason_text": "Không còn nhu cầu sử dụng",
             "items": [{"order_item_id": item_id, "requested_quantity": 1}],
             "customer_phone_verify": "0912345678",
+            "order_token": deliv_token,
         },
     )
     assert res_create.status_code == 200
@@ -567,7 +589,7 @@ def test_return_rejection_workflow(client: TestClient, setup_aftersales_data, ad
     assert res_reject.json()["status"] == "REJECTED"
 
     # Kiểm tra chi tiết
-    res_detail = client.get(f"/api/v1/returns/{return_code}?phone_verify=0912345678")
+    res_detail = client.get(f"/api/v1/returns/{return_code}?token={deliv_token}")
     assert res_detail.status_code == 200
     data = res_detail.json()
     assert data["status"] == "REJECTED"
@@ -580,6 +602,7 @@ def test_customer_cancel_return_request(client: TestClient, setup_aftersales_dat
     """
     deliv_code = setup_aftersales_data["order_delivered_code"]
     item_id = setup_aftersales_data["order_item_id"]
+    deliv_token = setup_aftersales_data["deliv_token"]
 
     res_create = client.post(
         "/api/v1/returns",
@@ -590,6 +613,7 @@ def test_customer_cancel_return_request(client: TestClient, setup_aftersales_dat
             "reason_text": "Đặt nhầm",
             "items": [{"order_item_id": item_id, "requested_quantity": 1}],
             "customer_phone_verify": "0912345678",
+            "order_token": deliv_token,
         },
     )
     return_code = res_create.json()["return_code"]
@@ -597,7 +621,7 @@ def test_customer_cancel_return_request(client: TestClient, setup_aftersales_dat
     # Khách hủy
     res_cancel = client.post(
         f"/api/v1/returns/{return_code}/cancel",
-        json={"reason": "Tôi tìm thấy đơn thuốc cũ rồi nên không trả nữa"},
+        json={"reason": "Tôi tìm thấy đơn thuốc cũ rồi nên không trả nữa", "order_token": deliv_token},
     )
     assert res_cancel.status_code == 200
     assert res_cancel.json()["status"] == "CANCELLED"
@@ -605,7 +629,7 @@ def test_customer_cancel_return_request(client: TestClient, setup_aftersales_dat
 
 def test_customer_ownership_security(client: TestClient, setup_aftersales_data):
     """
-    Bảo mật truy cập: Không thể xem chi tiết hoặc tạo yêu cầu khi số điện thoại xác thực sai.
+    Bảo mật truy cập: Không thể xem chi tiết hoặc tạo yêu cầu khi số điện thoại xác thực sai hoặc thiếu token.
     """
     deliv_code = setup_aftersales_data["order_delivered_code"]
     item_id = setup_aftersales_data["order_item_id"]
@@ -684,6 +708,7 @@ def test_return_excessive_quantity_rejected(client: TestClient, setup_aftersales
     """
     deliv_code = setup_aftersales_data["order_delivered_code"]
     item_id = setup_aftersales_data["order_item_id"]
+    deliv_token = setup_aftersales_data["deliv_token"]
 
     res = client.post(
         "/api/v1/returns",
@@ -694,6 +719,7 @@ def test_return_excessive_quantity_rejected(client: TestClient, setup_aftersales
             "reason_text": "Số lượng vượt mức",
             "items": [{"order_item_id": item_id, "requested_quantity": 9999}],
             "customer_phone_verify": "0912345678",
+            "order_token": deliv_token,
         },
     )
     assert res.status_code == 400
@@ -706,6 +732,7 @@ def test_email_outbox_created_on_return(client: TestClient, setup_aftersales_dat
     """
     deliv_code = setup_aftersales_data["order_delivered_code"]
     item_id = setup_aftersales_data["order_item_id"]
+    deliv_token = setup_aftersales_data["deliv_token"]
 
     res = client.post(
         "/api/v1/returns",
@@ -716,6 +743,7 @@ def test_email_outbox_created_on_return(client: TestClient, setup_aftersales_dat
             "reason_text": "Kiểm tra EmailOutbox",
             "items": [{"order_item_id": item_id, "requested_quantity": 1}],
             "customer_phone_verify": "0912345678",
+            "order_token": deliv_token,
         },
     )
     assert res.status_code == 200

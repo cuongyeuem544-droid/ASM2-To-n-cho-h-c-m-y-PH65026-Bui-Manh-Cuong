@@ -211,8 +211,15 @@ class TestOrdersSystem(unittest.TestCase):
         resp_wrong = self.client.get(f"/api/v1/store/orders/{order.order_code}?phone=0999999999")
         self.assertEqual(resp_wrong.status_code, 403)
 
-        # 3. Truy cập với đúng SĐT đặt hàng -> 200 OK
-        resp = self.client.get(f"/api/v1/store/orders/{order.order_code}?phone={order.customer_phone}")
+        # 3. Truy cập chỉ với SĐT (không có token) -> 403 Forbidden (chặn IDOR số điện thoại)
+        resp_phone_only = self.client.get(f"/api/v1/store/orders/{order.order_code}?phone={order.customer_phone}")
+        self.assertEqual(resp_phone_only.status_code, 403)
+        self.assertIn("Số điện thoại không phải là bằng chứng duy nhất", resp_phone_only.json()["detail"])
+
+        # 4. Truy cập với token bảo mật hợp lệ (guest order token) -> 200 OK
+        from app.core.security import create_guest_order_token
+        valid_token = create_guest_order_token(order.order_code, order.customer_phone)
+        resp = self.client.get(f"/api/v1/store/orders/{order.order_code}?token={valid_token}")
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["order_code"], "PT-260927-9999")

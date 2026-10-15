@@ -70,10 +70,17 @@ function CheckoutResultContent() {
     async function fetchStatus() {
       try {
         const phone = searchParams.get("phone") || (typeof window !== "undefined" ? localStorage.getItem("h4care_checkout_phone") || "" : "");
-        const token = typeof window !== "undefined" ? localStorage.getItem("h4care_auth_token") : null;
+        const token = typeof window !== "undefined" ? localStorage.getItem("h4care_auth_token") || localStorage.getItem("pharmatrust_token") : null;
+        const orderToken = searchParams.get("token") || (typeof window !== "undefined" ? localStorage.getItem(`h4care_order_token_${cleanOrderCode}`) || localStorage.getItem("h4care_latest_order_token") || "" : "");
+
         const headers: Record<string, string> = {};
         if (token) headers["Authorization"] = `Bearer ${token}`;
-        const queryParam = phone ? `?phone_verify=${encodeURIComponent(phone)}` : "";
+        if (orderToken) headers["X-Order-Token"] = orderToken;
+
+        const queryParts = [];
+        if (phone) queryParts.push(`phone_verify=${encodeURIComponent(phone)}`);
+        if (orderToken) queryParts.push(`token=${encodeURIComponent(orderToken)}`);
+        const queryParam = queryParts.length ? `?${queryParts.join("&")}` : "";
 
         const res = await fetch(`/api/v1/payments/orders/${cleanOrderCode}/status${queryParam}`, { headers });
         if (res.ok) {
@@ -99,9 +106,12 @@ function CheckoutResultContent() {
     setRetryMessage(null);
     try {
       const phone = searchParams.get("phone") || (typeof window !== "undefined" ? localStorage.getItem("h4care_checkout_phone") || "" : "");
-      const token = typeof window !== "undefined" ? localStorage.getItem("h4care_auth_token") : null;
+      const token = typeof window !== "undefined" ? localStorage.getItem("h4care_auth_token") || localStorage.getItem("pharmatrust_token") : null;
+      const orderToken = searchParams.get("token") || (typeof window !== "undefined" ? localStorage.getItem(`h4care_order_token_${cleanOrderCode}`) || localStorage.getItem("h4care_latest_order_token") || "" : "");
+
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (token) headers["Authorization"] = `Bearer ${token}`;
+      if (orderToken) headers["X-Order-Token"] = orderToken;
 
       const res = await fetch("/api/v1/payments/retry", {
         method: "POST",
@@ -110,12 +120,16 @@ function CheckoutResultContent() {
           order_code: cleanOrderCode,
           new_payment_method: "COD",
           phone_verify: phone || undefined,
+          order_token: orderToken || undefined,
         }),
       });
       if (res.ok) {
         setRetryMessage("Đã chuyển thành công sang Thanh toán khi nhận hàng (COD)!");
         // Refresh status
-        const queryParam = phone ? `?phone_verify=${encodeURIComponent(phone)}` : "";
+        const queryParts = [];
+        if (phone) queryParts.push(`phone_verify=${encodeURIComponent(phone)}`);
+        if (orderToken) queryParts.push(`token=${encodeURIComponent(orderToken)}`);
+        const queryParam = queryParts.length ? `?${queryParts.join("&")}` : "";
         const statusRes = await fetch(`/api/v1/payments/orders/${cleanOrderCode}/status${queryParam}`, { headers });
         if (statusRes.ok) {
           const fresh = await statusRes.json();

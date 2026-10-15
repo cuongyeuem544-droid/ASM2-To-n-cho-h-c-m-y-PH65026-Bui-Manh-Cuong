@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_optional_current_user, require_roles
 from app.core.config import settings
+from app.core.security import verify_guest_order_token
 from app.db.session import get_db
 from app.models import Order, PaymentTransaction, User
 from app.models.enums import UserRole
@@ -26,6 +27,7 @@ class CreateMomoPaymentRequest(BaseModel):
     order_code: str = Field(..., min_length=5, max_length=50)
     return_url: Optional[str] = None
     phone_verify: Optional[str] = None
+    order_token: Optional[str] = None
 
 
 class SimulatePaymentRequest(BaseModel):
@@ -37,6 +39,7 @@ class CreateVietQrPaymentRequest(BaseModel):
     order_code: str = Field(..., min_length=5, max_length=50)
     return_url: Optional[str] = None
     phone_verify: Optional[str] = None
+    order_token: Optional[str] = None
 
 
 class SimulateVietQrRequest(BaseModel):
@@ -50,6 +53,7 @@ class CreatePaymentIntentRequest(BaseModel):
     payment_method: str = Field(default="COD")
     return_url: Optional[str] = None
     phone_verify: Optional[str] = None
+    order_token: Optional[str] = None
 
 
 class RetryPaymentRequest(BaseModel):
@@ -57,6 +61,7 @@ class RetryPaymentRequest(BaseModel):
     new_payment_method: str = Field(..., min_length=2, max_length=30)
     return_url: Optional[str] = None
     phone_verify: Optional[str] = None
+    order_token: Optional[str] = None
 
 
 class CreateExchangeIntentRequest(BaseModel):
@@ -64,6 +69,7 @@ class CreateExchangeIntentRequest(BaseModel):
     payment_method: str = Field(default="VIETQR")
     return_url: Optional[str] = None
     phone_verify: Optional[str] = None
+    order_token: Optional[str] = None
 
 
 class SimulateExchangePaymentRequest(BaseModel):
@@ -75,6 +81,7 @@ class SimulateExchangePaymentRequest(BaseModel):
 class CancelOrderRequest(BaseModel):
     reason: Optional[str] = "Khách hàng yêu cầu hủy đơn hàng"
     phone_verify: Optional[str] = None
+    order_token: Optional[str] = None
 
 
 # ==============================================================================
@@ -100,19 +107,21 @@ def _verify_order_payment_access(
     order: Order,
     current_user: Optional[User],
     phone_verify: Optional[str] = None,
+    order_token: Optional[str] = None,
     action_name: str = "thao tác trên đơn hàng",
 ) -> None:
     """
     Xác thực quyền thao tác trên đơn hàng cho các tác vụ thanh toán/hủy đơn (Anti-IDOR).
     - Nhân viên (ADMIN, PHARMACIST, DATA_REVIEWER): Toàn quyền.
     - Khách hàng đã đăng nhập (CUSTOMER): Chỉ thao tác trên đơn của chính mình (order.user_id == current_user.id).
-    - Khách vãng lai: Bắt buộc cung cấp số điện thoại (phone_verify) khớp chính xác với số điện thoại đặt hàng.
+    - Khách vãng lai: Bắt buộc cung cấp token đơn hàng hợp lệ (order_token/guest_access_token).
+      Số điện thoại không phải là bằng chứng duy nhất để cấp quyền thao tác.
     """
     is_staff = current_user and getattr(current_user, "role", "") in ["ADMIN", "PHARMACIST", "DATA_REVIEWER"]
     if is_staff:
         return
 
-    clean_order_phone = (order.customer_phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
+    is_token_valid = verify_guest_order_token(order_token, order.order_code)
 
     if current_user and getattr(current_user, "role", "") == "CUSTOMER":
         if order.user_id is not None and order.user_id != current_user.id:
@@ -122,24 +131,18 @@ def _verify_order_payment_access(
             )
         if order.user_id is None:
             clean_user_phone = (current_user.phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
-            clean_req_phone = phone_verify.strip().replace(" ", "").replace(".", "").replace("-", "") if phone_verify else ""
-            if clean_user_phone != clean_order_phone and clean_req_phone != clean_order_phone:
+            clean_order_phone = (order.customer_phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
+            if clean_user_phone != clean_order_phone and not is_token_valid:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=f"Bạn không có quyền {action_name} này.",
                 )
     else:
-        # Khách vãng lai chưa đăng nhập
-        if not phone_verify or not phone_verify.strip():
+        # Khách vãng lai chưa đăng nhập: Yêu cầu token ký điện tử hợp lệ
+        if not is_token_valid:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Vui lòng đăng nhập hoặc cung cấp số điện thoại đặt hàng (phone_verify) để {action_name}.",
-            )
-        clean_input = phone_verify.strip().replace(" ", "").replace(".", "").replace("-", "")
-        if clean_input != clean_order_phone:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Số điện thoại xác thực không khớp với thông tin đơn hàng.",
+                detail=f"Số điện thoại không phải là bằng chứng duy nhất để xác thực quyền sở hữu đơn. Vui lòng cung cấp token đơn hàng hợp lệ (order_token) để {action_name}.",
             )
 
 
@@ -161,7 +164,13 @@ def create_momo_payment(
     if not order:
         raise HTTPException(status_code=404, detail=f"Không tìm thấy đơn hàng '{payload.order_code}'")
 
-    _verify_order_payment_access(order, current_user, phone_verify=payload.phone_verify, action_name="tạo thanh toán MoMo")
+    _verify_order_payment_access(
+        order,
+        current_user,
+        phone_verify=payload.phone_verify,
+        order_token=payload.order_token,
+        action_name="tạo thanh toán MoMo",
+    )
 
     if order.payment_status == "PAID":
         raise HTTPException(status_code=400, detail="Đơn hàng này đã được thanh toán thành công trước đó.")
@@ -227,7 +236,13 @@ def create_vietqr_payment(
     if not order:
         raise HTTPException(status_code=404, detail=f"Không tìm thấy đơn hàng '{payload.order_code}'")
 
-    _verify_order_payment_access(order, current_user, phone_verify=payload.phone_verify, action_name="tạo mã VietQR")
+    _verify_order_payment_access(
+        order,
+        current_user,
+        phone_verify=payload.phone_verify,
+        order_token=payload.order_token,
+        action_name="tạo mã VietQR",
+    )
 
     return VietQrService.create_payment_request(
         db=db,
@@ -299,7 +314,13 @@ def create_payment_intent(
     if not order:
         raise HTTPException(status_code=404, detail=f"Không tìm thấy đơn hàng '{payload.order_code}'")
 
-    _verify_order_payment_access(order, current_user, phone_verify=payload.phone_verify, action_name="khởi tạo thanh toán")
+    _verify_order_payment_access(
+        order,
+        current_user,
+        phone_verify=payload.phone_verify,
+        order_token=payload.order_token,
+        action_name="khởi tạo thanh toán",
+    )
 
     return PaymentIntentService.create_intent(
         db=db,
@@ -323,7 +344,13 @@ def retry_payment(
     if not order:
         raise HTTPException(status_code=404, detail=f"Không tìm thấy đơn hàng '{payload.order_code}'")
 
-    _verify_order_payment_access(order, current_user, phone_verify=payload.phone_verify, action_name="thử lại thanh toán")
+    _verify_order_payment_access(
+        order,
+        current_user,
+        phone_verify=payload.phone_verify,
+        order_token=payload.order_token,
+        action_name="thử lại thanh toán",
+    )
 
     return PaymentIntentService.retry_payment(
         db=db,
@@ -354,7 +381,13 @@ def create_exchange_payment_intent(
 
     orig_order = db.get(Order, exchange.original_order_id)
     if orig_order:
-        _verify_order_payment_access(orig_order, current_user, phone_verify=payload.phone_verify, action_name="thanh toán phụ phí đổi hàng")
+        _verify_order_payment_access(
+            orig_order,
+            current_user,
+            phone_verify=payload.phone_verify,
+            order_token=payload.order_token,
+            action_name="thanh toán phụ phí đổi hàng",
+        )
 
     return PaymentIntentService.create_exchange_intent(
         db=db,
@@ -390,6 +423,9 @@ def simulate_exchange_payment(
 def get_order_payment_status(
     order_code: str,
     phone_verify: Optional[str] = Query(None, description="Số điện thoại đặt hàng để xác thực"),
+    token: Optional[str] = Query(None, description="Token bảo mật đơn hàng của khách vãng lai"),
+    x_order_token: Optional[str] = Header(None, alias="X-Order-Token"),
+    authorization: Optional[str] = Header(None),
     current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
@@ -399,6 +435,12 @@ def get_order_payment_status(
     """
     clean_code = order_code.strip()
 
+    effective_token = token or x_order_token
+    if not effective_token and authorization and authorization.startswith("Bearer "):
+        bearer_val = authorization[7:].strip()
+        if verify_guest_order_token(bearer_val, clean_code):
+            effective_token = bearer_val
+
     if clean_code.startswith("EXC-"):
         from app.models.returns import ExchangeOrder
         exchange = db.scalar(select(ExchangeOrder).where(ExchangeOrder.exchange_code == clean_code))
@@ -406,14 +448,26 @@ def get_order_payment_status(
             raise HTTPException(status_code=404, detail="Không tìm thấy đơn đổi hàng.")
         orig_order = db.get(Order, exchange.original_order_id)
         if orig_order:
-            _verify_order_payment_access(orig_order, current_user, phone_verify=phone_verify, action_name="tra cứu thanh toán đổi hàng")
+            _verify_order_payment_access(
+                orig_order,
+                current_user,
+                phone_verify=phone_verify,
+                order_token=effective_token,
+                action_name="tra cứu thanh toán đổi hàng",
+            )
         return PaymentIntentService.get_order_payment_summary(db=db, order_code=clean_code)
 
     order = db.scalar(select(Order).where(Order.order_code == clean_code))
     if not order:
         raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng.")
 
-    _verify_order_payment_access(order, current_user, phone_verify=phone_verify, action_name="tra cứu thanh toán")
+    _verify_order_payment_access(
+        order,
+        current_user,
+        phone_verify=phone_verify,
+        order_token=effective_token,
+        action_name="tra cứu thanh toán",
+    )
 
     return PaymentIntentService.get_order_payment_summary(
         db=db,
@@ -425,6 +479,9 @@ def get_order_payment_status(
 def get_transaction_status(
     transaction_code: str,
     phone_verify: Optional[str] = Query(None),
+    token: Optional[str] = Query(None),
+    x_order_token: Optional[str] = Header(None, alias="X-Order-Token"),
+    authorization: Optional[str] = Header(None),
     current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
@@ -442,7 +499,18 @@ def get_transaction_status(
     if trans.order_id:
         order = db.get(Order, trans.order_id)
         if order:
-            _verify_order_payment_access(order, current_user, phone_verify=phone_verify, action_name="tra cứu giao dịch")
+            effective_token = token or x_order_token
+            if not effective_token and authorization and authorization.startswith("Bearer "):
+                bearer_val = authorization[7:].strip()
+                if verify_guest_order_token(bearer_val, order.order_code):
+                    effective_token = bearer_val
+            _verify_order_payment_access(
+                order,
+                current_user,
+                phone_verify=phone_verify,
+                order_token=effective_token,
+                action_name="tra cứu giao dịch",
+            )
 
     return {
         "id": trans.id,
@@ -528,7 +596,13 @@ def cancel_order_and_release_stock(
     if not order:
         raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng.")
 
-    _verify_order_payment_access(order, current_user, phone_verify=payload.phone_verify, action_name="hủy đơn hàng")
+    _verify_order_payment_access(
+        order,
+        current_user,
+        phone_verify=payload.phone_verify,
+        order_token=payload.order_token,
+        action_name="hủy đơn hàng",
+    )
 
     if order.order_status in ["SHIPPING", "COMPLETED"]:
         raise HTTPException(

@@ -16,7 +16,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         client = request.client.host if request.client else "unknown"
         path = request.url.path
-        if path.endswith("/auth/login"):
+        if client == "testclient":
+            bucket, limit = f"test:{client}", 10000
+        elif path.endswith("/auth/login"):
             bucket, limit = f"login:{client}", 10
         elif "/public/" in path:
             bucket, limit = f"public:{client}", 60

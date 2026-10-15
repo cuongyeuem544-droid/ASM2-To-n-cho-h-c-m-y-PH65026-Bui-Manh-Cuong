@@ -1023,10 +1023,13 @@ class TestModuleCCommerce(unittest.TestCase):
             mock_client_cls.return_value.__enter__.return_value = mock_client
             mock_client.post.return_value = mock_resp
 
+            from app.core.security import create_guest_order_token
+            valid_token = create_guest_order_token(order.order_code, order.customer_phone)
             resp = self.client.post("/api/v1/payments/momo/create", json={
                 "order_code": order.order_code,
                 "return_url": "http://localhost:3000/checkout/result",
                 "phone_verify": order.customer_phone,
+                "order_token": valid_token,
             })
             self.assertEqual(resp.status_code, 200)
             data = resp.json()
@@ -1102,10 +1105,13 @@ class TestModuleCCommerce(unittest.TestCase):
         self.db.add(order)
         self.db.commit()
 
+        from app.core.security import create_guest_order_token
+        valid_token = create_guest_order_token(order.order_code, order.customer_phone)
         resp = self.client.post("/api/v1/payments/retry", json={
             "order_code": order.order_code,
             "new_payment_method": "COD",
             "phone_verify": order.customer_phone,
+            "order_token": valid_token,
         })
         self.assertEqual(resp.status_code, 200)
         self.db.refresh(order)
@@ -1129,9 +1135,12 @@ class TestModuleCCommerce(unittest.TestCase):
         self.db.add(order)
         self.db.commit()
 
+        from app.core.security import create_guest_order_token
+        valid_token = create_guest_order_token(order.order_code, order.customer_phone)
         resp = self.client.post("/api/v1/payments/vietqr/create", json={
             "order_code": order.order_code,
             "phone_verify": order.customer_phone,
+            "order_token": valid_token,
         })
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
@@ -1214,9 +1223,12 @@ class TestModuleCCommerce(unittest.TestCase):
         self.db.add(order)
         self.db.commit()
 
+        from app.core.security import create_guest_order_token
+        valid_token = create_guest_order_token(order.order_code, order.customer_phone)
         resp = self.client.post(f"/api/v1/payments/orders/{order.order_code}/cancel", json={
             "reason": "Đổi ý không mua nữa",
             "phone_verify": order.customer_phone,
+            "order_token": valid_token,
         })
         self.assertEqual(resp.status_code, 200)
         self.db.refresh(order)
@@ -1272,6 +1284,7 @@ class TestModuleCCommerce(unittest.TestCase):
         }
         r = self.client.post("/api/v1/store/orders/checkout", json=payload)
         code = r.json()["order_code"]
+        order_token = r.json().get("order_token")
         self.db.refresh(stock)
         self.assertEqual(stock.quantity_available, 20)
 
@@ -1279,6 +1292,7 @@ class TestModuleCCommerce(unittest.TestCase):
         self.client.post(f"/api/v1/payments/orders/{code}/cancel", json={
             "reason": "Hủy đơn thử nghiệm giải phóng tồn",
             "phone_verify": payload["customer_phone"],
+            "order_token": order_token,
         })
         self.db.refresh(stock)
         self.assertEqual(stock.quantity_available, 30)

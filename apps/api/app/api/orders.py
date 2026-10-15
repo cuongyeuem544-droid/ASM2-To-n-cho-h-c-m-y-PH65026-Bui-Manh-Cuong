@@ -3,12 +3,13 @@ import random
 from decimal import Decimal
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_user, get_optional_current_user, require_roles
+from app.core.security import create_guest_order_token, verify_guest_order_token
 from app.db.session import get_db
 from app.models import (
     AdministrativeUnit,
@@ -129,6 +130,10 @@ class CheckoutRequest(BaseModel):
     district_code: Optional[str] = None
     ward_code: Optional[str] = None
     store_id: Optional[int] = None
+
+    # Khuyến mãi & Chi phí vận chuyển máy chủ quyết định
+    voucher_code: Optional[str] = None
+    shipping_fee: Optional[float] = None
 
 
 class CartItemValidate(BaseModel):
@@ -284,6 +289,7 @@ def checkout_order(
             .where(Order.idempotency_key == clean_idem)
         )
         if existing_order:
+            existing_token = create_guest_order_token(existing_order.order_code, existing_order.customer_phone)
             return {
                 "status": "SUCCESS",
                 "message": f"Đơn hàng của bạn đã được ghi nhận thành công trước đó (Mã đơn: {existing_order.order_code}).",
@@ -293,6 +299,8 @@ def checkout_order(
                 "created_at": existing_order.created_at.isoformat() if existing_order.created_at else None,
                 "fulfillments": _serialize_fulfillments(db, existing_order.id),
                 "is_idempotent_replay": True,
+                "guest_access_token": existing_token,
+                "order_token": existing_token,
             }
 
     name = payload.customer_name.strip()
@@ -447,6 +455,33 @@ def checkout_order(
     comm_info = AdministrativeDataService.get_commune_by_code(comm_code_val) if payload.province_code and comm_code_val else None
     prov_info = AdministrativeDataService.get_province_by_code(payload.province_code) if payload.province_code else None
 
+    # 3. Tính toán chi phí vận chuyển & Giảm giá Voucher an toàn tại máy chủ (Server-side Pricing)
+    total_subtotal = total_amount  # Tổng tiền hàng theo giá niêm yết hệ thống
+
+    if (payload.fulfillment_type or "DELIVERY").upper() == "STORE_PICKUP":
+        server_shipping_fee = Decimal("0.0")
+    elif total_subtotal >= Decimal("300000.0"):
+        server_shipping_fee = Decimal("0.0")
+    elif payload.shipping_fee is not None:
+        server_shipping_fee = Decimal(str(payload.shipping_fee))
+    else:
+        server_shipping_fee = Decimal("0.0")
+
+    server_discount = Decimal("0.0")
+    if payload.voucher_code and payload.voucher_code.strip():
+        vcode = payload.voucher_code.strip().upper()
+        if vcode == "H4CARENEW":
+            server_discount = Decimal("20000.0")
+        elif vcode == "FREESHIP":
+            server_discount = server_shipping_fee
+        elif vcode == "HEALTH2026":
+            ten_pct = (total_subtotal * Decimal("0.10")).quantize(Decimal("1"))
+            server_discount = min(Decimal("50000.0"), ten_pct)
+        else:
+            raise HTTPException(status_code=400, detail="Mã giảm giá không hợp lệ hoặc đã hết hạn.")
+
+    final_total_amount = max(Decimal("0.0"), total_subtotal + server_shipping_fee - server_discount)
+
     # Trạng thái ban đầu: Tất cả đơn hàng mới tạo ở trạng thái PENDING chờ xử lý
     initial_order_status = "PENDING"
 
@@ -481,8 +516,8 @@ def checkout_order(
         payment_method=payload.payment_method.upper(),
         payment_status="PENDING",
         order_status=initial_order_status,
-        total_amount=total_amount,
-        shipping_fee=Decimal("0.0"),
+        total_amount=final_total_amount,
+        shipping_fee=server_shipping_fee,
         note=payload.note.strip() if payload.note else None,
         items=order_items_to_add,
     )
@@ -546,35 +581,45 @@ def checkout_order(
         },
     )
 
+    guest_token = create_guest_order_token(order.order_code, order.customer_phone)
     return {
         "status": "SUCCESS",
         "message": f"Đặt hàng thành công! Mã đơn của bạn là {order.order_code}.",
         "order_code": order.order_code,
         "total_amount": float(order.total_amount),
+        "shipping_fee": float(order.shipping_fee),
+        "discount_amount": float(server_discount),
         "order_status": order.order_status,
         "created_at": order.created_at.isoformat() if order.created_at else None,
         "fulfillments": _serialize_fulfillments(db, order.id),
+        "guest_access_token": guest_token,
+        "order_token": guest_token,
     }
 
 
 @store_order_router.get("/{order_code}")
 def get_order_by_code(
     order_code: str,
-    phone: Optional[str] = Query(None, description="Số điện thoại đặt hàng để xác thực nếu là khách vãng lai"),
+    token: Optional[str] = Query(None, description="Token bảo mật đơn hàng của khách vãng lai"),
+    phone: Optional[str] = Query(None, description="Số điện thoại đặt hàng"),
+    x_order_token: Optional[str] = Header(None, alias="X-Order-Token"),
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_current_user),
 ):
     """
     Tra cứu thông tin tiến độ đơn hàng cho khách hàng.
     Yêu cầu bảo mật:
-    - Nhân viên (ADMIN, PHARMACIST): Có quyền tra cứu để hỗ trợ khách.
+    - Nhân viên (ADMIN, PHARMACIST, DATA_REVIEWER): Có quyền tra cứu để hỗ trợ khách.
     - Khách hàng đã đăng nhập (CUSTOMER): Chỉ xem đơn thuộc tài khoản của chính mình (order.user_id == current_user.id).
-    - Khách vãng lai: Bắt buộc cung cấp đúng số điện thoại đặt hàng (phone) để đối chiếu, cấm xem đơn của người khác.
+    - Khách vãng lai: Bắt buộc cung cấp token đơn hàng ký điện tử hợp lệ (order_token/guest_access_token).
+      Số điện thoại không được dùng làm bằng chứng duy nhất để cấp quyền xem thông tin chi tiết.
     """
+    clean_code = order_code.strip()
     order = db.scalar(
         select(Order)
         .options(selectinload(Order.items))
-        .where(Order.order_code == order_code.strip())
+        .where(Order.order_code == clean_code)
     )
     if not order:
         raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng với mã này.")
@@ -583,27 +628,31 @@ def get_order_by_code(
     is_staff = current_user and getattr(current_user, "role", "") in ["ADMIN", "PHARMACIST", "DATA_REVIEWER"]
     clean_order_phone = (order.customer_phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
 
+    effective_token = token or x_order_token
+    if not effective_token and authorization and authorization.startswith("Bearer "):
+        bearer_val = authorization[7:].strip()
+        if verify_guest_order_token(bearer_val, order.order_code):
+            effective_token = bearer_val
+
+    is_guest_token_valid = verify_guest_order_token(effective_token, order.order_code)
+
     if not is_staff:
         if current_user and getattr(current_user, "role", "") == "CUSTOMER":
             # Đơn gắn với tài khoản khác -> Chặn User A truy cập User B
             if order.user_id and order.user_id != current_user.id:
                 raise HTTPException(status_code=403, detail="Bạn không có quyền xem đơn hàng này.")
-            # Đơn chưa gắn user_id (đặt dạng guest trước đó) -> Kiểm tra số điện thoại
+            # Đơn chưa gắn user_id (đặt dạng guest trước đó) -> Kiểm tra số điện thoại hoặc token
             if not order.user_id:
                 clean_user_phone = (current_user.phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
-                clean_req_phone = phone.strip().replace(" ", "").replace(".", "").replace("-", "") if phone else ""
-                if clean_user_phone != clean_order_phone and clean_req_phone != clean_order_phone:
+                if clean_user_phone != clean_order_phone and not is_guest_token_valid:
                     raise HTTPException(status_code=403, detail="Bạn không có quyền xem đơn hàng này.")
         else:
-            # Khách vãng lai hoặc chưa đăng nhập: Bắt buộc cung cấp số điện thoại đặt hàng khớp chính xác
-            if not phone or not phone.strip():
+            # Khách vãng lai hoặc chưa đăng nhập: Bắt buộc có token ký điện tử hợp lệ
+            if not is_guest_token_valid:
                 raise HTTPException(
                     status_code=403,
-                    detail="Vui lòng cung cấp số điện thoại đặt hàng (phone) để xác minh quyền truy cập đơn hàng.",
+                    detail="Số điện thoại không phải là bằng chứng duy nhất để xác thực quyền sở hữu đơn. Vui lòng cung cấp token đơn hàng hợp lệ (order_token) hoặc đăng nhập tài khoản sở hữu.",
                 )
-            clean_input = phone.strip().replace(" ", "").replace(".", "").replace("-", "")
-            if clean_input != clean_order_phone:
-                raise HTTPException(status_code=403, detail="Số điện thoại xác thực không khớp với thông tin đơn hàng.")
 
     return {
         "order_code": order.order_code,

@@ -21,7 +21,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_optional_current_user
 from app.core.config import settings
+from app.core.security import verify_guest_order_token
 from app.db.session import get_db
 from app.models.entities import Order, OrderItem, User
 from app.models.returns import (
@@ -70,17 +71,21 @@ class ReturnRequestCreate(BaseModel):
     evidence_urls: Optional[List[str]] = None
     customer_phone_verify: Optional[str] = None
     customer_email_verify: Optional[str] = None
+    order_token: Optional[str] = None
 
 
 class ShippingUpdate(BaseModel):
     carrier_name: str
     tracking_code: str
     phone_verify: Optional[str] = None
+    order_token: Optional[str] = None
 
 
 class CancelReturnRequest(BaseModel):
     reason: Optional[str] = None
     phone_verify: Optional[str] = None
+    order_token: Optional[str] = None
+
 
 
 # --- Endpoints ---
@@ -88,20 +93,45 @@ class CancelReturnRequest(BaseModel):
 @router.get("/eligibility/{order_code}")
 def check_order_eligibility(
     order_code: str,
+    token: Optional[str] = Query(None, description="Token bảo mật đơn hàng của khách vãng lai"),
+    x_order_token: Optional[str] = Header(None, alias="X-Order-Token"),
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_current_user),
 ):
     """
     Kiểm tra điều kiện đổi trả của đơn hàng theo chính sách dược phẩm H4CARE.
     """
-    order = db.scalar(select(Order).where(Order.order_code == order_code))
+    clean_code = order_code.strip()
+    order = db.scalar(select(Order).where(Order.order_code == clean_code))
     if not order:
-        raise HTTPException(status_code=404, detail=f"Không tìm thấy đơn hàng '{order_code}'.")
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy đơn hàng '{clean_code}'.")
 
-    # Kiểm tra quyền nếu là tài khoản CUSTOMER
-    if current_user and current_user.role == "CUSTOMER":
-        if order.user_id and order.user_id != current_user.id:
-            raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập đơn hàng này.")
+    # Xác thực quyền kiểm tra điều kiện đổi/trả
+    is_staff = current_user and getattr(current_user, "role", "") in ["ADMIN", "PHARMACIST", "DATA_REVIEWER"]
+    effective_token = token or x_order_token
+    if not effective_token and authorization and authorization.startswith("Bearer "):
+        bearer_val = authorization[7:].strip()
+        if verify_guest_order_token(bearer_val, clean_code):
+            effective_token = bearer_val
+
+    is_token_valid = verify_guest_order_token(effective_token, clean_code)
+
+    if not is_staff:
+        if current_user and getattr(current_user, "role", "") == "CUSTOMER":
+            if order.user_id and order.user_id != current_user.id:
+                raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập đơn hàng này.")
+            if not order.user_id and not is_token_valid:
+                clean_user_phone = (current_user.phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
+                clean_order_phone = (order.customer_phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
+                if clean_user_phone != clean_order_phone:
+                    raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập đơn hàng này.")
+        else:
+            if not is_token_valid:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Số điện thoại không phải là bằng chứng duy nhất để xác thực quyền sở hữu đơn. Vui lòng cung cấp token đơn hàng hợp lệ (order_token) hoặc đăng nhập để kiểm tra điều kiện đổi/trả.",
+                )
 
     eligibility = ReturnPolicyService.evaluate_order_eligibility(db, order)
 
@@ -159,6 +189,30 @@ def create_return_request(
     """
     Gửi yêu cầu đổi hoặc trả hàng mới.
     """
+    clean_code = payload.order_code.strip()
+    order = db.scalar(select(Order).where(Order.order_code == clean_code))
+    if not order:
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy đơn hàng '{clean_code}'.")
+
+    is_staff = current_user and getattr(current_user, "role", "") in ["ADMIN", "PHARMACIST", "DATA_REVIEWER"]
+    is_token_valid = verify_guest_order_token(payload.order_token, clean_code)
+
+    if not is_staff:
+        if current_user and getattr(current_user, "role", "") == "CUSTOMER":
+            if order.user_id and order.user_id != current_user.id:
+                raise HTTPException(status_code=403, detail="Bạn không có quyền tạo yêu cầu đổi/trả cho đơn hàng này.")
+            if not order.user_id and not is_token_valid:
+                clean_user_phone = (current_user.phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
+                clean_order_phone = (order.customer_phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
+                if clean_user_phone != clean_order_phone:
+                    raise HTTPException(status_code=403, detail="Bạn không có quyền tạo yêu cầu đổi/trả cho đơn hàng này.")
+        else:
+            if not is_token_valid:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Số điện thoại không phải là bằng chứng duy nhất để xác thực quyền sở hữu đơn. Vui lòng cung cấp token đơn hàng hợp lệ (order_token) để gửi yêu cầu đổi/trả.",
+                )
+
     evidences_data = []
     if payload.evidence_urls:
         for url in payload.evidence_urls:
@@ -253,45 +307,55 @@ def get_my_return_requests(
 def get_return_detail(
     return_code: str,
     phone_verify: Optional[str] = None,
+    token: Optional[str] = Query(None, description="Token bảo mật đơn hàng của khách vãng lai"),
+    x_order_token: Optional[str] = Header(None, alias="X-Order-Token"),
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_current_user),
 ):
     """
     Xem chi tiết tiến trình đổi/trả, dòng thời gian (timeline), thông tin bưu tá và đối soát hoàn tiền.
     Yêu cầu bảo mật:
-    - Nhân viên (ADMIN, PHARMACIST): Toàn quyền tra cứu để xử lý nghiệp vụ.
+    - Nhân viên (ADMIN, PHARMACIST, DATA_REVIEWER): Toàn quyền tra cứu để xử lý nghiệp vụ.
     - Khách hàng đã đăng nhập (CUSTOMER): Chỉ được xem yêu cầu thuộc tài khoản của chính mình.
-    - Khách vãng lai: Bắt buộc cung cấp đúng số điện thoại đặt hàng (phone_verify) để đối chiếu, cấm người lạ đọc thông tin.
+    - Khách vãng lai: Bắt buộc cung cấp token đơn hàng hợp lệ (order_token/guest_access_token).
+      Số điện thoại không phải là bằng chứng duy nhất để cấp quyền xem thông tin chi tiết.
     """
     ret = db.scalar(select(ReturnRequest).where(ReturnRequest.return_code == return_code))
     if not ret:
         raise HTTPException(status_code=404, detail=f"Không tìm thấy yêu cầu '{return_code}'.")
 
+    order_code = ret.order.order_code if ret.order else (db.scalar(select(Order.order_code).where(Order.id == ret.order_id)) or "")
+
     # Kiểm tra quyền truy cập (Anti-IDOR - Từ chối người chưa đủ quyền)
     is_staff = current_user and getattr(current_user, "role", "") in ["ADMIN", "PHARMACIST", "DATA_REVIEWER"]
     clean_order_phone = (ret.customer_phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
+
+    effective_token = token or x_order_token
+    if not effective_token and authorization and authorization.startswith("Bearer "):
+        bearer_val = authorization[7:].strip()
+        if verify_guest_order_token(bearer_val, order_code):
+            effective_token = bearer_val
+
+    is_token_valid = verify_guest_order_token(effective_token, order_code)
 
     if not is_staff:
         if current_user and getattr(current_user, "role", "") == "CUSTOMER":
             # Đơn gắn với tài khoản khác -> Chặn User A truy cập User B
             if ret.user_id and ret.user_id != current_user.id:
                 raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập yêu cầu đổi/trả này.")
-            # Đơn chưa gắn user_id (đặt dạng guest trước đó) -> Kiểm tra số điện thoại
+            # Đơn chưa gắn user_id (đặt dạng guest trước đó) -> Kiểm tra số điện thoại hoặc token
             if not ret.user_id:
                 clean_user_phone = (current_user.phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
-                clean_req_phone = phone_verify.strip().replace(" ", "").replace(".", "").replace("-", "") if phone_verify else ""
-                if clean_user_phone != clean_order_phone and clean_req_phone != clean_order_phone:
+                if clean_user_phone != clean_order_phone and not is_token_valid:
                     raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập yêu cầu đổi/trả này.")
         else:
-            # Khách vãng lai hoặc chưa đăng nhập: Bắt buộc cung cấp phone_verify khớp chính xác
-            if not phone_verify or not phone_verify.strip():
+            # Khách vãng lai chưa đăng nhập: Bắt buộc có token ký điện tử hợp lệ
+            if not is_token_valid:
                 raise HTTPException(
                     status_code=403,
-                    detail="Vui lòng đăng nhập hoặc cung cấp số điện thoại (phone_verify) để xem thông tin đổi/trả.",
+                    detail="Số điện thoại không phải là bằng chứng duy nhất để xác thực quyền sở hữu đơn. Vui lòng cung cấp token đơn hàng hợp lệ (order_token) hoặc đăng nhập để xem thông tin đổi/trả.",
                 )
-            clean_input = phone_verify.strip().replace(" ", "").replace(".", "").replace("-", "")
-            if clean_input != clean_order_phone:
-                raise HTTPException(status_code=403, detail="Số điện thoại xác thực không khớp với yêu cầu đổi/trả.")
 
     # Format danh sách sản phẩm
     items_data = []
@@ -442,16 +506,19 @@ def update_return_shipping(
     if not ret:
         raise HTTPException(status_code=404, detail=f"Không tìm thấy yêu cầu '{return_code}'.")
 
+    order_code = ret.order.order_code if ret.order else (db.scalar(select(Order.order_code).where(Order.id == ret.order_id)) or "")
     is_staff = current_user and getattr(current_user, "role", "") in ["ADMIN", "PHARMACIST", "DATA_REVIEWER"]
+    is_token_valid = verify_guest_order_token(payload.order_token, order_code)
     if not is_staff:
         if current_user and getattr(current_user, "role", "") == "CUSTOMER":
             if ret.user_id and ret.user_id != current_user.id:
                 raise HTTPException(status_code=403, detail="Bạn không có quyền cập nhật yêu cầu này.")
-        elif payload.phone_verify and payload.phone_verify.strip():
-            clean_input = payload.phone_verify.strip().replace(" ", "").replace(".", "").replace("-", "")
-            clean_order_phone = (ret.customer_phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
-            if clean_input != clean_order_phone:
-                raise HTTPException(status_code=403, detail="Số điện thoại xác thực không chính xác.")
+        else:
+            if not is_token_valid:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Số điện thoại không phải là bằng chứng duy nhất để xác thực quyền sở hữu đơn. Vui lòng cung cấp token đơn hàng hợp lệ (order_token) để cập nhật thông tin gửi hàng.",
+                )
 
     ret = ReturnService.update_customer_shipping(
         db=db,
@@ -482,16 +549,19 @@ def cancel_return_request(
     if not ret:
         raise HTTPException(status_code=404, detail=f"Không tìm thấy yêu cầu '{return_code}'.")
 
+    order_code = ret.order.order_code if ret.order else (db.scalar(select(Order.order_code).where(Order.id == ret.order_id)) or "")
     is_staff = current_user and getattr(current_user, "role", "") in ["ADMIN", "PHARMACIST", "DATA_REVIEWER"]
+    is_token_valid = verify_guest_order_token(payload.order_token, order_code)
     if not is_staff:
         if current_user and getattr(current_user, "role", "") == "CUSTOMER":
             if ret.user_id and ret.user_id != current_user.id:
                 raise HTTPException(status_code=403, detail="Bạn không có quyền hủy yêu cầu này.")
-        elif payload.phone_verify and payload.phone_verify.strip():
-            clean_input = payload.phone_verify.strip().replace(" ", "").replace(".", "").replace("-", "")
-            clean_order_phone = (ret.customer_phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
-            if clean_input != clean_order_phone:
-                raise HTTPException(status_code=403, detail="Số điện thoại xác thực không chính xác.")
+        else:
+            if not is_token_valid:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Số điện thoại không phải là bằng chứng duy nhất để xác thực quyền sở hữu đơn. Vui lòng cung cấp token đơn hàng hợp lệ (order_token) để hủy yêu cầu đổi/trả.",
+                )
 
     ret = ReturnService.cancel_return_request(
         db=db,
