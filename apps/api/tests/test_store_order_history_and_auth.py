@@ -347,19 +347,27 @@ def test_11_guest_lookup_mismatched_phone_returns_404(client: TestClient, produc
 
 
 def test_12_legacy_phone_endpoint_forbidden_for_non_admin(client: TestClient, auth_fixture):
-    """12. GET /customer/{phone}: Bị chặn đối với Khách (403) và Khách vãng lai (401/403); Chỉ Admin được truy cập."""
+    """12. GET /customer/{phone}: Cho phép khách hàng tra cứu đúng SĐT của mình; Chặn 403 đối với SĐT của người khác."""
     target_phone = "0901234567"
+    other_phone = "0987654321"
 
     # Khách vãng lai gọi -> 401 hoặc 403
     r_anon = client.get(f"/api/v1/store/orders/customer/{target_phone}")
     assert r_anon.status_code in [401, 403]
 
-    # Khách hàng gọi -> 403 Forbidden (chỉ Admin)
-    r_customer = client.get(
+    # Khách hàng gọi tra cứu số của người khác -> 403 Forbidden
+    r_other = client.get(
+        f"/api/v1/store/orders/customer/{other_phone}",
+        headers=auth_fixture["headers_a"],
+    )
+    assert r_other.status_code == 403
+
+    # Khách hàng gọi tra cứu số của chính mình -> 200 Thành công
+    r_own = client.get(
         f"/api/v1/store/orders/customer/{target_phone}",
         headers=auth_fixture["headers_a"],
     )
-    assert r_customer.status_code == 403
+    assert r_own.status_code == 200
 
     # Admin gọi -> 200 Thành công
     r_admin = client.get(

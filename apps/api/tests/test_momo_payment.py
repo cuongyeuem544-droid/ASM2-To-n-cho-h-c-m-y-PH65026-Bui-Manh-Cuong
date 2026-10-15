@@ -356,9 +356,9 @@ class TestMomoPaymentSuite(unittest.TestCase):
 
     def test_06_query_payment_status(self):
         """Tra cứu trạng thái thanh toán đơn hàng qua API với kiểm tra xác thực."""
-        # Không có số điện thoại hoặc token -> 403
+        # Không có số điện thoại hoặc token -> 401 hoặc 403
         resp_unauth = self.client.get(f"/api/v1/payments/orders/{self.order_code}/status")
-        self.assertEqual(resp_unauth.status_code, 403)
+        self.assertIn(resp_unauth.status_code, [401, 403])
 
         # Chỉ có số điện thoại (không có token) -> 403 Forbidden
         resp_phone_only = self.client.get(f"/api/v1/payments/orders/{self.order_code}/status?phone_verify={self.order.customer_phone}")

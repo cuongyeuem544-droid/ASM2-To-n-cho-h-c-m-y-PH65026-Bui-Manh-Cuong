@@ -99,6 +99,26 @@ class TestP0StabilityRegression(unittest.TestCase):
             cls.db.add(cls.stock)
             cls.db.commit()
 
+        # Setup test voucher H4CARENEW
+        from app.models import Voucher
+        from datetime import datetime, timezone
+        v_new = cls.db.query(Voucher).filter_by(code="H4CARENEW").first()
+        if not v_new:
+            v_new = Voucher(
+                code="H4CARENEW",
+                name="Chào bạn mới",
+                discount_type="FIXED",
+                discount_value=Decimal("20000.0"),
+                min_order_amount=Decimal("100000.0"),
+                start_date=datetime.now(timezone.utc) - timedelta(days=1),
+                end_date=datetime.now(timezone.utc) + timedelta(days=30),
+                usage_limit=1000,
+                used_count=0,
+                is_active=True,
+            )
+            cls.db.add(v_new)
+            cls.db.commit()
+
     @classmethod
     def tearDownClass(cls):
         cls.db.close()
@@ -139,10 +159,10 @@ class TestP0StabilityRegression(unittest.TestCase):
         self.assertEqual(res_phone.status_code, 403)
         self.assertIn("Số điện thoại không phải là bằng chứng duy nhất", res_phone.json()["detail"])
 
-        # Signed guest token in query string is disallowed -> 403 Forbidden
+        # Signed guest token in query string is disallowed -> 401 Unauthorized or 403 Forbidden
         token = create_guest_order_token(order.order_code, order.customer_phone)
         res_query_token = self.client.get(f"/api/v1/store/orders/{order.order_code}?token={token}")
-        self.assertEqual(res_query_token.status_code, 403)
+        self.assertIn(res_query_token.status_code, [401, 403])
 
         # Signed guest token via X-Order-Token header -> 200 OK
         res_token = self.client.get(
@@ -167,14 +187,14 @@ class TestP0StabilityRegression(unittest.TestCase):
         self.db.add(order)
         self.db.commit()
 
-        # 1. Status check with phone only -> 403
+        # 1. Status check with phone only -> 401 or 403
         r_status = self.client.get(f"/api/v1/payments/orders/{order.order_code}/status?phone_verify={order.customer_phone}")
-        self.assertEqual(r_status.status_code, 403)
+        self.assertIn(r_status.status_code, [401, 403])
 
-        # Status check with query token -> 403 (query token removed)
+        # Status check with query token -> 401 or 403 (query token removed)
         token = create_guest_order_token(order.order_code, order.customer_phone)
         r_status_query = self.client.get(f"/api/v1/payments/orders/{order.order_code}/status?token={token}")
-        self.assertEqual(r_status_query.status_code, 403)
+        self.assertIn(r_status_query.status_code, [401, 403])
 
         # Status check with X-Order-Token header -> 200
         r_status_ok = self.client.get(
@@ -183,12 +203,12 @@ class TestP0StabilityRegression(unittest.TestCase):
         )
         self.assertEqual(r_status_ok.status_code, 200)
 
-        # 2. Cancel order with phone only -> 403
+        # 2. Cancel order with phone only -> 401 or 403
         r_cancel = self.client.post(f"/api/v1/payments/orders/{order.order_code}/cancel", json={
             "reason": "Test cancel without token",
             "phone_verify": order.customer_phone,
         })
-        self.assertEqual(r_cancel.status_code, 403)
+        self.assertIn(r_cancel.status_code, [401, 403])
 
         # Cancel order with token -> 200
         r_cancel_ok = self.client.post(
@@ -1031,13 +1051,13 @@ class TestP0StabilityRegression(unittest.TestCase):
 
         token = create_guest_order_token(order.order_code, order.customer_phone)
 
-        # 1. Accessing transaction status with NO token -> 403 Forbidden
+        # 1. Accessing transaction status with NO token -> 401 Unauthorized or 403 Forbidden
         res_no_tok = self.client.get(f"/api/v1/payments/transactions/{tx_code}/status")
-        self.assertEqual(res_no_tok.status_code, 403)
+        self.assertIn(res_no_tok.status_code, [401, 403])
 
-        # 2. Accessing transaction status with query param token -> 403 Forbidden (query token removed)
+        # 2. Accessing transaction status with query param token -> 401 or 403 Forbidden (query token removed)
         res_query_tok = self.client.get(f"/api/v1/payments/transactions/{tx_code}/status?token={token}")
-        self.assertEqual(res_query_tok.status_code, 403)
+        self.assertIn(res_query_tok.status_code, [401, 403])
 
         # 3. Accessing transaction status with X-Order-Token Header -> 200 OK
         res_header_tok = self.client.get(

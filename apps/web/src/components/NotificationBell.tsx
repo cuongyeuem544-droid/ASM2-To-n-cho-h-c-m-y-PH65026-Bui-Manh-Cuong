@@ -409,7 +409,6 @@ export function NotificationBell({ viewAllUrl, bellColor }: NotificationBellProp
             style={{
               maxHeight: '420px',
               overflowY: 'auto',
-              divideY: '1px solid #f8fafc',
             }}
           >
             {loading ? (

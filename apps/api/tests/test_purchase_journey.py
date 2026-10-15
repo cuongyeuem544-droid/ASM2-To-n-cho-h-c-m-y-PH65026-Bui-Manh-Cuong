@@ -147,19 +147,19 @@ class TestPurchaseJourney(unittest.TestCase):
         self.db.refresh(sku_box)
         self.db.refresh(sku_blister)
 
-        # Tạo Lô A: Hạn 30 ngày (Gần hạn hơn -> FEFO ưu tiên)
+        # Tạo Lô A: Hạn 200 ngày (Gần hạn hơn -> FEFO ưu tiên)
         batch_a = InventoryBatch(
             sku_id=sku_box.id,
             batch_number="LOT-COMM-EXP-EARLY",
-            expiry_date=today + timedelta(days=30),
+            expiry_date=today + timedelta(days=200),
             initial_quantity=20,
             status=BatchStatus.ACTIVE,
         )
-        # Tạo Lô B: Hạn 180 ngày (Xa hạn hơn)
+        # Tạo Lô B: Hạn 400 ngày (Xa hạn hơn)
         batch_b = InventoryBatch(
             sku_id=sku_box.id,
             batch_number="LOT-COMM-EXP-LATER",
-            expiry_date=today + timedelta(days=180),
+            expiry_date=today + timedelta(days=400),
             initial_quantity=50,
             status=BatchStatus.ACTIVE,
         )

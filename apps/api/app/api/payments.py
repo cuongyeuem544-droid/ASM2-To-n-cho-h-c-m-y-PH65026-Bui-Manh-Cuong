@@ -142,9 +142,19 @@ def _verify_order_payment_access(
     else:
         # Khách vãng lai chưa đăng nhập: Yêu cầu token ký điện tử hợp lệ
         if not is_token_valid:
+            if phone_verify:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Số điện thoại không phải là bằng chứng duy nhất để xác thực quyền sở hữu đơn. Vui lòng cung cấp token đơn hàng hợp lệ (order_token) để {action_name}.",
+                )
+            if not order_token:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail=f"Vui lòng đăng nhập hoặc cung cấp token đơn hàng hợp lệ để {action_name}.",
+                )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Số điện thoại không phải là bằng chứng duy nhất để xác thực quyền sở hữu đơn. Vui lòng cung cấp token đơn hàng hợp lệ (order_token) để {action_name}.",
+                detail=f"Token đơn hàng không hợp lệ hoặc đã hết hạn để {action_name}.",
             )
 
 

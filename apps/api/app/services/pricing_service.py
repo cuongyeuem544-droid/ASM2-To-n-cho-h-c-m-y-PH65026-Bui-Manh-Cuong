@@ -190,9 +190,25 @@ class PricingService:
 
             eligibility = ProductEligibilityService.evaluate_product_eligibility(prod, db)
             sku_obj = None
-            if sku_id:
+            if sku_id is not None:
                 sku_obj = db.get(ProductSku, sku_id)
-            if not sku_obj:
+                if not sku_obj or sku_obj.canonical_product_id != prod.id or not sku_obj.is_active:
+                    all_eligible = False
+                    calculated_items.append({
+                        "product_id": pid,
+                        "sku_id": sku_id,
+                        "sku_code": None,
+                        "product_name": prod.canonical_name,
+                        "uom": "Hộp",
+                        "unit_price": 0.0,
+                        "quantity": qty,
+                        "subtotal": 0.0,
+                        "available_stock": 0,
+                        "can_checkout": False,
+                        "rejection_reason": f"Mã quy cách (SKU #{sku_id}) không tồn tại hoặc không hợp lệ.",
+                    })
+                    continue
+            else:
                 sku_obj = (
                     db.query(ProductSku)
                     .filter(

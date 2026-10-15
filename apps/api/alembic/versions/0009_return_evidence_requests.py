@@ -72,13 +72,15 @@ def downgrade() -> None:
     tables = _get_existing_tables(conn)
     if "return_evidences" in tables:
         evidence_cols = _get_existing_columns(conn, "return_evidences")
-        if "customer_note" in evidence_cols:
-            op.drop_column("return_evidences", "customer_note")
-        if "evidence_request_id" in evidence_cols:
-            try:
-                op.drop_index("idx_return_evidences_evidence_request_id", table_name="return_evidences")
-            except Exception:
-                pass
-            op.drop_column("return_evidences", "evidence_request_id")
+        inspector = sa.inspect(conn)
+        existing_indices = {idx["name"] for idx in inspector.get_indexes("return_evidences")}
+        with op.batch_alter_table("return_evidences") as batch_op:
+            for idx_name in ["ix_return_evidences_evidence_request_id", "idx_return_evidences_evidence_request_id"]:
+                if idx_name in existing_indices:
+                    batch_op.drop_index(idx_name)
+            if "customer_note" in evidence_cols:
+                batch_op.drop_column("customer_note")
+            if "evidence_request_id" in evidence_cols:
+                batch_op.drop_column("evidence_request_id")
     if "return_evidence_requests" in tables:
         op.drop_table("return_evidence_requests")

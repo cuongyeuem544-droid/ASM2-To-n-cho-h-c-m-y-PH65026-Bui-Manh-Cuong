@@ -231,9 +231,25 @@ def validate_cart(payload: CartValidateRequest, db: Session = Depends(get_db)):
 
         eligibility = ProductEligibilityService.evaluate_product_eligibility(prod, db)
         sku_obj = None
-        if it.sku_id:
+        if it.sku_id is not None:
             sku_obj = db.get(ProductSku, it.sku_id)
-        if not sku_obj:
+            if not sku_obj or sku_obj.canonical_product_id != prod.id or not sku_obj.is_active:
+                results.append({
+                    "product_id": it.product_id,
+                    "sku_id": it.sku_id,
+                    "product_name": prod.canonical_name,
+                    "uom": "Hộp",
+                    "server_price": 0.0,
+                    "client_price": it.client_price,
+                    "price_changed": False,
+                    "available_stock": 0,
+                    "is_eligible": False,
+                    "rejection_reason": f"Mã quy cách (SKU #{it.sku_id}) không tồn tại hoặc không hợp lệ.",
+                    "can_checkout": False,
+                })
+                all_valid = False
+                continue
+        else:
             sku_obj = db.query(ProductSku).filter(
                 ProductSku.canonical_product_id == prod.id,
                 ProductSku.is_active == True,
@@ -484,6 +500,19 @@ def checkout_order(
         lat=payload.lat,
         lng=payload.lng,
     )
+
+    # Kiểm tra gian lận phí vận chuyển (Client-side shipping fee tampering protection)
+    if payload.shipping_fee is not None:
+        if payload.shipping_fee < 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Phí vận chuyển không hợp lệ (không được là số âm).",
+            )
+        if payload.shipping_fee == 0.0 and float(pricing["shipping_fee"]) > 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Không cho phép client tự quyết định phí giao hàng bằng 0đ khi đơn hàng chưa đạt ngưỡng miễn phí.",
+            )
 
     if not pricing["all_eligible"]:
         for cit in pricing["items"]:
@@ -842,12 +871,39 @@ def get_order_by_code(
             detail="Không tìm thấy đơn hàng phù hợp với thông tin đã cung cấp.",
         )
 
-    is_staff = current_user and getattr(current_user, "role", "") in [
-        UserRole.ADMIN,
-        UserRole.PHARMACIST,
-        UserRole.WAREHOUSE_MANAGER,
-        UserRole.WAREHOUSE_STAFF,
-    ]
+    user_role = getattr(current_user, "role", "") if current_user else ""
+    is_admin = user_role in [UserRole.ADMIN, UserRole.PHARMACIST]
+    is_warehouse_role = user_role in [UserRole.WAREHOUSE_MANAGER, UserRole.WAREHOUSE_STAFF]
+
+    is_staff = False
+    if is_admin:
+        is_staff = True
+    elif is_warehouse_role:
+        user_wh_id = getattr(current_user, "warehouse_id", None)
+        is_belong_to_warehouse = False
+        if user_wh_id:
+            if order.assigned_warehouse_id == user_wh_id:
+                is_belong_to_warehouse = True
+            else:
+                ff_exists = db.scalar(
+                    select(OrderFulfillment.id)
+                    .where(
+                        OrderFulfillment.order_id == order.id,
+                        OrderFulfillment.warehouse_id == user_wh_id,
+                    )
+                    .limit(1)
+                )
+                if ff_exists:
+                    is_belong_to_warehouse = True
+
+        if is_belong_to_warehouse:
+            is_staff = True
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Bạn không có quyền xem đơn hàng thuộc kho khác hoặc đơn không được phân về kho của bạn.",
+            )
+
     clean_order_phone = (order.customer_phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
 
     effective_token = x_order_token
@@ -871,8 +927,13 @@ def get_order_by_code(
         else:
             # Khách vãng lai hoặc chưa đăng nhập: Bắt buộc có token ký điện tử hợp lệ
             if not is_guest_token_valid:
+                if not effective_token and not phone:
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Vui lòng đăng nhập hoặc cung cấp token đơn hàng hợp lệ để xem thông tin đơn hàng.",
+                    )
                 raise HTTPException(
-                    status_code=403,
+                    status_code=status.HTTP_403_FORBIDDEN,
                     detail="Số điện thoại không phải là bằng chứng duy nhất để xác thực quyền sở hữu đơn. Vui lòng cung cấp token đơn hàng hợp lệ (order_token) hoặc đăng nhập tài khoản sở hữu.",
                 )
 
@@ -925,7 +986,7 @@ def get_customer_orders(
     if not current_user:
         raise HTTPException(
             status_code=401,
-            detail="Vui lòng đăng nhập để tra cứu lịch sử đơn hàng theo số điện thoại.",
+            detail="Tra cứu đơn hàng qua số điện thoại trên URL bị vô hiệu hóa vì lý do bảo mật. Vui lòng đăng nhập để xem đơn hàng của bạn.",
         )
 
     is_staff = getattr(current_user, "role", "") in [UserRole.ADMIN, UserRole.PHARMACIST, UserRole.WAREHOUSE_MANAGER]

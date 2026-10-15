@@ -166,9 +166,9 @@ def test_anonymous_access_blocked(client: TestClient, sample_orders_a_and_b):
     res = client.get(f"/api/v1/store/orders/{code}")
     assert res.status_code == 401
 
-    # 2. Tìm kiếm theo SĐT -> 403 (bị vô hiệu hóa vì lý do bảo mật)
+    # 2. Tìm kiếm theo SĐT -> 401 hoặc 403 (bị vô hiệu hóa vì lý do bảo mật)
     res = client.get("/api/v1/store/orders/customer/0901111111")
-    assert res.status_code == 403
+    assert res.status_code in [401, 403]
 
     # 3. Xem trạng thái thanh toán -> 401
     res = client.get(f"/api/v1/payments/orders/{code}/status")

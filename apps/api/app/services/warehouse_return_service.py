@@ -1431,6 +1431,7 @@ class WarehouseReturnService:
         return_code: str,
         user: User | None = None,
         phone_verify: str | None = None,
+        is_token_verified: bool = False,
     ) -> ReturnEvidenceRequest | None:
         """
         Lấy thông tin yêu cầu bổ sung ảnh cho khách hàng (kèm kiểm tra quá hạn Just-in-Time).
@@ -1450,6 +1451,8 @@ class WarehouseReturnService:
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Bạn không có quyền xem yêu cầu đổi trả của khách hàng khác.",
                 )
+        elif is_token_verified:
+            pass  # Xác thực hợp lệ qua chữ ký số đơn hàng (Guest Order Token)
         elif phone_verify:
             if ret_req.customer_phone != phone_verify.strip():
                 raise HTTPException(

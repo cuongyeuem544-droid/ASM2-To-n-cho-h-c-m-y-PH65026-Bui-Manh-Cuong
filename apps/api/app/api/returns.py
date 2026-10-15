@@ -552,6 +552,7 @@ def get_return_detail(
                 return_code=return_code,
                 user=current_user,
                 phone_verify=phone_verify,
+                is_token_verified=is_token_valid,
             )
         ),
     }
@@ -561,17 +562,30 @@ def get_return_detail(
 def get_customer_evidence_request_endpoint(
     return_code: str,
     phone_verify: Optional[str] = Query(None),
+    x_order_token: Optional[str] = Header(None, alias="X-Order-Token"),
+    order_token: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_current_user),
 ):
     """
     Khách hàng xem yêu cầu bổ sung ảnh, hạn chót còn lại và danh sách ảnh đã nộp.
     """
+    ret_req = db.scalar(select(ReturnRequest).where(ReturnRequest.return_code == return_code))
+    is_token_verified = False
+    if ret_req and ret_req.order:
+        effective_token = x_order_token or order_token
+        if not effective_token and authorization and authorization.startswith("Bearer "):
+            effective_token = authorization[7:].strip()
+        if effective_token:
+            is_token_verified = verify_guest_order_token(effective_token, ret_req.order.order_code)
+
     req = WarehouseReturnService.get_customer_evidence_request(
         db=db,
         return_code=return_code,
         user=current_user,
         phone_verify=phone_verify,
+        is_token_verified=is_token_verified,
     )
     if not req:
         return {"has_active_request": False, "request": None}

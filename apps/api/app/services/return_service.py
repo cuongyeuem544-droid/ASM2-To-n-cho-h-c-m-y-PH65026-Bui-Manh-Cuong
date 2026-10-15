@@ -275,7 +275,7 @@ class ReturnService:
                 ),
                 body_text=f"Yêu cầu đổi trả mới: {ret_request.return_code} cho đơn {order.order_code}",
                 status="PENDING",
-                reference_type="RETURN_REQUEST_ALERT",
+                reference_type="RETURN_REQUEST",
                 reference_id=ret_request.return_code,
             )
             db.add(email_admin)

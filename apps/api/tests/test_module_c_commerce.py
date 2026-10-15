@@ -144,7 +144,7 @@ class TestModuleCCommerce(unittest.TestCase):
             sku_id=sku.id,
             initial_quantity=50,
             batch_number="BATCH-801-A",
-            expiry_date=date.today() + timedelta(days=90),
+            expiry_date=date.today() + timedelta(days=365),
             status=BatchStatus.ACTIVE,
         )
         self.db.add(batch)
@@ -194,7 +194,7 @@ class TestModuleCCommerce(unittest.TestCase):
             sku_id=sku.id,
             initial_quantity=50,
             batch_number="BATCH-802-A",
-            expiry_date=date.today() + timedelta(days=120),
+            expiry_date=date.today() + timedelta(days=365),
             status=BatchStatus.ACTIVE,
         )
         self.db.add(batch)
@@ -269,7 +269,7 @@ class TestModuleCCommerce(unittest.TestCase):
             sku_id=sku_box.id,
             initial_quantity=50,
             batch_number="BATCH-804-A",
-            expiry_date=date.today() + timedelta(days=90),
+            expiry_date=date.today() + timedelta(days=365),
             status=BatchStatus.ACTIVE,
         )
         self.db.add(batch)
@@ -317,7 +317,7 @@ class TestModuleCCommerce(unittest.TestCase):
             sku_id=sku.id,
             initial_quantity=50,
             batch_number="B-805",
-            expiry_date=date.today() + timedelta(days=100),
+            expiry_date=date.today() + timedelta(days=365),
             status=BatchStatus.ACTIVE,
         )
         self.db.add(batch)
@@ -356,7 +356,7 @@ class TestModuleCCommerce(unittest.TestCase):
             sku_id=sku.id,
             initial_quantity=50,
             batch_number="B-806",
-            expiry_date=date.today() + timedelta(days=100),
+            expiry_date=date.today() + timedelta(days=365),
             status=BatchStatus.ACTIVE,
         )
         self.db.add(batch)
@@ -405,7 +405,7 @@ class TestModuleCCommerce(unittest.TestCase):
             sku_id=sku.id,
             initial_quantity=50,
             batch_number="B-808",
-            expiry_date=date.today() + timedelta(days=100),
+            expiry_date=date.today() + timedelta(days=365),
             status=BatchStatus.ACTIVE,
         )
         self.db.add(batch)
@@ -469,7 +469,7 @@ class TestModuleCCommerce(unittest.TestCase):
         batch = InventoryBatch(
             sku_id=sku_valid.id,
             batch_number="B-810",
-            expiry_date=date.today() + timedelta(days=90),
+            expiry_date=date.today() + timedelta(days=365),
             initial_quantity=50,
             status=BatchStatus.ACTIVE,
         )
@@ -628,20 +628,20 @@ class TestModuleCCommerce(unittest.TestCase):
         self.db.add(sku)
         self.db.commit()
 
-        # Lô A: hạn 30 ngày (20 hộp)
+        # Lô A: hạn 200 ngày (20 hộp)
         batch_a = InventoryBatch(
             sku_id=sku.id,
             initial_quantity=20,
             batch_number="BATCH-816-EARLY",
-            expiry_date=date.today() + timedelta(days=30),
+            expiry_date=date.today() + timedelta(days=200),
             status=BatchStatus.ACTIVE,
         )
-        # Lô B: hạn 180 ngày (50 hộp)
+        # Lô B: hạn 400 ngày (50 hộp)
         batch_b = InventoryBatch(
             sku_id=sku.id,
             initial_quantity=50,
             batch_number="BATCH-816-LATE",
-            expiry_date=date.today() + timedelta(days=180),
+            expiry_date=date.today() + timedelta(days=400),
             status=BatchStatus.ACTIVE,
         )
         self.db.add_all([batch_a, batch_b])
@@ -706,7 +706,7 @@ class TestModuleCCommerce(unittest.TestCase):
             sku_id=sku.id,
             initial_quantity=50,
             batch_number="B-817",
-            expiry_date=date.today() + timedelta(days=90),
+            expiry_date=date.today() + timedelta(days=365),
             status=BatchStatus.ACTIVE,
         )
         self.db.add(batch)
@@ -815,7 +815,7 @@ class TestModuleCCommerce(unittest.TestCase):
             sku_id=sku.id,
             initial_quantity=50,
             batch_number="B-820",
-            expiry_date=date.today() + timedelta(days=120),
+            expiry_date=date.today() + timedelta(days=365),
             status=BatchStatus.ACTIVE,
         )
         self.db.add(batch)
@@ -846,7 +846,7 @@ class TestModuleCCommerce(unittest.TestCase):
         data = resp.json()
         self.assertTrue(data["order_code"].startswith("PT-"))
         self.assertEqual(data["order_status"], "PENDING")
-        self.assertEqual(data["total_amount"], 105000.0)  # 80k subtotal + 25k server-calculated shipping fee
+        self.assertEqual(data["total_amount"], 95000.0)  # 80k subtotal + 15k server-calculated shipping fee (dist <= 5km)
 
     # =========================================================================
     # 21. DUPLICATE CHECKOUT IDEMPOTENCY
@@ -868,7 +868,7 @@ class TestModuleCCommerce(unittest.TestCase):
             sku_id=sku.id,
             initial_quantity=50,
             batch_number="B-821",
-            expiry_date=date.today() + timedelta(days=100),
+            expiry_date=date.today() + timedelta(days=365),
             status=BatchStatus.ACTIVE,
         )
         self.db.add(batch)
@@ -932,7 +932,7 @@ class TestModuleCCommerce(unittest.TestCase):
             sku_id=sku.id,
             initial_quantity=50,
             batch_number="B-822",
-            expiry_date=date.today() + timedelta(days=100),
+            expiry_date=date.today() + timedelta(days=365),
             status=BatchStatus.ACTIVE,
         )
         self.db.add(batch)
@@ -1254,7 +1254,7 @@ class TestModuleCCommerce(unittest.TestCase):
             sku_id=sku.id,
             initial_quantity=50,
             batch_number="B-832",
-            expiry_date=date.today() + timedelta(days=90),
+            expiry_date=date.today() + timedelta(days=365),
             status=BatchStatus.ACTIVE,
         )
         self.db.add(batch)
@@ -1392,7 +1392,7 @@ class TestModuleCCommerce(unittest.TestCase):
             sku_id=sku.id,
             initial_quantity=50,
             batch_number="B-835",
-            expiry_date=date.today() + timedelta(days=90),
+            expiry_date=date.today() + timedelta(days=365),
             status=BatchStatus.ACTIVE,
         )
         self.db.add(batch)

@@ -881,7 +881,7 @@ def import_rows(
                     prod.publish_status = PublishStatus.PUBLISHED
                     prod.publish_mode = "SALE_ELIGIBLE"
                     score_res = calculate_product_score(db, prod, "Cập nhật dữ liệu từ phiếu nhập")
-                    prod.overall_score = score_res.total_score
+                    prod.overall_score = score_res.new_score
                     prod.confidence_label = score_res.label
 
                 try:
@@ -975,7 +975,7 @@ def import_rows(
             prod.publish_status = PublishStatus.PUBLISHED
             prod.publish_mode = "SALE_ELIGIBLE"
             score_res = calculate_product_score(db, prod, "Tính điểm tự động khi nhập sản phẩm mới")
-            prod.overall_score = score_res.total_score
+            prod.overall_score = score_res.new_score
             prod.confidence_label = score_res.label
 
             try:
