@@ -21,6 +21,7 @@ from app.api import (
     reviews,
     sources,
     storefront,
+    chat,
 )
 
 
@@ -55,5 +56,6 @@ api_router.include_router(returns.router)
 api_router.include_router(admin_returns.router)
 api_router.include_router(admin_refunds.router)
 api_router.include_router(admin_exchanges.router)
+api_router.include_router(chat.router)
 
 
