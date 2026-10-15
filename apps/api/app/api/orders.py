@@ -289,6 +289,21 @@ def checkout_order(
             .where(Order.idempotency_key == clean_idem)
         )
         if existing_order:
+            # Xác thực người gọi có đúng là chủ nhân của đơn hàng đã tạo trước đó hay không (Anti-IDOR)
+            clean_req_phone = (payload.customer_phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
+            clean_ord_phone = (existing_order.customer_phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
+            is_owner = False
+            if current_user and existing_order.user_id is not None and existing_order.user_id == current_user.id:
+                is_owner = True
+            elif clean_req_phone and clean_req_phone == clean_ord_phone:
+                is_owner = True
+
+            if not is_owner:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Idempotency key này không thuộc về số điện thoại hoặc tài khoản của bạn. Không thể truy xuất thông tin đơn hàng.",
+                )
+
             existing_token = create_guest_order_token(existing_order.order_code, existing_order.customer_phone)
             return {
                 "status": "SUCCESS",
@@ -457,6 +472,16 @@ def checkout_order(
 
     # 3. Tính toán chi phí vận chuyển & Giảm giá Voucher an toàn tại máy chủ (Server-side Pricing)
     total_subtotal = total_amount  # Tổng tiền hàng theo giá niêm yết hệ thống
+
+    # Kiểm tra tính hợp lệ của shipping_fee từ client (nếu có): chặn âm, NaN, Infinite
+    import math
+    if payload.shipping_fee is not None:
+        try:
+            val_fee = float(payload.shipping_fee)
+            if math.isnan(val_fee) or math.isinf(val_fee) or val_fee < 0:
+                raise ValueError()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Phí vận chuyển không hợp lệ (không được âm, NaN hoặc vô hạn).")
 
     if (payload.fulfillment_type or "DELIVERY").upper() == "STORE_PICKUP":
         server_shipping_fee = Decimal("0.0")

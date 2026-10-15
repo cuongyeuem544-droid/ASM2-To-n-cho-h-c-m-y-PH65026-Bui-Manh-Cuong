@@ -127,13 +127,6 @@ export default function CartPage() {
           let dbId = it.dbId;
           if (!dbId && it.id.startsWith("pt-")) dbId = parseInt(it.id.replace("pt-", ""), 10);
           else if (!dbId && /^\d+$/.test(it.id)) dbId = parseInt(it.id, 10);
-          else if (!dbId && it.id.startsWith("prod-")) {
-            const mockMap: Record<string, number> = {
-              "prod-01": 17, "prod-02": 16, "prod-03": 18, "prod-04": 20, "prod-05": 21,
-              "prod-06": 19, "prod-07": 22, "prod-08": 23, "prod-13": 43,
-            };
-            dbId = mockMap[it.id];
-          }
           return {
             product_id: dbId || 0,
             sku_id: it.skuId,
@@ -454,19 +447,6 @@ export default function CartPage() {
           dbId = parseInt(it.id.replace("pt-", ""), 10);
         } else if (!dbId && /^\d+$/.test(it.id)) {
           dbId = parseInt(it.id, 10);
-        } else if (!dbId && it.id.startsWith("prod-")) {
-          const mockMap: Record<string, number> = {
-            "prod-01": 17, // Panadol Extra
-            "prod-02": 16, // Efferalgan 500mg
-            "prod-03": 18, // Hapacol 650
-            "prod-04": 20, // Phosphalugel 20g
-            "prod-05": 21, // Duphalac 667g/l
-            "prod-06": 19, // Telfast HD 180mg
-            "prod-07": 22, // Orlistat Stada 120mg
-            "prod-08": 23, // Daflon 500mg
-            "prod-13": 43, // Berocca Performance
-          };
-          dbId = mockMap[it.id];
         }
         if (!dbId || isNaN(dbId)) {
           throw new Error(`Sản phẩm '${it.name}' không có mã định danh hợp lệ trên hệ thống. Vui lòng chọn lại.`);
@@ -545,7 +525,7 @@ export default function CartPage() {
       // Handle MoMo Sandbox payment
       if (paymentMethod === "MOMO") {
         const returnUrl = typeof window !== "undefined"
-          ? `${window.location.origin}/checkout/result?order_code=${encodeURIComponent(data.order_code)}&token=${encodeURIComponent(guestOrderToken)}&phone=${encodeURIComponent(finalCustomerPhone || "")}`
+          ? `${window.location.origin}/checkout/result?order_code=${encodeURIComponent(data.order_code)}`
           : "";
         if (typeof window !== "undefined" && finalCustomerPhone) {
           localStorage.setItem("h4care_checkout_phone", finalCustomerPhone);

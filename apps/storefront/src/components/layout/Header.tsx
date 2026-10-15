@@ -161,21 +161,13 @@ export const Header: React.FC<HeaderProps> = ({ onReplayIntro }) => {
               </button>
             </div>
 
-            {/* Central Interactive Search (Desktop & Tablet) */}
-            <div className="flex-1 max-w-2xl hidden md:block">
+            {/* Central Interactive Search (Desktop & Tablet) - Long Châu prominent bar (680px - 900px) */}
+            <div className="flex-1 max-w-3xl xl:max-w-4xl hidden md:block mx-2 lg:mx-4">
               <SearchExperience />
             </div>
 
             {/* Right Action Navigation */}
             <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
-              {/* Mobile Search Trigger */}
-              <button
-                onClick={() => setIsMobileSearchOpen(true)}
-                className="p-2.5 rounded-xl text-slate-700 hover:bg-slate-100 md:hidden transition-colors"
-                aria-label="Tìm kiếm thuốc"
-              >
-                <Search className="w-5 h-5 text-slate-600" />
-              </button>
 
               {/* Consultation Hotline Pill - Minimalist on xl */}
               <Link
@@ -346,6 +338,11 @@ export const Header: React.FC<HeaderProps> = ({ onReplayIntro }) => {
                 )}
               </Link>
             </div>
+          </div>
+
+          {/* Dedicated Mobile Search Bar Row (Clean, prominent, Long Châu style on mobile) */}
+          <div className="pt-2 pb-0.5 md:hidden">
+            <SearchExperience />
           </div>
         </div>
 

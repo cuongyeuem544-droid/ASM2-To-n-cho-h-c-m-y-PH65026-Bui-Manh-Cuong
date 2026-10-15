@@ -18,7 +18,14 @@ class Settings(BaseSettings):
     refresh_token_days: int = 7
     database_url: str = "sqlite:///./pharmatrust.db"
     redis_url: str = "redis://localhost:6379/0"
-    cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["http://localhost:5173"])
+    cors_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: [
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:5173",
+        ]
+    )
     public_api_min_score: int = 85
     storage_root: Path = Path("storage")
     max_upload_mb: int = 20

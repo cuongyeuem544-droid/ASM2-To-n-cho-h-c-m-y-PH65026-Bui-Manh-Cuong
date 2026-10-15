@@ -103,6 +103,9 @@ class TestP0StabilityRegression(unittest.TestCase):
     def tearDownClass(cls):
         cls.db.close()
 
+    def tearDown(self):
+        self.db.rollback()
+
     # -------------------------------------------------------------------------
     # PRIORITY 1: ANTI-IDOR & GUEST TOKEN SECURITY
     # -------------------------------------------------------------------------
@@ -277,6 +280,106 @@ class TestP0StabilityRegression(unittest.TestCase):
         self.assertEqual(prod_settings.app_env, "production")
         self.assertFalse(prod_settings.is_simulator_permitted)
 
+    # -------------------------------------------------------------------------
+    # PRIORITY 4: IDEMPOTENCY REPLAY ACCESS CONTROL & COMMERCE TAMPERING
+    # -------------------------------------------------------------------------
+    def test_07_idempotency_replay_unauthorized_attacker_rejected(self):
+        """Attacker cannot steal guest order token by replaying another customer's idempotency key."""
+        import uuid
+        idem_key = f"IDEM-SEC-{uuid.uuid4().hex[:10]}"
+        legit_phone = "0988776655"
+        attacker_phone = "0912345999"
+
+        payload_legit = {
+            "customer_name": "Chủ Đơn Thật",
+            "customer_phone": legit_phone,
+            "shipping_address": "77 Đường Cách Mạng, Q.1, TP.HCM",
+            "shipping_city": "TP. Hồ Chí Minh",
+            "province_code": "79",
+            "district_code": "760",
+            "ward_code": "26734",
+            "lat": 10.7769,
+            "lng": 106.7009,
+            "is_verified": True,
+            "payment_method": "COD",
+            "idempotency_key": idem_key,
+            "items": [{"product_id": 9901, "quantity": 1}],
+        }
+        res_legit = self.client.post("/api/v1/store/orders/checkout", json=payload_legit)
+        self.assertEqual(res_legit.status_code, 200, res_legit.text)
+        legit_data = res_legit.json()
+        self.assertIn("guest_access_token", legit_data)
+
+        # 1. Attacker calls with same idempotency key but different phone -> Must be rejected with 403
+        payload_attacker = dict(payload_legit)
+        payload_attacker["customer_phone"] = attacker_phone
+        payload_attacker["customer_name"] = "Kẻ Tấn Công"
+        res_attacker = self.client.post("/api/v1/store/orders/checkout", json=payload_attacker)
+        self.assertEqual(res_attacker.status_code, 403, res_attacker.text)
+        self.assertIn("Idempotency key này không thuộc về số điện thoại", res_attacker.json()["detail"])
+
+        # 2. Legitimate customer retries with same idempotency key and same phone -> 200 OK (Idempotent replay)
+        res_replay = self.client.post("/api/v1/store/orders/checkout", json=payload_legit)
+        self.assertEqual(res_replay.status_code, 200, res_replay.text)
+        replay_data = res_replay.json()
+        self.assertTrue(replay_data["is_idempotent_replay"])
+        self.assertEqual(replay_data["order_code"], legit_data["order_code"])
+
+    def test_08_shipping_fee_tampering_rejected(self):
+        """Negative shipping fee or invalid numeric value is strictly rejected with HTTP 400."""
+        payload_neg = {
+            "customer_name": "Test Ship Fee",
+            "customer_phone": "0988776654",
+            "shipping_address": "77 Đường Cách Mạng, Q.1, TP.HCM",
+            "shipping_city": "TP. Hồ Chí Minh",
+            "province_code": "79",
+            "district_code": "760",
+            "ward_code": "26734",
+            "lat": 10.7769,
+            "lng": 106.7009,
+            "is_verified": True,
+            "payment_method": "COD",
+            "shipping_fee": -50000.0,  # Negative shipping fee tampering
+            "items": [{"product_id": 9901, "quantity": 1}],
+        }
+        res = self.client.post("/api/v1/store/orders/checkout", json=payload_neg)
+        self.assertEqual(res.status_code, 400, res.text)
+        self.assertIn("Phí vận chuyển không hợp lệ", res.json()["detail"])
+
+    def test_09_free_shipping_threshold_enforced(self):
+        """Orders >= 300,000 VND always receive 0 VND shipping fee by server calculation."""
+        # 4 boxes of 9901 (120,000 x 4 = 480,000 > 300,000)
+        payload_free = {
+            "customer_name": "Test Free Ship",
+            "customer_phone": "0988776653",
+            "shipping_address": "77 Đường Cách Mạng, Q.1, TP.HCM",
+            "shipping_city": "TP. Hồ Chí Minh",
+            "province_code": "79",
+            "district_code": "760",
+            "ward_code": "26734",
+            "lat": 10.7769,
+            "lng": 106.7009,
+            "is_verified": True,
+            "payment_method": "COD",
+            "shipping_fee": 99000.0,  # Client tries to send high shipping fee
+            "items": [{"product_id": 9901, "quantity": 4}],
+        }
+        res = self.client.post("/api/v1/store/orders/checkout", json=payload_free)
+        self.assertEqual(res.status_code, 200, res.text)
+        order = self.db.query(Order).filter_by(order_code=res.json()["order_code"]).first()
+        self.assertIsNotNone(order)
+        self.assertEqual(order.shipping_fee, Decimal("0.0"))
+        self.assertEqual(order.total_amount, Decimal("480000.0"))
+
+    def test_10_cors_origin_restriction_hardened(self):
+        """CORS middleware does not contain wildcard allow_origin_regex."""
+        from fastapi.middleware.cors import CORSMiddleware
+        for middleware in app.user_middleware:
+            if middleware.cls == CORSMiddleware:
+                # verify allow_origin_regex is empty or None
+                self.assertFalse(middleware.kwargs.get("allow_origin_regex"))
+
 
 if __name__ == "__main__":
     unittest.main()
+
