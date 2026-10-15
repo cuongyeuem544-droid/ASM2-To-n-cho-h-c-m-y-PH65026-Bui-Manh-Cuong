@@ -24,6 +24,7 @@ import { motion, AnimatePresence } from "framer-motion";
 interface MegaMenuProps {
   isOpen: boolean;
   onClose: () => void;
+  topClassName?: string;
 }
 
 // Icon mapping helper
@@ -49,7 +50,7 @@ const CategoryIcon: React.FC<{ iconName: string; className?: string }> = ({
   }
 };
 
-export const MegaMenu: React.FC<MegaMenuProps> = ({ isOpen, onClose }) => {
+export const MegaMenu: React.FC<MegaMenuProps> = ({ isOpen, onClose, topClassName }) => {
   const router = useRouter();
   const [categories, setCategories] = useState<Category[]>(CATEGORIES_DATA);
   const [activeCategoryId, setActiveCategoryId] = useState<string>(CATEGORIES_DATA[0].id);
@@ -73,7 +74,7 @@ export const MegaMenu: React.FC<MegaMenuProps> = ({ isOpen, onClose }) => {
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-40 top-[70px]" onClick={onClose}>
+      <div className={`fixed inset-0 z-40 ${topClassName || "top-[104px]"}`} onClick={onClose}>
         {/* Backdrop */}
         <motion.div
           initial={{ opacity: 0 }}

@@ -208,15 +208,15 @@ export const SearchExperience: React.FC<SearchExperienceProps> = ({
 
   return (
     <div ref={containerRef} className={`relative w-full ${className}`}>
-      {/* Search Input Bar - Long Châu style prominent bar (height ~54-58px, wide, recognizable search button) */}
+      {/* Search Input Bar - Long Châu style prominent pill bar */}
       <div
-        className={`relative flex items-center w-full min-h-[50px] sm:min-h-[54px] transition-all duration-200 rounded-2xl ${
+        className={`relative flex items-center w-full min-h-[48px] sm:min-h-[52px] transition-all duration-200 rounded-full px-1.5 ${
           isOpen
             ? "ring-2 ring-brand-blue-500 shadow-depth-2 bg-white border border-brand-blue-500"
             : "bg-slate-50 hover:bg-slate-100/90 border border-slate-200/90 hover:border-slate-300 shadow-xs"
         }`}
       >
-        <div className="pl-4 pr-2 text-slate-400 shrink-0">
+        <div className="pl-3.5 pr-2 text-slate-400 shrink-0">
           {isLoading ? (
             <Loader2 className="w-5 h-5 text-brand-blue-600 animate-spin" />
           ) : (
@@ -239,10 +239,10 @@ export const SearchExperience: React.FC<SearchExperienceProps> = ({
           }}
           onKeyDown={handleKeyDownInput}
           placeholder="Tìm tên thuốc, hoạt chất, triệu chứng, vitamin..."
-          className="w-full py-3 pr-2 text-sm sm:text-[15px] bg-transparent outline-none text-slate-800 placeholder:text-slate-400 font-medium"
+          className="w-full py-2.5 pr-2 text-sm sm:text-[15px] bg-transparent outline-none text-slate-800 placeholder:text-slate-400 font-medium"
         />
 
-        <div className="flex items-center gap-1.5 mr-2 shrink-0">
+        <div className="flex items-center gap-1.5 mr-1 shrink-0">
           {query && (
             <button
               type="button"
@@ -259,7 +259,7 @@ export const SearchExperience: React.FC<SearchExperienceProps> = ({
           <button
             type="button"
             onClick={() => handleSelectKeyword(query.trim())}
-            className="h-9 sm:h-10 px-3.5 sm:px-5 bg-gradient-to-r from-brand-blue-600 to-brand-blue-700 hover:from-brand-blue-700 hover:to-brand-blue-800 text-white rounded-xl text-xs sm:text-sm font-bold transition-all shadow-sm flex items-center gap-1.5 active:scale-95"
+            className="h-8 sm:h-9 px-4 sm:px-5 bg-gradient-to-r from-brand-blue-600 to-brand-blue-700 hover:from-brand-blue-700 hover:to-brand-blue-800 text-white rounded-full text-xs sm:text-sm font-bold transition-all shadow-sm flex items-center gap-1.5 active:scale-95 shrink-0"
             aria-label="Tìm kiếm thuốc"
           >
             <Search className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
