@@ -6,7 +6,6 @@ import { IntroAnimation } from "@/components/intro/IntroAnimation";
 import { Header } from "@/components/layout/Header";
 import { HeroSection } from "@/components/hero/HeroSection";
 import { Footer } from "@/components/layout/Footer";
-import { PRODUCTS_DATA } from "@/data/products";
 import { Product } from "@/types";
 import { ProductCard } from "@/components/product/ProductCard";
 import { ProductQuickViewModal } from "@/components/product/ProductQuickViewModal";
@@ -16,11 +15,13 @@ import {
   ArrowRight,
   Flame,
   Award,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 
 export default function HomePage() {
-  const [products, setProducts] = useState<Product[]>(PRODUCTS_DATA);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [showIntro, setShowIntro] = useState(false);
   const [introKey, setIntroKey] = useState(0);
 
@@ -29,18 +30,23 @@ export default function HomePage() {
   const [rxConsultProduct, setRxConsultProduct] = useState<Product | null>(null);
 
   React.useEffect(() => {
+    setIsLoading(true);
     fetch("/api/v1/store/products?limit=300")
       .then((res) => {
         if (!res.ok) throw new Error("API error");
         return res.json();
       })
       .then((data) => {
-        if (data?.items && Array.isArray(data.items) && data.items.length > 0) {
+        if (data?.items && Array.isArray(data.items)) {
           setProducts(data.items);
         }
       })
       .catch((err) => {
-        console.warn("Using offline catalog on Home:", err);
+        console.warn("Could not fetch store products on Home:", err);
+        setProducts([]);
+      })
+      .finally(() => {
+        setIsLoading(false);
       });
   }, []);
 

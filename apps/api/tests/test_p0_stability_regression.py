@@ -217,8 +217,9 @@ class TestP0StabilityRegression(unittest.TestCase):
         order_code = data["order_code"]
         db_order = self.db.query(Order).filter_by(order_code=order_code).first()
         self.assertIsNotNone(db_order)
-        # Expected total: 120000 - 20000 = 100000
-        self.assertEqual(db_order.total_amount, Decimal("100000.0"))
+        # Server-side calculation: 120,000 subtotal - 20,000 discount = 100,000 + server shipping fee (15k local or 45k interprovincial)
+        self.assertIn(db_order.total_amount, [Decimal("115000.0"), Decimal("145000.0")])
+        self.assertIn(db_order.shipping_fee, [Decimal("15000.0"), Decimal("45000.0")])
 
     def test_05_no_fabricated_barcodes_or_prices(self):
         """FulfillmentRoutingService does not synthesize fake 893... barcodes or 50k prices."""
@@ -318,12 +319,18 @@ class TestP0StabilityRegression(unittest.TestCase):
         self.assertEqual(res_attacker.status_code, 403, res_attacker.text)
         self.assertIn("Idempotency key này không thuộc về số điện thoại", res_attacker.json()["detail"])
 
-        # 2. Legitimate customer retries with same idempotency key and same phone -> 200 OK (Idempotent replay)
+        # 2. Replay with same phone & key without token -> 200 OK (Idempotent replay) BUT token is NOT re-issued
         res_replay = self.client.post("/api/v1/store/orders/checkout", json=payload_legit)
         self.assertEqual(res_replay.status_code, 200, res_replay.text)
         replay_data = res_replay.json()
         self.assertTrue(replay_data["is_idempotent_replay"])
         self.assertEqual(replay_data["order_code"], legit_data["order_code"])
+        self.assertNotIn("guest_access_token", replay_data, "Guest token must NOT be re-issued merely by matching phone and idempotency key")
+
+        # 3. Replay with verified X-Order-Token -> token confirmed
+        res_token = self.client.post("/api/v1/store/orders/checkout", json=payload_legit, headers={"X-Order-Token": legit_data["guest_access_token"]})
+        self.assertEqual(res_token.status_code, 200)
+        self.assertIn("guest_access_token", res_token.json())
 
     def test_08_shipping_fee_tampering_rejected(self):
         """Negative shipping fee or invalid numeric value is strictly rejected with HTTP 400."""
@@ -345,6 +352,13 @@ class TestP0StabilityRegression(unittest.TestCase):
         res = self.client.post("/api/v1/store/orders/checkout", json=payload_neg)
         self.assertEqual(res.status_code, 400, res.text)
         self.assertIn("Phí vận chuyển không hợp lệ", res.json()["detail"])
+
+        # Zero shipping fee tampering on order < 300k is strictly rejected with HTTP 400
+        payload_zero = dict(payload_neg)
+        payload_zero["shipping_fee"] = 0.0
+        res_zero = self.client.post("/api/v1/store/orders/checkout", json=payload_zero)
+        self.assertEqual(res_zero.status_code, 400, res_zero.text)
+        self.assertIn("Không cho phép client tự quyết định phí giao hàng bằng 0đ", res_zero.json()["detail"])
 
     def test_09_free_shipping_threshold_enforced(self):
         """Orders >= 300,000 VND always receive 0 VND shipping fee by server calculation."""
@@ -378,6 +392,77 @@ class TestP0StabilityRegression(unittest.TestCase):
             if middleware.cls == CORSMiddleware:
                 # verify allow_origin_regex is empty or None
                 self.assertFalse(middleware.kwargs.get("allow_origin_regex"))
+
+    # -------------------------------------------------------------------------
+    # PRIORITY 5: RETURN EVIDENCE PRIVACY, STATIC URL RESTRICTION & MAGIC BYTES
+    # -------------------------------------------------------------------------
+    def test_11_return_evidence_security_and_privacy(self):
+        """Return evidence files are strictly protected from static access and fake uploads."""
+        # 1. Direct static access to /storage/returns must be blocked (HTTP 403)
+        res_static = self.client.get("/storage/returns/secret_evidence.jpg")
+        self.assertEqual(res_static.status_code, 403, res_static.text)
+        self.assertIn("bị từ chối vì lý do bảo mật", res_static.json()["detail"])
+
+        # 2. Upload dangerous extension (.exe, .sh) must be rejected with HTTP 400
+        import io
+        fake_exe = io.BytesIO(b"MZ\x90\x00\x03\x00\x00\x00")
+        res_exe = self.client.post(
+            "/api/v1/returns/upload-evidence",
+            files={"file": ("exploit.exe", fake_exe, "application/octet-stream")},
+        )
+        self.assertEqual(res_exe.status_code, 400)
+        self.assertIn("nguy hiểm bị từ chối", res_exe.json()["detail"])
+
+        # 3. Upload file with mismatched magic bytes (text disguised as .jpg) must be rejected with HTTP 400
+        fake_jpg = io.BytesIO(b"Plain text payload pretending to be a jpeg image")
+        res_fake_jpg = self.client.post(
+            "/api/v1/returns/upload-evidence",
+            files={"file": ("fake_proof.jpg", fake_jpg, "image/jpeg")},
+        )
+        self.assertEqual(res_fake_jpg.status_code, 400)
+        self.assertIn("Chữ ký tệp không hợp lệ", res_fake_jpg.json()["detail"])
+
+        # 4. Upload valid JPEG binary (starts with \xff\xd8\xff) succeeds
+        valid_jpg_content = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00`\x00`\x00\x00\xff\xdb\x00C\x00"
+        valid_jpg = io.BytesIO(valid_jpg_content)
+        res_valid = self.client.post(
+            "/api/v1/returns/upload-evidence",
+            files={"file": ("legit_photo.jpg", valid_jpg, "image/jpeg")},
+        )
+        self.assertEqual(res_valid.status_code, 200, res_valid.text)
+        evid_data = res_valid.json()
+        self.assertTrue(evid_data["success"])
+        filename = evid_data["file_name"]
+
+        # 5. Accessing evidence via secure API without ownership or token must return 403 Forbidden
+        res_unauth = self.client.get(evid_data["file_url"])
+        self.assertEqual(res_unauth.status_code, 403)
+
+    def test_12_atomic_rollback_on_failed_checkout_transaction(self):
+        """Checkout transaction cleanly rolls back when an error occurs during stock allocation."""
+        order_count_before = self.db.query(Order).count()
+        import uuid
+        failing_payload = {
+            "customer_name": "Test Rollback",
+            "customer_phone": "0988776652",
+            "shipping_address": "77 Đường Cách Mạng, Q.1, TP.HCM",
+            "shipping_city": "TP. Hồ Chí Minh",
+            "province_code": "79",
+            "district_code": "760",
+            "ward_code": "26734",
+            "lat": 10.7769,
+            "lng": 106.7009,
+            "is_verified": True,
+            "payment_method": "COD",
+            "idempotency_key": f"IDEM-ROLLBACK-{uuid.uuid4().hex[:8]}",
+            # Requesting product 99999 that has no stock / does not exist
+            "items": [{"product_id": 99999, "quantity": 1}],
+        }
+        res = self.client.post("/api/v1/store/orders/checkout", json=failing_payload)
+        self.assertIn(res.status_code, [400, 404])
+        # Verify no half-baked Order record was committed
+        order_count_after = self.db.query(Order).count()
+        self.assertEqual(order_count_after, order_count_before)
 
 
 if __name__ == "__main__":

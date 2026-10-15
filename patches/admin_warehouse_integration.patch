@@ -1,6 +1,8 @@
+diff --git a/apps/web/src/pages/OrdersPage.tsx b/apps/web/src/pages/OrdersPage.tsx
+index 2a3bf6d..eab9862 100644
 --- a/apps/web/src/pages/OrdersPage.tsx
 +++ b/apps/web/src/pages/OrdersPage.tsx
-@@ -118,6 +118,8 @@
+@@ -118,6 +118,8 @@ export function OrdersPage() {
    const [searchQuery, setSearchQuery] = useState('')
    const [selectedOrder, setSelectedOrder] = useState<OrderDetailData | null>(null)
    const [loadingDetail, setLoadingDetail] = useState(false)
@@ -9,7 +11,7 @@
    const [updatingId, setUpdatingId] = useState<number | null>(null)
    const [updatingFulfillmentId, setUpdatingFulfillmentId] = useState<number | null>(null)
    const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
-@@ -129,7 +131,13 @@
+@@ -129,7 +131,13 @@ export function OrdersPage() {
    useEffect(() => {
      setCurrentPage(1)
      loadOrders()
@@ -24,7 +26,7 @@
  
    const totalPages = Math.max(1, Math.ceil(orders.length / pageSize))
    const displayedOrders = useMemo(() => {
-@@ -143,6 +151,7 @@
+@@ -143,6 +151,7 @@ export function OrdersPage() {
        const q = new URLSearchParams()
        if (selectedStatus !== 'ALL') q.set('status', selectedStatus)
        if (searchQuery.trim()) q.set('search', searchQuery.trim())
@@ -32,7 +34,7 @@
  
        const res = await api<{ items: OrderSummary[] }>(`/admin/orders?${q.toString()}`)
        setOrders(res.items || [])
-@@ -254,6 +263,16 @@
+@@ -254,6 +263,16 @@ export function OrdersPage() {
          isRefreshing={loading}
        >
          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -49,25 +51,605 @@
            {['ALL', 'PENDING', 'CONFIRMED', 'SHIPPING', 'COMPLETED', 'CANCELLED'].map((st) => (
              <button
                key={st}
+diff --git a/apps/web/src/pages/WarehousesPage.tsx b/apps/web/src/pages/WarehousesPage.tsx
+index d9f97e7..b58c39c 100644
 --- a/apps/web/src/pages/WarehousesPage.tsx
 +++ b/apps/web/src/pages/WarehousesPage.tsx
-@@ -95,6 +95,9 @@
-   const [detailSearch, setDetailSearch] = useState('')
+@@ -15,6 +15,7 @@ import {
+   Search,
+   ShieldCheck,
+   Tag,
++  Truck,
+   X,
+ } from 'lucide-react'
+ import { useEffect, useMemo, useState } from 'react'
+@@ -96,6 +97,24 @@ export function WarehousesPage() {
    const [detailPage, setDetailPage] = useState(1)
    const [detailPageSize, setDetailPageSize] = useState(25)
+ 
++  // Warehouse Queues Integration (Fulfillments & Returns)
 +  const [warehouseQueueTab, setWarehouseQueueTab] = useState<'STOCKS' | 'FULFILLMENTS' | 'RETURNS'>('STOCKS')
 +  const [warehouseFulfillments, setWarehouseFulfillments] = useState<any[]>([])
 +  const [warehouseReturns, setWarehouseReturns] = useState<any[]>([])
- 
++  const [activeWhId, setActiveWhId] = useState<number | null>(null)
++  const [fulfillmentsLoading, setFulfillmentsLoading] = useState(false)
++  const [returnsLoading, setReturnsLoading] = useState(false)
++
++  // Inspection modal state
++  const [inspectModalOpen, setInspectModalOpen] = useState(false)
++  const [inspectingReturn, setInspectingReturn] = useState<any | null>(null)
++  const [inspectResult, setInspectResult] = useState<'PASSED' | 'REJECTED'>('PASSED')
++  const [acceptedQty, setAcceptedQty] = useState(1)
++  const [rejectedQty, setRejectedQty] = useState(0)
++  const [disposition, setDisposition] = useState<'RESTOCK' | 'QUARANTINE' | 'DISPOSE'>('RESTOCK')
++  const [pharmacistNotes, setPharmacistNotes] = useState('')
++  const [inspectSubmitting, setInspectSubmitting] = useState(false)
++
    // Form state
    const [code, setCode] = useState('')
-@@ -133,6 +136,9 @@
+   const [name, setName] = useState('')
+@@ -123,13 +142,105 @@ export function WarehousesPage() {
+     loadWarehouses()
+   }, [])
+ 
++  async function loadWarehouseFulfillments(whId: number) {
++    setFulfillmentsLoading(true)
++    try {
++      const res = await api<any>(`/admin/warehouses/${whId}/fulfillments`)
++      setWarehouseFulfillments(res?.items || [])
++    } catch {
++      setWarehouseFulfillments([])
++    } finally {
++      setFulfillmentsLoading(false)
++    }
++  }
++
++  async function loadWarehouseReturns(whId: number) {
++    setReturnsLoading(true)
++    try {
++      const res = await api<any>(`/admin/warehouses/${whId}/returns`)
++      setWarehouseReturns(res?.items || [])
++    } catch {
++      setWarehouseReturns([])
++    } finally {
++      setReturnsLoading(false)
++    }
++  }
++
++  async function handleUpdateFulfillmentStatus(fulfillmentId: number, nextStatus: string) {
++    try {
++      await api(`/admin/orders/fulfillments/${fulfillmentId}/status`, {
++        method: 'PATCH',
++        body: JSON.stringify({ status: nextStatus }),
++      })
++      if (activeWhId) {
++        loadWarehouseFulfillments(activeWhId)
++      }
++    } catch (err: any) {
++      alert(err.message || 'Không thể cập nhật trạng thái kiện hàng')
++    }
++  }
++
++  async function handleReceiveReturn(returnCode: string) {
++    try {
++      await api(`/admin/returns/${returnCode}/receive`, { method: 'POST' })
++      if (activeWhId) {
++        loadWarehouseReturns(activeWhId)
++      }
++    } catch (err: any) {
++      alert(err.message || 'Không thể tiếp nhận hàng hoàn')
++    }
++  }
++
++  function openInspectModal(ret: any) {
++    setInspectingReturn(ret)
++    const qty = ret.items?.[0]?.original_quantity || 1
++    setAcceptedQty(qty)
++    setRejectedQty(0)
++    setInspectResult('PASSED')
++    setDisposition('RESTOCK')
++    setPharmacistNotes('Kiểm định đạt tiêu chuẩn GSP, bao bì nguyên vẹn, hạn dùng còn dài.')
++    setInspectModalOpen(true)
++  }
++
++  async function handleSubmitInspect(e: React.FormEvent) {
++    e.preventDefault()
++    if (!inspectingReturn) return
++    setInspectSubmitting(true)
++    try {
++      await api(`/admin/returns/${inspectingReturn.return_code}/inspect`, {
++        method: 'POST',
++        body: JSON.stringify({
++          inspection_result: inspectResult,
++          accepted_quantity: acceptedQty,
++          rejected_quantity: rejectedQty,
++          disposition: disposition,
++          pharmacist_notes: pharmacistNotes,
++        }),
++      })
++      setInspectModalOpen(false)
++      setInspectingReturn(null)
++      if (activeWhId) {
++        loadWarehouseReturns(activeWhId)
++        api<WarehouseStockDetailResponse>(`/warehouses/${activeWhId}/stocks`).then(setDetailData).catch(() => {})
++      }
++    } catch (err: any) {
++      alert(err.message || 'Lỗi kiểm định dược')
++    } finally {
++      setInspectSubmitting(false)
++    }
++  }
++
+   async function openWarehouseDetail(wh: WarehouseItem) {
++    setActiveWhId(wh.id)
++    setWarehouseQueueTab('STOCKS')
+     setDetailModalOpen(true)
+     setDetailLoading(true)
+     setDetailData(null)
+     setDetailTab('ALL')
+     setDetailSearch('')
+     setDetailPage(1)
++    loadWarehouseFulfillments(wh.id)
++    loadWarehouseReturns(wh.id)
      try {
        const data = await api<WarehouseStockDetailResponse>(`/warehouses/${wh.id}/stocks`)
        setDetailData(data)
-+      // Tải kèm danh sách kiện hàng cần xuất và hàng hoàn trả
-+      api<any>(`/admin/warehouses/${wh.id}/fulfillments`).then(res => setWarehouseFulfillments(res?.items || [])).catch(() => {})
-+      api<any>(`/admin/warehouses/${wh.id}/returns`).then(res => setWarehouseReturns(res?.items || [])).catch(() => {})
-     } catch (err: any) {
-       setError(err.message || 'Không thể tải chi tiết tồn kho chi nhánh')
-     } finally {
+@@ -697,9 +808,318 @@ export function WarehousesPage() {
+               </button>
+             </div>
+ 
++            {/* Modal Queue Tabs */}
++            <div
++              style={{
++                display: 'flex',
++                gap: '8px',
++                borderBottom: '1px solid #e2e8f0',
++                padding: '0 24px',
++                background: '#f8fafc',
++              }}
++            >
++              <button
++                type="button"
++                onClick={() => setWarehouseQueueTab('STOCKS')}
++                style={{
++                  padding: '12px 16px',
++                  borderBottom: warehouseQueueTab === 'STOCKS' ? '2px solid #0284c7' : '2px solid transparent',
++                  fontWeight: warehouseQueueTab === 'STOCKS' ? 700 : 500,
++                  color: warehouseQueueTab === 'STOCKS' ? '#0284c7' : '#64748b',
++                  background: 'none',
++                  border: 'none',
++                  cursor: 'pointer',
++                  fontSize: '13px',
++                }}
++              >
++                Tồn kho dược GSP
++              </button>
++              <button
++                type="button"
++                onClick={() => setWarehouseQueueTab('FULFILLMENTS')}
++                style={{
++                  padding: '12px 16px',
++                  borderBottom: warehouseQueueTab === 'FULFILLMENTS' ? '2px solid #0284c7' : '2px solid transparent',
++                  fontWeight: warehouseQueueTab === 'FULFILLMENTS' ? 700 : 500,
++                  color: warehouseQueueTab === 'FULFILLMENTS' ? '#0284c7' : '#64748b',
++                  background: 'none',
++                  border: 'none',
++                  cursor: 'pointer',
++                  fontSize: '13px',
++                }}
++              >
++                Kiện hàng xuất kho ({warehouseFulfillments.length})
++              </button>
++              <button
++                type="button"
++                onClick={() => setWarehouseQueueTab('RETURNS')}
++                style={{
++                  padding: '12px 16px',
++                  borderBottom: warehouseQueueTab === 'RETURNS' ? '2px solid #0284c7' : '2px solid transparent',
++                  fontWeight: warehouseQueueTab === 'RETURNS' ? 700 : 500,
++                  color: warehouseQueueTab === 'RETURNS' ? '#0284c7' : '#64748b',
++                  background: 'none',
++                  border: 'none',
++                  cursor: 'pointer',
++                  fontSize: '13px',
++                }}
++              >
++                Hàng hoàn trả về kho ({warehouseReturns.length})
++              </button>
++            </div>
++
+             {/* Modal Body */}
+             <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1 }}>
+-              {detailLoading ? (
++              {warehouseQueueTab === 'FULFILLMENTS' ? (
++                <div style={{ marginTop: '4px' }}>
++                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
++                    <h3 style={{ fontSize: '15px', fontWeight: 700, margin: 0, color: '#1e293b' }}>
++                      Hàng đợi kiện hàng xuất kho ({warehouseFulfillments.length})
++                    </h3>
++                    <button
++                      type="button"
++                      className="button button-secondary"
++                      onClick={() => activeWhId && loadWarehouseFulfillments(activeWhId)}
++                      style={{ fontSize: '12px', padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
++                    >
++                      <RefreshCw size={13} className={fulfillmentsLoading ? 'spin' : ''} /> Làm mới
++                    </button>
++                  </div>
++                  {fulfillmentsLoading ? (
++                    <div style={{ textAlign: 'center', padding: '40px 0', color: '#64748b' }}>Đang tải danh sách kiện hàng...</div>
++                  ) : warehouseFulfillments.length === 0 ? (
++                    <div style={{ textAlign: 'center', padding: '50px 0', color: '#64748b', background: '#f8fafc', borderRadius: '10px' }}>
++                      <Package size={36} style={{ margin: '0 auto 10px', opacity: 0.4 }} />
++                      <p style={{ margin: 0, fontWeight: 600 }}>Không có kiện hàng nào đang chờ xử lý tại kho này.</p>
++                    </div>
++                  ) : (
++                    <div style={{ overflowX: 'auto' }}>
++                      <table className="table" style={{ width: '100%', fontSize: '12.5px', borderCollapse: 'collapse' }}>
++                        <thead>
++                          <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #cbd5e1', textAlign: 'left' }}>
++                            <th style={{ padding: '10px 12px' }}>Mã kiện / Đơn hàng</th>
++                            <th style={{ padding: '10px 12px' }}>Khách hàng / Giao hàng</th>
++                            <th style={{ padding: '10px 12px' }}>Mặt hàng & Phân bổ lô FEFO</th>
++                            <th style={{ padding: '10px 12px' }}>Vận chuyển</th>
++                            <th style={{ padding: '10px 12px' }}>Trạng thái</th>
++                            <th style={{ padding: '10px 12px', textAlign: 'right' }}>Thao tác FSM</th>
++                          </tr>
++                        </thead>
++                        <tbody>
++                          {warehouseFulfillments.map((ff) => (
++                            <tr key={ff.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
++                              <td style={{ padding: '10px 12px', verticalAlign: 'top' }}>
++                                <strong style={{ color: '#0284c7', display: 'block' }}>{ff.fulfillment_code}</strong>
++                                <span style={{ fontSize: '11px', color: '#64748b' }}>Đơn: {ff.order?.order_code || ff.order_id}</span>
++                              </td>
++                              <td style={{ padding: '10px 12px', verticalAlign: 'top' }}>
++                                <div style={{ fontWeight: 600 }}>{ff.order?.customer_name || 'Khách vãng lai'}</div>
++                                <div style={{ fontSize: '11.5px', color: '#64748b' }}>{ff.order?.customer_phone}</div>
++                                <div style={{ fontSize: '11px', color: '#94a3b8', maxWidth: '200px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
++                                  {ff.order?.shipping_address}
++                                </div>
++                              </td>
++                              <td style={{ padding: '10px 12px', verticalAlign: 'top' }}>
++                                {ff.items?.map((it: any) => (
++                                  <div key={it.id} style={{ marginBottom: '4px' }}>
++                                    <div style={{ fontWeight: 500 }}>{it.product_name} x {it.quantity}</div>
++                                    {it.allocations?.map((al: any) => (
++                                      <div key={al.id} style={{ fontSize: '11px', color: '#059669', paddingLeft: '8px' }}>
++                                        • Lô: <strong>{al.batch_number}</strong> (HSD: {al.expiry_date ? al.expiry_date.slice(0, 10) : 'N/A'}) - SL: {al.allocated_quantity}
++                                      </div>
++                                    ))}
++                                  </div>
++                                ))}
++                              </td>
++                              <td style={{ padding: '10px 12px', verticalAlign: 'top' }}>
++                                <div>{ff.carrier_name || 'Giao Tiêu Chuẩn'}</div>
++                                {ff.tracking_code && (
++                                  <span style={{ fontSize: '11px', background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px', color: '#334155' }}>
++                                    {ff.tracking_code}
++                                  </span>
++                                )}
++                              </td>
++                              <td style={{ padding: '10px 12px', verticalAlign: 'top' }}>
++                                <span style={{
++                                  padding: '3px 8px',
++                                  borderRadius: '6px',
++                                  fontSize: '11px',
++                                  fontWeight: 700,
++                                  background: ff.status === 'SHIPPED' ? '#dcfce7' : ff.status === 'PACKED' ? '#e0e7ff' : ff.status === 'PICKED' ? '#fef3c7' : '#f1f5f9',
++                                  color: ff.status === 'SHIPPED' ? '#166534' : ff.status === 'PACKED' ? '#4338ca' : ff.status === 'PICKED' ? '#b45309' : '#475569',
++                                }}>
++                                  {ff.status}
++                                </span>
++                              </td>
++                              <td style={{ padding: '10px 12px', verticalAlign: 'top', textAlign: 'right' }}>
++                                <div style={{ display: 'inline-flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
++                                  {ff.status === 'PENDING' && (
++                                    <button
++                                      type="button"
++                                      className="button button-primary"
++                                      onClick={() => handleUpdateFulfillmentStatus(ff.id, 'PICKED')}
++                                      style={{ fontSize: '11.5px', padding: '4px 8px' }}
++                                    >
++                                      Lấy hàng (PICK)
++                                    </button>
++                                  )}
++                                  {ff.status === 'PICKED' && (
++                                    <button
++                                      type="button"
++                                      className="button button-primary"
++                                      onClick={() => handleUpdateFulfillmentStatus(ff.id, 'PACKED')}
++                                      style={{ fontSize: '11.5px', padding: '4px 8px', background: '#4338ca' }}
++                                    >
++                                      Đóng gói (PACK)
++                                    </button>
++                                  )}
++                                  {ff.status === 'PACKED' && (
++                                    <button
++                                      type="button"
++                                      className="button button-primary"
++                                      onClick={() => handleUpdateFulfillmentStatus(ff.id, 'SHIPPED')}
++                                      style={{ fontSize: '11.5px', padding: '4px 8px', background: '#16a34a' }}
++                                    >
++                                      Xuất kho (SHIP)
++                                    </button>
++                                  )}
++                                  {ff.status !== 'SHIPPED' && ff.status !== 'CANCELLED' && (
++                                    <button
++                                      type="button"
++                                      className="button button-secondary"
++                                      onClick={() => handleUpdateFulfillmentStatus(ff.id, 'CANCELLED')}
++                                      style={{ fontSize: '11.5px', padding: '4px 8px', color: '#ef4444' }}
++                                    >
++                                      Hủy
++                                    </button>
++                                  )}
++                                </div>
++                              </td>
++                            </tr>
++                          ))}
++                        </tbody>
++                      </table>
++                    </div>
++                  )}
++                </div>
++              ) : warehouseQueueTab === 'RETURNS' ? (
++                <div style={{ marginTop: '4px' }}>
++                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
++                    <h3 style={{ fontSize: '15px', fontWeight: 700, margin: 0, color: '#1e293b' }}>
++                      Hàng hoàn trả về kho chi nhánh ({warehouseReturns.length})
++                    </h3>
++                    <button
++                      type="button"
++                      className="button button-secondary"
++                      onClick={() => activeWhId && loadWarehouseReturns(activeWhId)}
++                      style={{ fontSize: '12px', padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
++                    >
++                      <RefreshCw size={13} className={returnsLoading ? 'spin' : ''} /> Làm mới
++                    </button>
++                  </div>
++                  {returnsLoading ? (
++                    <div style={{ textAlign: 'center', padding: '40px 0', color: '#64748b' }}>Đang tải danh sách hàng hoàn trả...</div>
++                  ) : warehouseReturns.length === 0 ? (
++                    <div style={{ textAlign: 'center', padding: '50px 0', color: '#64748b', background: '#f8fafc', borderRadius: '10px' }}>
++                      <RefreshCw size={36} style={{ margin: '0 auto 10px', opacity: 0.4 }} />
++                      <p style={{ margin: 0, fontWeight: 600 }}>Không có yêu cầu đổi/trả nào được chỉ định hoàn về kho này.</p>
++                    </div>
++                  ) : (
++                    <div style={{ overflowX: 'auto' }}>
++                      <table className="table" style={{ width: '100%', fontSize: '12.5px', borderCollapse: 'collapse' }}>
++                        <thead>
++                          <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #cbd5e1', textAlign: 'left' }}>
++                            <th style={{ padding: '10px 12px' }}>Mã yêu cầu / Đơn</th>
++                            <th style={{ padding: '10px 12px' }}>Khách hàng</th>
++                            <th style={{ padding: '10px 12px' }}>Sản phẩm hoàn trả</th>
++                            <th style={{ padding: '10px 12px' }}>Lý do / Loại</th>
++                            <th style={{ padding: '10px 12px' }}>Vận đơn hoàn</th>
++                            <th style={{ padding: '10px 12px' }}>Trạng thái</th>
++                            <th style={{ padding: '10px 12px', textAlign: 'right' }}>Thao tác GSP</th>
++                          </tr>
++                        </thead>
++                        <tbody>
++                          {warehouseReturns.map((r) => (
++                            <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
++                              <td style={{ padding: '10px 12px', verticalAlign: 'top' }}>
++                                <strong style={{ color: '#be123c', display: 'block' }}>{r.return_code}</strong>
++                                <span style={{ fontSize: '11px', color: '#64748b' }}>Đơn: {r.order_code}</span>
++                              </td>
++                              <td style={{ padding: '10px 12px', verticalAlign: 'top' }}>
++                                <div style={{ fontWeight: 600 }}>{r.customer_name}</div>
++                                <div style={{ fontSize: '11.5px', color: '#64748b' }}>{r.customer_phone}</div>
++                              </td>
++                              <td style={{ padding: '10px 12px', verticalAlign: 'top' }}>
++                                {r.items?.map((it: any) => (
++                                  <div key={it.id} style={{ marginBottom: '2px' }}>
++                                    <span>{it.product_name}</span> - <strong>SL: {it.original_quantity}</strong>
++                                  </div>
++                                ))}
++                              </td>
++                              <td style={{ padding: '10px 12px', verticalAlign: 'top' }}>
++                                <span style={{ fontSize: '11px', fontWeight: 600, color: '#475569', display: 'block' }}>
++                                  {r.request_type === 'EXCHANGE' ? 'Đổi thuốc mới' : 'Trả hàng hoàn tiền'}
++                                </span>
++                                <span style={{ fontSize: '11px', color: '#64748b' }}>{r.reason_text || r.reason_code}</span>
++                              </td>
++                              <td style={{ padding: '10px 12px', verticalAlign: 'top' }}>
++                                {r.tracking_code ? (
++                                  <div>
++                                    <span style={{ fontSize: '11px', background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>
++                                      {r.carrier_name || 'Vận chuyển'}: {r.tracking_code}
++                                    </span>
++                                  </div>
++                                ) : (
++                                  <span style={{ fontSize: '11px', color: '#94a3b8' }}>Chưa có mã vận đơn</span>
++                                )}
++                              </td>
++                              <td style={{ padding: '10px 12px', verticalAlign: 'top' }}>
++                                <span style={{
++                                  padding: '3px 8px',
++                                  borderRadius: '6px',
++                                  fontSize: '11px',
++                                  fontWeight: 700,
++                                  background: r.status === 'CLOSED' ? '#dcfce7' : r.status === 'INSPECTING' || r.status === 'RECEIVED' ? '#fef3c7' : '#f1f5f9',
++                                  color: r.status === 'CLOSED' ? '#166534' : r.status === 'INSPECTING' || r.status === 'RECEIVED' ? '#b45309' : '#475569',
++                                }}>
++                                  {r.status}
++                                </span>
++                              </td>
++                              <td style={{ padding: '10px 12px', verticalAlign: 'top', textAlign: 'right' }}>
++                                <div style={{ display: 'inline-flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
++                                  {(r.status === 'APPROVED' || r.status === 'SHIPPING') && (
++                                    <button
++                                      type="button"
++                                      className="button button-primary"
++                                      onClick={() => handleReceiveReturn(r.return_code)}
++                                      style={{ fontSize: '11.5px', padding: '4px 8px', background: '#0284c7' }}
++                                    >
++                                      Kho nhận hàng
++                                    </button>
++                                  )}
++                                  {(r.status === 'RECEIVED' || r.status === 'INSPECTING') && (
++                                    <button
++                                      type="button"
++                                      className="button button-primary"
++                                      onClick={() => openInspectModal(r)}
++                                      style={{ fontSize: '11.5px', padding: '4px 8px', background: '#7e22ce' }}
++                                    >
++                                      Kiểm định Dược (GSP)
++                                    </button>
++                                  )}
++                                  {r.status === 'CLOSED' && (
++                                    <span style={{ fontSize: '11.5px', color: '#16a34a', fontWeight: 600 }}>Hoàn tất</span>
++                                  )}
++                                </div>
++                              </td>
++                            </tr>
++                          ))}
++                        </tbody>
++                      </table>
++                    </div>
++                  )}
++                </div>
++              ) : detailLoading ? (
+                 <div style={{ textAlign: 'center', padding: '60px 0', color: '#64748b' }}>
+                   <RefreshCw size={28} className="spin" style={{ margin: '0 auto 12px', display: 'block', color: '#0284c7' }} />
+                   <span>Đang tải thông tin mặt hàng thuốc và hạn dùng...</span>
+@@ -1111,6 +1531,138 @@ export function WarehousesPage() {
+           </div>
+         </div>
+       )}
++
++      {/* Modal Pharmacist Inspection */}
++      {inspectModalOpen && inspectingReturn && (
++        <div
++          style={{
++            position: 'fixed',
++            inset: 0,
++            background: 'rgba(15, 23, 42, 0.7)',
++            backdropFilter: 'blur(4px)',
++            zIndex: 200,
++            display: 'flex',
++            alignItems: 'center',
++            justifyContent: 'center',
++            padding: '20px',
++          }}
++          onClick={() => setInspectModalOpen(false)}
++        >
++          <div
++            style={{
++              background: '#ffffff',
++              borderRadius: '14px',
++              maxWidth: '560px',
++              width: '100%',
++              padding: '24px',
++              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
++            }}
++            onClick={(e) => e.stopPropagation()}
++          >
++            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px' }}>
++              <div>
++                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#0f172a' }}>
++                  Kiểm Định Dược Sĩ & Phân Luồng Tồn Kho (GSP)
++                </h3>
++                <span style={{ fontSize: '12px', color: '#64748b' }}>Yêu cầu: {inspectingReturn.return_code} - Đơn: {inspectingReturn.order_code}</span>
++              </div>
++              <button type="button" className="icon-button" onClick={() => setInspectModalOpen(false)}>
++                <X size={18} />
++              </button>
++            </div>
++
++            <form onSubmit={handleSubmitInspect} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
++              <div>
++                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
++                  Kết quả kiểm tra cảm quan & niêm phong
++                </label>
++                <select
++                  value={inspectResult}
++                  onChange={(e) => setInspectResult(e.target.value as any)}
++                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
++                >
++                  <option value="PASSED">ĐẠT (PASSED) - Bao bì nguyên vẹn, thuốc chuẩn GSP</option>
++                  <option value="REJECTED">KHÔNG ĐẠT (REJECTED) - Thuốc biến chất / rách tem / rò rỉ</option>
++                </select>
++              </div>
++
++              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
++                <div>
++                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
++                    Số lượng chấp nhận
++                  </label>
++                  <input
++                    type="number"
++                    min={0}
++                    value={acceptedQty}
++                    onChange={(e) => setAcceptedQty(Number(e.target.value))}
++                    style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
++                  />
++                </div>
++                <div>
++                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
++                    Số lượng loại bỏ
++                  </label>
++                  <input
++                    type="number"
++                    min={0}
++                    value={rejectedQty}
++                    onChange={(e) => setRejectedQty(Number(e.target.value))}
++                    style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
++                  />
++                </div>
++              </div>
++
++              <div>
++                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
++                  Phân luồng tồn kho Dược GSP (Disposition)
++                </label>
++                <select
++                  value={disposition}
++                  onChange={(e) => setDisposition(e.target.value as any)}
++                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
++                >
++                  <option value="RESTOCK">RESTOCK - Nhập lại kho bán (Cộng tồn kho chi nhánh)</option>
++                  <option value="QUARANTINE">QUARANTINE - Biệt trữ cách ly theo dõi</option>
++                  <option value="DISPOSE">DISPOSE - Hủy dược phẩm theo quy trình GSP</option>
++                </select>
++              </div>
++
++              <div>
++                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
++                  Biên bản ghi chú của Dược sĩ
++                </label>
++                <textarea
++                  rows={3}
++                  value={pharmacistNotes}
++                  onChange={(e) => setPharmacistNotes(e.target.value)}
++                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
++                  required
++                />
++              </div>
++
++              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
++                <button
++                  type="button"
++                  className="button button-secondary"
++                  onClick={() => setInspectModalOpen(false)}
++                  style={{ fontSize: '13px' }}
++                >
++                  Hủy bỏ
++                </button>
++                <button
++                  type="submit"
++                  disabled={inspectSubmitting}
++                  className="button button-primary"
++                  style={{ fontSize: '13px', background: '#7e22ce' }}
++                >
++                  {inspectSubmitting ? 'Đang lưu...' : 'Xác nhận kiểm định & Phân luồng'}
++                </button>
++              </div>
++            </form>
++          </div>
++        </div>
++      )}
+     </div>
+   )
+ }

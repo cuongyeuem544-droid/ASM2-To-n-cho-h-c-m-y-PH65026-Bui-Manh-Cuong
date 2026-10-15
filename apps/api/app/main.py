@@ -81,11 +81,13 @@ web_dist_dir = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
 assets_dir = web_dist_dir / "assets"
 index_html = web_dist_dir / "index.html"
 
-# Mount static files cho storage nội bộ (ảnh sản phẩm, tài liệu gốc)
+# Mount static files an toàn: Chỉ cho phép thư mục ảnh sản phẩm công khai (/storage/products).
+# Tuyệt đối KHÔNG mount tĩnh thư mục storage/returns chứa tài liệu và hình ảnh đổi/trả nhạy cảm.
 storage_dir = settings.storage_root.resolve()
 storage_dir.mkdir(parents=True, exist_ok=True)
-(storage_dir / "products").mkdir(parents=True, exist_ok=True)
-app.mount("/storage", StaticFiles(directory=str(storage_dir)), name="storage")
+products_dir = storage_dir / "products"
+products_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/storage/products", StaticFiles(directory=str(products_dir)), name="storage_products")
 
 if assets_dir.exists():
     app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
@@ -100,6 +102,8 @@ def serve_root():
 
 @app.get("/{full_path:path}")
 async def serve_spa(full_path: str):
+    if full_path.startswith("storage/returns") or full_path == "storage/returns":
+        return JSONResponse(status_code=403, content={"detail": "Truy cập tài liệu đổi/trả qua static URL bị từ chối vì lý do bảo mật. Vui lòng sử dụng API bảo mật có xác thực."})
     if full_path.startswith("api/") or full_path == "api" or full_path.startswith("storage/") or full_path == "storage":
         return JSONResponse(status_code=404, content={"detail": "Not found"})
     target_file = web_dist_dir / full_path

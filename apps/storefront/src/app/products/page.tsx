@@ -4,7 +4,6 @@ import React, { useState, useMemo, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Header } from "@/components/layout/Header";
-import { PRODUCTS_DATA } from "@/data/products";
 import { Product, ProductFilterState, ProductSortOption } from "@/types";
 import { ProductCard } from "@/components/product/ProductCard";
 import { ProductFilterSidebar } from "@/components/product/ProductFilterSidebar";
@@ -45,7 +44,7 @@ function ProductsContent() {
   const searchParamQuery = searchParams.get("search") || "";
   const categoryParam = searchParams.get("category") || "";
 
-  const [products, setProducts] = useState<Product[]>(PRODUCTS_DATA);
+  const [products, setProducts] = useState<Product[]>([]);
   const [filters, setFilters] = useState<ProductFilterState>(() => ({
     ...INITIAL_FILTERS,
     category: categoryParam,
@@ -54,7 +53,7 @@ function ProductsContent() {
   const [gridCols, setGridCols] = useState<3 | 4>(3);
   const [currentPage, setCurrentPage] = useState(1);
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Modals state
   const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null);
@@ -97,23 +96,8 @@ function ProductsContent() {
       })
       .catch((err) => {
         if (!isMounted) return;
-        console.warn("FastAPI Storefront offline, using fallback catalog:", err);
-        // Fallback filter
-        if (searchParamQuery.trim()) {
-          const q = searchParamQuery.trim().toLowerCase();
-          const fallbackMatches = PRODUCTS_DATA.filter((p) => {
-            return (
-              p.name.toLowerCase().includes(q) ||
-              p.brand.toLowerCase().includes(q) ||
-              p.activeIngredient.toLowerCase().includes(q) ||
-              p.usage.toLowerCase().includes(q) ||
-              p.indications.toLowerCase().includes(q)
-            );
-          });
-          setProducts(fallbackMatches);
-        } else {
-          setProducts(PRODUCTS_DATA);
-        }
+        console.warn("FastAPI Storefront error fetching products:", err);
+        setProducts([]);
       })
       .finally(() => {
         if (isMounted) setIsLoading(false);

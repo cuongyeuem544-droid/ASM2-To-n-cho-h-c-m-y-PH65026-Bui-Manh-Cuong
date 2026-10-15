@@ -586,27 +586,111 @@ def cancel_return_request(
     }
 
 
+DANGEROUS_EXTENSIONS = {
+    ".exe", ".bat", ".sh", ".py", ".php", ".phtml", ".html", ".htm",
+    ".js", ".svg", ".dll", ".cmd", ".vbs", ".msi", ".jar", ".jsp", ".asp", ".aspx"
+}
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".pdf"}
+MAX_EVIDENCE_SIZE = 5 * 1024 * 1024  # 5 MB
+
+
+def verify_magic_bytes(data: bytes, ext: str) -> bool:
+    """Xác minh loại file bằng nội dung nhị phân (magic bytes / file signature)."""
+    if len(data) < 4:
+        return False
+    if ext in [".jpg", ".jpeg"]:
+        return data.startswith(b"\xff\xd8\xff")
+    elif ext == ".png":
+        return data.startswith(b"\x89PNG\r\n\x1a\n")
+    elif ext == ".webp":
+        return data.startswith(b"RIFF") and len(data) >= 12 and data[8:12] == b"WEBP"
+    elif ext == ".pdf":
+        return data.startswith(b"%PDF-")
+    return False
+
+
 @router.post("/upload-evidence")
-def upload_return_evidence(
+async def upload_return_evidence(
     file: UploadFile = File(...),
     return_code: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
+    order_token: Optional[str] = Form(None),
+    x_order_token: Optional[str] = Header(None, alias="X-Order-Token"),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_current_user),
 ):
     """
     Tải lên ảnh hoặc tài liệu bằng chứng hàng lỗi/hỏng (Lưu trữ cục bộ an toàn trong thư mục storage/returns).
+    Có kiểm tra quyền sở hữu, dung lượng tối đa 5MB, chặn file nguy hiểm và xác minh magic bytes.
     """
-    # Kiểm tra kích thước và loại file
-    allowed_extensions = {".jpg", ".jpeg", ".png", ".webp", ".pdf"}
-    ext = os.path.splitext(file.filename or "")[1].lower()
-    if ext not in allowed_extensions:
+    filename = file.filename or ""
+    ext = os.path.splitext(filename)[1].lower()
+
+    # 1. Chặn file nguy hiểm
+    if ext in DANGEROUS_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Tệp chứa định dạng nguy hiểm bị từ chối ({ext}).",
+        )
+
+    # 2. Kiểm tra phần mở rộng cho phép
+    if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=400,
             detail=f"Định dạng tệp không được hỗ trợ ({ext}). Chỉ chấp nhận: JPG, PNG, WEBP, PDF.",
         )
 
-    # Thư mục lưu trữ
+    # 3. Đọc dữ liệu và giới hạn dung lượng 5MB
+    content = await file.read(MAX_EVIDENCE_SIZE + 1)
+    if len(content) > MAX_EVIDENCE_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail="Dung lượng tệp vượt quá giới hạn tối đa cho phép (5MB).",
+        )
+    if len(content) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Tệp tải lên rỗng không có nội dung.",
+        )
+
+    # 4. Xác minh loại file bằng nội dung (Magic Bytes)
+    if not verify_magic_bytes(content, ext):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Nội dung tệp không khớp với định dạng khai báo ({ext}). Chữ ký tệp không hợp lệ hoặc bị giả mạo.",
+        )
+
+    # 5. Kiểm tra quyền sở hữu đối với return_code (nếu có)
+    ret = None
+    if return_code:
+        ret = db.scalar(select(ReturnRequest).where(ReturnRequest.return_code == return_code))
+        if not ret:
+            raise HTTPException(status_code=404, detail="Không tìm thấy yêu cầu đổi/trả.")
+
+        is_staff = current_user and getattr(current_user, "role", "") in ["ADMIN", "PHARMACIST", "DATA_REVIEWER"]
+        is_owner = False
+        if is_staff:
+            is_owner = True
+        elif current_user and ret.user_id and current_user.id == ret.user_id:
+            is_owner = True
+        elif current_user and current_user.phone:
+            clean_u_phone = (current_user.phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
+            clean_r_phone = (ret.customer_phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
+            if clean_u_phone and clean_u_phone == clean_r_phone:
+                is_owner = True
+
+        effective_token = order_token or x_order_token
+        if not is_owner and effective_token and ret.order:
+            if verify_guest_order_token(effective_token, ret.order.order_code):
+                is_owner = True
+
+        if not is_owner:
+            raise HTTPException(
+                status_code=403,
+                detail="Bạn không có quyền tải lên bằng chứng cho yêu cầu đổi/trả này.",
+            )
+
+    # 6. Lưu file an toàn
     upload_dir = Path(settings.storage_root) / "returns"
     upload_dir.mkdir(parents=True, exist_ok=True)
 
@@ -615,41 +699,47 @@ def upload_return_evidence(
 
     try:
         with open(target_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            buffer.write(content)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi khi lưu file: {str(e)}")
 
-    file_size = target_path.stat().st_size
+    file_size = len(content)
     file_url = f"/api/v1/returns/evidence/{unique_filename}"
 
-    # Nếu có return_code, gắn trực tiếp vào ReturnEvidence
-    if return_code:
-        ret = db.scalar(select(ReturnRequest).where(ReturnRequest.return_code == return_code))
-        if ret:
-            evidence = ReturnEvidence(
-                return_request_id=ret.id,
-                file_url=file_url,
-                file_name=file.filename or unique_filename,
-                file_type="image" if ext in [".jpg", ".jpeg", ".png", ".webp"] else "pdf",
-                file_size=file_size,
-                description=description,
-                uploaded_by_user_id=current_user.id if current_user else None,
-            )
-            db.add(evidence)
-            db.commit()
+    if ret:
+        evidence = ReturnEvidence(
+            return_request_id=ret.id,
+            storage_key=f"returns/{unique_filename}",
+            file_url=file_url,
+            file_name=filename or unique_filename,
+            mime_type=file.content_type or ("image/jpeg" if ext in [".jpg", ".jpeg"] else "application/pdf"),
+            file_size=file_size,
+            file_category="DAMAGE_PHOTO",
+            uploaded_by=current_user.id if current_user else None,
+        )
+        db.add(evidence)
+        db.commit()
 
     return {
         "success": True,
         "file_url": file_url,
-        "file_name": file.filename or unique_filename,
+        "file_name": filename or unique_filename,
         "file_size": file_size,
     }
 
 
 @router.get("/evidence/{filename}")
-def get_evidence_file(filename: str):
+def get_evidence_file(
+    filename: str,
+    phone: Optional[str] = Query(None),
+    order_token: Optional[str] = Query(None),
+    x_order_token: Optional[str] = Header(None, alias="X-Order-Token"),
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
+):
     """
-    Truy xuất tệp bằng chứng hình ảnh hàng lỗi.
+    Truy xuất tệp bằng chứng hình ảnh hàng lỗi có kiểm soát quyền truy cập (Access Control).
+    Chỉ cho phép Admin, Dược sĩ hoặc Khách hàng sở hữu yêu cầu đổi/trả.
     """
     # Ngăn chặn Directory Traversal
     safe_filename = os.path.basename(filename)
@@ -657,5 +747,40 @@ def get_evidence_file(filename: str):
 
     if not file_path.is_file():
         raise HTTPException(status_code=404, detail="Không tìm thấy tệp bằng chứng.")
+
+    # Kiểm tra quyền nhân viên quản trị / Dược sĩ
+    is_staff = current_user and getattr(current_user, "role", "") in ["ADMIN", "PHARMACIST", "DATA_REVIEWER"]
+    if is_staff:
+        return FileResponse(file_path)
+
+    # Tra cứu bản ghi ReturnEvidence
+    evidence = db.scalar(select(ReturnEvidence).where(ReturnEvidence.file_url.like(f"%{safe_filename}")))
+    if not evidence:
+        raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập tệp bằng chứng này.")
+
+    ret = db.get(ReturnRequest, evidence.return_request_id) if evidence.return_request_id else None
+    if not ret:
+        raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập tệp bằng chứng này.")
+
+    # Xác thực quyền khách hàng
+    is_authorized = False
+    if current_user and ret.user_id and current_user.id == ret.user_id:
+        is_authorized = True
+    elif current_user and current_user.phone:
+        clean_u_phone = (current_user.phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
+        clean_r_phone = (ret.customer_phone or "").strip().replace(" ", "").replace(".", "").replace("-", "")
+        if clean_u_phone and clean_u_phone == clean_r_phone:
+            is_authorized = True
+
+    effective_token = order_token or x_order_token
+    if not is_authorized and effective_token and ret.order:
+        if verify_guest_order_token(effective_token, ret.order.order_code):
+            is_authorized = True
+
+    if not is_authorized:
+        raise HTTPException(
+            status_code=403,
+            detail="Bạn không có quyền truy cập tệp bằng chứng này. Vui lòng cung cấp mã token đơn hàng hợp lệ hoặc đăng nhập tài khoản sở hữu.",
+        )
 
     return FileResponse(file_path)

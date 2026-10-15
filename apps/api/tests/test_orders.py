@@ -161,7 +161,8 @@ class TestOrdersSystem(unittest.TestCase):
 
         self.assertEqual(data["status"], "SUCCESS")
         self.assertTrue(data["order_code"].startswith("PT-"))
-        self.assertEqual(data["total_amount"], 90000.0)
+        self.assertIn(data["total_amount"], [115000.0, 135000.0])
+        self.assertIn(data["shipping_fee"], [25000.0, 45000.0])
         self.assertEqual(data["order_status"], "PENDING")
 
         # Kiểm tra CSDL
@@ -260,18 +261,27 @@ class TestOrdersSystem(unittest.TestCase):
         self.assertIn("items", data)
         self.assertGreaterEqual(len(data["items"]), 1)
 
-        # Cập nhật trạng thái
-        update_resp = self.client.patch(
+        # 1. Cố tình cập nhật trực tiếp payment_status sang PAID qua API thông thường -> Phải bị từ chối với HTTP 400
+        forbidden_resp = self.client.patch(
             f"/api/v1/admin/orders/{order.id}/status",
             headers=self.headers,
             json={"order_status": "CONFIRMED", "payment_status": "PAID"},
+        )
+        self.assertEqual(forbidden_resp.status_code, 400)
+        self.assertIn("Không được phép thay đổi trực tiếp payment_status sang PAID", forbidden_resp.json()["detail"])
+
+        # 2. Cập nhật order_status hợp lệ -> 200 OK
+        update_resp = self.client.patch(
+            f"/api/v1/admin/orders/{order.id}/status",
+            headers=self.headers,
+            json={"order_status": "CONFIRMED"},
         )
         self.assertEqual(update_resp.status_code, 200)
         self.assertEqual(update_resp.json()["order_status"], "CONFIRMED")
 
         self.db.refresh(order)
         self.assertEqual(order.order_status, "CONFIRMED")
-        self.assertEqual(order.payment_status, "PAID")
+        self.assertEqual(order.payment_status, "PENDING")
 
 
 if __name__ == "__main__":

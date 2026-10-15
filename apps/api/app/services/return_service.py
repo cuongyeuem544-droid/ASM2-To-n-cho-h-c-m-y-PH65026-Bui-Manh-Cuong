@@ -231,7 +231,7 @@ class ReturnService:
         cls._add_status_history(
             db=db,
             return_request=ret_request,
-            from_status=None,
+            from_status="INITIAL",
             to_status=ReturnStatus.REQUESTED.value,
             actor=current_user,
             actor_role="CUSTOMER" if (current_user and current_user.role == "CUSTOMER") else "GUEST",
@@ -849,7 +849,7 @@ class ReturnService:
         """
         history = ReturnStatusHistory(
             return_request_id=return_request.id,
-            from_status=from_status,
+            from_status=from_status or "INITIAL",
             to_status=to_status,
             actor_id=actor.id if actor else None,
             actor_name=actor.full_name if actor and actor.full_name else (actor.username if actor else "Hệ thống"),

@@ -16,7 +16,6 @@ import {
   Pill,
 } from "lucide-react";
 import { TRENDING_KEYWORDS } from "@/data/mockData";
-import { PRODUCTS_DATA } from "@/data/products";
 import { Product } from "@/types";
 import { formatVND } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -41,6 +40,7 @@ export const SearchExperience: React.FC<SearchExperienceProps> = ({
   const [isOpen, setIsOpen] = useState(false);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [liveResults, setLiveResults] = useState<Product[]>([]);
+  const [popularProducts, setPopularProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [totalFound, setTotalFound] = useState(0);
@@ -48,7 +48,7 @@ export const SearchExperience: React.FC<SearchExperienceProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Load recent searches from localStorage on mount
+  // Load recent searches from localStorage on mount & fetch real popular products
   useEffect(() => {
     try {
       const saved = localStorage.getItem(RECENT_KEY);
@@ -61,6 +61,15 @@ export const SearchExperience: React.FC<SearchExperienceProps> = ({
       }
     } catch {}
     setRecentSearches(["Panadol Extra", "Efferalgan 500mg", "Berocca", "Vitamin C DHG"]);
+
+    fetch("/api/v1/store/products?limit=4")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.items && Array.isArray(data.items)) {
+          setPopularProducts(data.items);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const saveRecentSearch = (kw: string) => {
@@ -453,7 +462,7 @@ export const SearchExperience: React.FC<SearchExperienceProps> = ({
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {PRODUCTS_DATA.slice(0, 4).map((prod) => (
+                      {popularProducts.map((prod) => (
                         <div
                           key={prod.id}
                           onClick={() => handleSelectProduct(prod)}

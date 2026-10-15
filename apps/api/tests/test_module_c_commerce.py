@@ -846,7 +846,7 @@ class TestModuleCCommerce(unittest.TestCase):
         data = resp.json()
         self.assertTrue(data["order_code"].startswith("PT-"))
         self.assertEqual(data["order_status"], "PENDING")
-        self.assertEqual(data["total_amount"], 80000.0)
+        self.assertEqual(data["total_amount"], 105000.0)  # 80k subtotal + 25k server-calculated shipping fee
 
     # =========================================================================
     # 21. DUPLICATE CHECKOUT IDEMPOTENCY

@@ -1,5 +1,6 @@
 import datetime
 import random
+import secrets
 from decimal import Decimal
 from typing import Any, List, Optional
 
@@ -152,10 +153,18 @@ class UpdateOrderStatusRequest(BaseModel):
     payment_status: Optional[str] = None
 
 
-def generate_order_code() -> str:
+def generate_order_code(db: Optional[Session] = None) -> str:
     now_str = datetime.datetime.now().strftime("%y%m%d")
-    rand_suffix = random.randint(1000, 9999)
-    return f"PT-{now_str}-{rand_suffix}"
+    for _ in range(50):
+        rand_suffix = secrets.randbelow(900000) + 100000
+        code = f"PT-{now_str}-{rand_suffix}"
+        if db is not None:
+            existing = db.scalar(select(Order.id).where(Order.order_code == code))
+            if not existing:
+                return code
+        else:
+            return code
+    return f"PT-{now_str}-{secrets.token_hex(3).upper()}"
 
 
 # ==========================================
@@ -271,6 +280,7 @@ def validate_cart(payload: CartValidateRequest, db: Session = Depends(get_db)):
 @store_order_router.post("/checkout")
 def checkout_order(
     payload: CheckoutRequest,
+    x_order_token: Optional[str] = Header(None, alias="X-Order-Token"),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_current_user),
 ):
@@ -304,8 +314,14 @@ def checkout_order(
                     detail="Idempotency key này không thuộc về số điện thoại hoặc tài khoản của bạn. Không thể truy xuất thông tin đơn hàng.",
                 )
 
-            existing_token = create_guest_order_token(existing_order.order_code, existing_order.customer_phone)
-            return {
+            # Không cấp lại guest order token chỉ nhờ khớp số điện thoại và idempotency key
+            has_verified_token = False
+            if current_user and existing_order.user_id is not None and existing_order.user_id == current_user.id:
+                has_verified_token = True
+            elif x_order_token and verify_guest_order_token(x_order_token, existing_order.order_code):
+                has_verified_token = True
+
+            replay_res = {
                 "status": "SUCCESS",
                 "message": f"Đơn hàng của bạn đã được ghi nhận thành công trước đó (Mã đơn: {existing_order.order_code}).",
                 "order_code": existing_order.order_code,
@@ -314,9 +330,13 @@ def checkout_order(
                 "created_at": existing_order.created_at.isoformat() if existing_order.created_at else None,
                 "fulfillments": _serialize_fulfillments(db, existing_order.id),
                 "is_idempotent_replay": True,
-                "guest_access_token": existing_token,
-                "order_token": existing_token,
             }
+            if has_verified_token:
+                token_val = x_order_token or create_guest_order_token(existing_order.order_code, existing_order.customer_phone)
+                replay_res["guest_access_token"] = token_val
+                replay_res["order_token"] = token_val
+
+            return replay_res
 
     name = payload.customer_name.strip()
     phone = payload.customer_phone.strip()
@@ -483,14 +503,38 @@ def checkout_order(
         except Exception:
             raise HTTPException(status_code=400, detail="Phí vận chuyển không hợp lệ (không được âm, NaN hoặc vô hạn).")
 
+    from app.services.shipping_service import ShippingService
+
     if (payload.fulfillment_type or "DELIVERY").upper() == "STORE_PICKUP":
         server_shipping_fee = Decimal("0.0")
-    elif total_subtotal >= Decimal("300000.0"):
+    elif total_subtotal >= ShippingService.FREE_SHIPPING_THRESHOLD:
         server_shipping_fee = Decimal("0.0")
-    elif payload.shipping_fee is not None:
-        server_shipping_fee = Decimal(str(payload.shipping_fee))
     else:
-        server_shipping_fee = Decimal("0.0")
+        # Đơn hàng dưới ngưỡng 300.000đ giao tận nơi: Tính cước vận chuyển chuẩn từ ShippingService
+        ship_info = ShippingService.calculate_shipping(
+            db=db,
+            lat=payload.lat,
+            lng=payload.lng,
+            province_code=payload.province_code,
+            district_code=payload.district_code,
+            order_total=total_subtotal,
+        )
+        calculated_fee = Decimal(str(ship_info.get("shipping_fee", 25000.0)))
+
+        # Không cho client tự quyết định phí giao hàng, kể cả gửi shipping_fee = 0
+        if payload.shipping_fee is not None:
+            client_fee = Decimal(str(payload.shipping_fee))
+            if client_fee == Decimal("0.0"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Không cho phép client tự quyết định phí giao hàng bằng 0đ khi đơn hàng chưa đạt ngưỡng miễn phí vận chuyển (300.000đ).",
+                )
+            if client_fee != calculated_fee:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Phí vận chuyển không hợp lệ (hệ thống tính toán là {int(calculated_fee):,}đ, không chấp nhận giá trị client gửi {int(client_fee):,}đ).",
+                )
+        server_shipping_fee = calculated_fee
 
     server_discount = Decimal("0.0")
     if payload.voucher_code and payload.voucher_code.strip():
@@ -510,7 +554,7 @@ def checkout_order(
     # Trạng thái ban đầu: Tất cả đơn hàng mới tạo ở trạng thái PENDING chờ xử lý
     initial_order_status = "PENDING"
 
-    order_code = generate_order_code()
+    order_code = generate_order_code(db)
     order = Order(
         order_code=order_code,
         user_id=current_user.id if current_user else None,
@@ -1073,7 +1117,18 @@ def update_order_status(
 
     order.order_status = payload.order_status.upper()
     if payload.payment_status:
-        order.payment_status = payload.payment_status.upper()
+        req_pay = payload.payment_status.upper()
+        if req_pay == "PAID":
+            raise HTTPException(
+                status_code=400,
+                detail="Không được phép thay đổi trực tiếp payment_status sang PAID thông qua API cập nhật đơn thông thường. Chỉ cập nhật khi có bằng chứng thanh toán hợp lệ từ cổng thanh toán hoặc quy trình đối soát tài chính có kiểm toán (PaymentReconciliationService).",
+            )
+        if req_pay not in {"PENDING", "FAILED"}:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Trạng thái thanh toán '{req_pay}' không hợp lệ hoặc không được phép cập nhật qua endpoint này.",
+            )
+        order.payment_status = req_pay
 
     db.commit()
     return {
