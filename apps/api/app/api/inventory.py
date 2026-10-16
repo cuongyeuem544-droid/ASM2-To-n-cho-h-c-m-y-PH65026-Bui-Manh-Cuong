@@ -352,6 +352,39 @@ def delete_warehouse(
             }
 
 
+@warehouses_router.post("/{wh_id}/activate")
+@warehouses_router.patch("/{wh_id}/activate")
+def activate_warehouse(
+    wh_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
+):
+    wh = db.get(Warehouse, wh_id)
+    if not wh:
+        raise HTTPException(status_code=404, detail="Không tìm thấy thông tin kho")
+
+    wh.is_active = True
+    db.commit()
+    write_audit(
+        db,
+        "ACTIVATE_WAREHOUSE",
+        "Warehouse",
+        wh.id,
+        user,
+        request,
+        before={"is_active": False},
+        after={"is_active": True},
+    )
+    db.commit()
+    return {
+        "success": True,
+        "action": "ACTIVATED",
+        "message": f"Kho '{wh.name}' ({wh.code}) đã được bật lại hoạt động thành công.",
+        "id": wh.id,
+    }
+
+
 @warehouses_router.get("/{wh_id}/stocks")
 def get_warehouse_stocks(
     wh_id: int,

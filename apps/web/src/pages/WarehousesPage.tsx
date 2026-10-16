@@ -12,6 +12,7 @@ import {
   Phone,
   Plus,
   RefreshCw,
+  RotateCcw,
   Search,
   ShieldCheck,
   Tag,
@@ -91,6 +92,7 @@ export function WarehousesPage() {
   // Delete Warehouse State
   const [deletingWh, setDeletingWh] = useState<WarehouseItem | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [activatingWhId, setActivatingWhId] = useState<number | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
 
@@ -99,8 +101,9 @@ export function WarehousesPage() {
     try {
       setIsDeleting(true)
       setDeleteError(null)
-      const res = await api.delete<{ success: boolean; message: string; action: string }>(
-        `/warehouses/${deletingWh.id}`
+      const res = await api<{ success: boolean; message: string; action: string }>(
+        `/warehouses/${deletingWh.id}`,
+        { method: 'DELETE' }
       )
       setToastMessage(res.message || 'Thao tác xóa kho thành công')
       setDeletingWh(null)
@@ -109,6 +112,22 @@ export function WarehousesPage() {
       setDeleteError(err.message || 'Không thể xóa kho')
     } finally {
       setIsDeleting(false)
+    }
+  }
+
+  const handleReactivateWarehouse = async (wh: WarehouseItem) => {
+    try {
+      setActivatingWhId(wh.id)
+      const res = await api<{ success: boolean; message: string }>(
+        `/warehouses/${wh.id}/activate`,
+        { method: 'POST' }
+      )
+      setToastMessage(res.message || `Kho '${wh.name}' đã được bật lại hoạt động thành công`)
+      await loadWarehouses()
+    } catch (err: any) {
+      setError(err.message || 'Không thể kích hoạt lại kho')
+    } finally {
+      setActivatingWhId(null)
     }
   }
 
@@ -385,6 +404,17 @@ export function WarehousesPage() {
                 </div>
 
                 <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                  {!wh.is_active && (
+                    <button
+                      className="icon-button"
+                      title="Bật lại kho hoạt động"
+                      onClick={() => handleReactivateWarehouse(wh)}
+                      disabled={activatingWhId === wh.id}
+                      style={{ padding: '6px', color: '#16a34a', background: '#ecfdf5', borderColor: '#a7f3d0' }}
+                    >
+                      <RotateCcw size={15} />
+                    </button>
+                  )}
                   <button
                     className="icon-button"
                     title="Chỉnh sửa thông tin kho"
@@ -485,18 +515,42 @@ export function WarehousesPage() {
                 gap: '8px',
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', flexWrap: 'wrap' }}>
                 <span
                   style={{
                     width: '8px',
                     height: '8px',
                     borderRadius: '50%',
-                    background: wh.is_active ? '#22c55e' : '#94a3b8',
+                    background: wh.is_active ? '#22c55e' : '#ef4444',
                   }}
                 />
-                <span style={{ color: wh.is_active ? '#166534' : '#64748b', fontWeight: 600 }}>
-                  {wh.is_active ? 'Đang hoạt động' : 'Tạm dừng tiếp nhận'}
+                <span style={{ color: wh.is_active ? '#166534' : '#b91c1c', fontWeight: 600 }}>
+                  {wh.is_active ? 'Đang hoạt động' : 'Ngừng hoạt động'}
                 </span>
+                {!wh.is_active && (
+                  <button
+                    type="button"
+                    onClick={() => handleReactivateWarehouse(wh)}
+                    disabled={activatingWhId === wh.id}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      fontSize: '11.5px',
+                      fontWeight: 700,
+                      padding: '3px 10px',
+                      background: '#ecfdf5',
+                      color: '#047857',
+                      border: '1px solid #10b981',
+                      borderRadius: '6px',
+                      cursor: activatingWhId === wh.id ? 'not-allowed' : 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                    title="Bấm để bật lại kho hoạt động tiếp nhận đơn hàng"
+                  >
+                    <RotateCcw size={12} /> {activatingWhId === wh.id ? 'Đang bật…' : 'Bật lại kho hoạt động'}
+                  </button>
+                )}
               </div>
 
               <button

@@ -61,5 +61,26 @@ export async function api<T>(path: string, options: RequestInit = {}, retry = tr
   return response.json()
 }
 
+api.get = <T>(path: string, options?: RequestInit) => api<T>(path, { ...options, method: 'GET' })
+api.post = <T>(path: string, body?: any, options?: RequestInit) =>
+  api<T>(path, {
+    ...options,
+    method: 'POST',
+    body: body instanceof FormData ? body : body !== undefined ? JSON.stringify(body) : undefined,
+  })
+api.put = <T>(path: string, body?: any, options?: RequestInit) =>
+  api<T>(path, {
+    ...options,
+    method: 'PUT',
+    body: body instanceof FormData ? body : body !== undefined ? JSON.stringify(body) : undefined,
+  })
+api.patch = <T>(path: string, body?: any, options?: RequestInit) =>
+  api<T>(path, {
+    ...options,
+    method: 'PATCH',
+    body: body instanceof FormData ? body : body !== undefined ? JSON.stringify(body) : undefined,
+  })
+api.delete = <T>(path: string, options?: RequestInit) => api<T>(path, { ...options, method: 'DELETE' })
+
 export { API_URL }
 
