@@ -237,6 +237,121 @@ def update_warehouse(
     return {"message": "Cập nhật thông tin kho thành công", "id": wh.id}
 
 
+@warehouses_router.delete("/{wh_id}")
+def delete_warehouse(
+    wh_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(UserRole.ADMIN)),
+):
+    wh = db.get(Warehouse, wh_id)
+    if not wh:
+        raise HTTPException(status_code=404, detail="Không tìm thấy thông tin kho")
+
+    # Bảo vệ Kho Tổng Trung Tâm: Không cho phép xóa kho tổng trung tâm
+    if wh.is_central:
+        raise HTTPException(
+            status_code=400,
+            detail="Không thể xóa Kho Tổng Trung Tâm duy nhất của hệ thống. Kho tổng đóng vai trò điều phối trung ương.",
+        )
+
+    # Kiểm tra xem kho đã có dữ liệu giao dịch hoặc tồn kho chưa
+    has_stocks = db.scalar(
+        select(func.count(WarehouseBatchStock.id)).where(WarehouseBatchStock.warehouse_id == wh_id)
+    )
+    has_fulfillments = db.scalar(
+        select(func.count(OrderFulfillment.id)).where(OrderFulfillment.warehouse_id == wh_id)
+    )
+    has_movements = db.scalar(
+        select(func.count(StockMovement.id)).where(StockMovement.warehouse_id == wh_id)
+    )
+
+    has_data = bool(
+        (has_stocks and has_stocks > 0)
+        or (has_fulfillments and has_fulfillments > 0)
+        or (has_movements and has_movements > 0)
+    )
+
+    if has_data:
+        # Soft delete: Đánh dấu ngừng hoạt động để bảo toàn dữ liệu lịch sử
+        wh.is_active = False
+        db.commit()
+        write_audit(
+            db,
+            "DEACTIVATE_WAREHOUSE",
+            "Warehouse",
+            wh.id,
+            user,
+            request,
+            before={"is_active": True},
+            after={"is_active": False},
+        )
+        db.commit()
+        return {
+            "success": True,
+            "action": "SOFT_DELETE",
+            "status": "deactivated",
+            "message": f"Kho '{wh.name}' ({wh.code}) đã phát sinh dữ liệu tồn kho/đơn hàng nên được chuyển sang trạng thái Ngừng hoạt động để bảo toàn lịch sử và loại khỏi luồng phân bổ đơn.",
+            "id": wh.id,
+        }
+    else:
+        # Hard delete: Kho mới chưa phát sinh dữ liệu -> Xóa an toàn
+        wh_name = wh.name
+        wh_code = wh.code
+
+        # Xóa các vị trí lưu trữ mặc định liên kết với kho
+        db.query(WarehouseLocation).filter(WarehouseLocation.warehouse_id == wh_id).delete()
+        # Bỏ gán kho cho người dùng nếu có
+        db.query(User).filter(User.warehouse_id == wh_id).update({"warehouse_id": None})
+        db.flush()
+
+        try:
+            db.delete(wh)
+            db.commit()
+            write_audit(
+                db,
+                "DELETE_WAREHOUSE",
+                "Warehouse",
+                wh_id,
+                user,
+                request,
+                before={"name": wh_name, "code": wh_code},
+                after=None,
+            )
+            db.commit()
+            return {
+                "success": True,
+                "action": "HARD_DELETE",
+                "status": "deleted",
+                "message": f"Đã xóa hoàn toàn kho '{wh_name}' ({wh_code}) khỏi cơ sở dữ liệu.",
+                "id": wh_id,
+            }
+        except Exception:
+            db.rollback()
+            wh = db.get(Warehouse, wh_id)
+            if wh:
+                wh.is_active = False
+                db.commit()
+                write_audit(
+                    db,
+                    "DEACTIVATE_WAREHOUSE",
+                    "Warehouse",
+                    wh.id,
+                    user,
+                    request,
+                    before={"is_active": True},
+                    after={"is_active": False},
+                )
+                db.commit()
+            return {
+                "success": True,
+                "action": "SOFT_DELETE",
+                "status": "deactivated",
+                "message": f"Kho '{wh_name}' ({wh_code}) được chuyển sang trạng thái Ngừng hoạt động do có ràng buộc dữ liệu liên quan.",
+                "id": wh_id,
+            }
+
+
 @warehouses_router.get("/{wh_id}/stocks")
 def get_warehouse_stocks(
     wh_id: int,

@@ -7,12 +7,127 @@ from app.models import Warehouse, AdministrativeUnit
 
 
 PROVINCE_DEFAULT_COORDINATES: dict[str, tuple[float, float]] = {
-    "79": (10.7769, 106.7009),   # TP. Hồ Chí Minh
-    "01": (21.0285, 105.8542),   # Hà Nội
-    "48": (16.0544, 108.2022),   # Đà Nẵng
-    "92": (10.0452, 105.7469),   # Cần Thơ
-    "31": (20.8449, 106.6881),   # Hải Phòng
+    # 5 thành phố trực thuộc trung ương
+    "01": (21.0285, 105.8542),  # Hà Nội
+    "79": (10.7769, 106.7009),  # TP. Hồ Chí Minh
+    "31": (20.8449, 106.6881),  # Hải Phòng
+    "48": (16.0544, 108.2022),  # Đà Nẵng
+    "92": (10.0452, 105.7469),  # Cần Thơ
+    # Đồng bằng sông Hồng & Đông Bắc / Tây Bắc
+    "02": (22.8233, 104.9839),  # Hà Giang
+    "04": (22.6657, 106.2570),  # Cao Bằng
+    "06": (22.1470, 105.8348),  # Bắc Kạn
+    "08": (21.8234, 105.2140),  # Tuyên Quang
+    "10": (22.4856, 103.9707),  # Lào Cai
+    "11": (21.3860, 103.0230),  # Điện Biên
+    "12": (22.3964, 103.4684),  # Lai Châu
+    "14": (21.3283, 103.9148),  # Sơn La
+    "15": (21.7168, 104.8967),  # Yên Bái
+    "17": (20.8171, 105.3376),  # Hòa Bình
+    "19": (21.5942, 105.8482),  # Thái Nguyên
+    "20": (21.8537, 106.7615),  # Lạng Sơn
+    "22": (21.0069, 107.2925),  # Quảng Ninh
+    "24": (21.2731, 106.1946),  # Bắc Giang
+    "25": (21.3990, 105.2280),  # Phú Thọ
+    "26": (21.3089, 105.6049),  # Vĩnh Phúc
+    "27": (21.1861, 106.0763),  # Bắc Ninh
+    "30": (20.9373, 106.3150),  # Hải Dương
+    "33": (20.6464, 106.0511),  # Hưng Yên
+    "34": (20.4463, 106.3366),  # Thái Bình
+    "35": (20.5843, 105.9220),  # Hà Nam
+    "36": (20.4343, 106.1774),  # Nam Định
+    "37": (20.2506, 105.9745),  # Ninh Bình
+    # Bắc Trung Bộ & Duyên hải miền Trung
+    "38": (19.8067, 105.7852),  # Thanh Hóa
+    "40": (18.6796, 105.6813),  # Nghệ An
+    "42": (18.3430, 105.9058),  # Hà Tĩnh
+    "44": (17.4761, 106.5995),  # Quảng Bình
+    "45": (16.8164, 107.1004),  # Quảng Trị
+    "46": (16.4637, 107.5909),  # Thừa Thiên Huế
+    "49": (15.5647, 108.4800),  # Quảng Nam
+    "51": (15.1205, 108.7923),  # Quảng Ngãi
+    "52": (13.7820, 109.2197),  # Bình Định
+    "54": (13.0882, 109.3138),  # Phú Yên
+    "56": (12.2388, 109.1967),  # Khánh Hòa
+    "58": (11.5658, 108.9882),  # Ninh Thuận
+    "60": (10.9333, 108.1000),  # Bình Thuận
+    # Tây Nguyên
+    "62": (14.3497, 108.0005),  # Kon Tum
+    "64": (13.9833, 108.0000),  # Gia Lai
+    "66": (12.6667, 108.0500),  # Đắk Lắk
+    "67": (12.0040, 107.6870),  # Đắk Nông
+    "68": (11.9404, 108.4583),  # Lâm Đồng
+    # Đông Nam Bộ
+    "70": (11.9333, 106.9167),  # Bình Phước
+    "72": (11.3128, 106.0989),  # Tây Ninh
+    "74": (11.1667, 106.6667),  # Bình Dương
+    "75": (10.9574, 106.8427),  # Đồng Nai
+    "77": (10.5425, 107.2429),  # Bà Rịa - Vũng Tàu
+    # Đồng bằng sông Cửu Long
+    "80": (10.5333, 106.4167),  # Long An
+    "82": (10.3600, 106.3600),  # Tiền Giang
+    "83": (10.2333, 106.3833),  # Bến Tre
+    "84": (9.9347, 106.3455),   # Trà Vinh
+    "86": (10.2537, 105.9722),  # Vĩnh Long
+    "87": (10.4578, 105.6324),  # Đồng Tháp
+    "89": (10.5216, 105.1259),  # An Giang
+    "91": (10.0139, 105.0809),  # Kiên Giang
+    "93": (9.7833, 105.4667),   # Hậu Giang
+    "94": (9.6000, 105.9667),   # Sóc Trăng
+    "95": (9.2833, 105.7167),   # Bạc Liêu
+    "96": (9.1769, 105.1500),   # Cà Mau
 }
+
+PROVINCE_KEYWORDS: list[tuple[list[str], tuple[float, float]]] = [
+    (["hồ chí minh", "tp.hcm", "tphcm", "sài gòn", "sai gon"], (10.7769, 106.7009)),
+    (["hà nội", "ha noi", "thủ đô"], (21.0285, 105.8542)),
+    (["đà nẵng", "da nang"], (16.0544, 108.2022)),
+    (["hải phòng", "hai phong"], (20.8449, 106.6881)),
+    (["cần thơ", "can tho"], (10.0452, 105.7469)),
+    (["bình dương", "binh duong", "thủ dầu một", "dĩ an", "thuận an"], (11.1667, 106.6667)),
+    (["đồng nai", "dong nai", "biên hòa", "bien hoa"], (10.9574, 106.8427)),
+    (["bà rịa", "vũng tàu", "vung tau", "ba ria"], (10.5425, 107.2429)),
+    (["long an", "tân an", "tan an"], (10.5333, 106.4167)),
+    (["tiền giang", "tien giang", "mỹ tho", "my tho"], (10.3600, 106.3600)),
+    (["bến tre", "ben tre"], (10.2333, 106.3833)),
+    (["vĩnh long", "vinh long"], (10.2537, 105.9722)),
+    (["đồng tháp", "dong thap", "cao lãnh", "sa đéc"], (10.4578, 105.6324)),
+    (["an giang", "long xuyên", "châu đốc"], (10.5216, 105.1259)),
+    (["kiên giang", "kien giang", "rạch giá", "phú quốc", "phu quoc"], (10.0139, 105.0809)),
+    (["khánh hòa", "khanh hoa", "nha trang", "cam ranh"], (12.2388, 109.1967)),
+    (["bình định", "binh dinh", "quy nhơn", "quy nhon"], (13.7820, 109.2197)),
+    (["thừa thiên huế", "thừa thiên", "huế", "hue"], (16.4637, 107.5909)),
+    (["quảng nam", "quang nam", "tam kỳ", "hội an"], (15.5647, 108.4800)),
+    (["quảng ngãi", "quang ngai"], (15.1205, 108.7923)),
+    (["quảng ninh", "quang ninh", "hạ long", "cẩm phả"], (21.0069, 107.2925)),
+    (["nghệ an", "nghe an", "vinh"], (18.6796, 105.6813)),
+    (["thanh hóa", "thanh hoa"], (19.8067, 105.7852)),
+    (["bắc ninh", "bac ninh"], (21.1861, 106.0763)),
+    (["bắc giang", "bac giang"], (21.2731, 106.1946)),
+    (["hải dương", "hai duong"], (20.9373, 106.3150)),
+    (["nam định", "nam dinh"], (20.4343, 106.1774)),
+    (["thái bình", "thai binh"], (20.4463, 106.3366)),
+    (["vĩnh phúc", "vinh phuc"], (21.3089, 105.6049)),
+    (["phú thọ", "phu tho", "việt trì"], (21.3990, 105.2280)),
+    (["thái nguyên", "thai nguyen"], (21.5942, 105.8482)),
+    (["lâm đồng", "lam dong", "đà lạt", "da lat", "bảo lộc"], (11.9404, 108.4583)),
+    (["đắk lắk", "dak lak", "buôn ma thuột"], (12.6667, 108.0500)),
+    (["bình thuận", "binh thuan", "phan thiết"], (10.9333, 108.1000)),
+    (["ninh thuận", "ninh thuan", "phan rang"], (11.5658, 108.9882)),
+    (["phú yên", "phu yen", "tuy hòa"], (13.0882, 109.3138)),
+    (["quảng bình", "quang binh", "đồng hới"], (17.4761, 106.5995)),
+    (["quảng trị", "quang tri", "đông hà"], (16.8164, 107.1004)),
+    (["hà tĩnh", "ha tinh"], (18.3430, 105.9058)),
+    (["hòa bình", "hoa binh"], (20.8171, 105.3376)),
+    (["sơn la", "son la"], (21.3283, 103.9148)),
+    (["lào cai", "lao cai", "sa pa"], (22.4856, 103.9707)),
+    (["lạng sơn", "lang son"], (21.8537, 106.7615)),
+    (["yên bái", "yen bai"], (21.7168, 104.8967)),
+    (["tuyên quang", "tuyen quang"], (21.8234, 105.2140)),
+    (["hà giang", "ha giang"], (22.8233, 104.9839)),
+    (["cao bằng", "cao bang"], (22.6657, 106.2570)),
+    (["bắc kạn", "bac kan"], (22.1470, 105.8348)),
+]
 
 # Tọa độ mặc định cho một số quận trung tâm
 DISTRICT_DEFAULT_COORDINATES: dict[str, tuple[float, float]] = {
@@ -100,21 +215,30 @@ class GeoService:
         lng: Optional[float] = None,
         province_code: Optional[str] = None,
         district_code: Optional[str] = None,
+        address_text: Optional[str] = None,
     ) -> tuple[float, float, str]:
         """
-        Xác định tọa độ giao hàng từ GPS/Map Pin hoặc tra cứu fallback theo Quận/Huyện/Tỉnh.
+        Xác định tọa độ giao hàng từ GPS/Map Pin hoặc tra cứu fallback theo Quận/Huyện/Tỉnh hoặc chuỗi địa chỉ.
         Trả về (lat, lng, resolution_source).
         """
-        if lat is not None and lng is not None and -90 <= lat <= 90 and -180 <= lng <= 180:
+        if lat is not None and lng is not None and -90 <= lat <= 90 and -180 <= lng <= 180 and not (abs(lat) < 0.0001 and abs(lng) < 0.0001):
             return float(lat), float(lng), "GPS_EXACT"
 
-        if district_code and district_code in DISTRICT_DEFAULT_COORDINATES:
-            d_lat, d_lng = DISTRICT_DEFAULT_COORDINATES[district_code]
+        if district_code and str(district_code) in DISTRICT_DEFAULT_COORDINATES:
+            d_lat, d_lng = DISTRICT_DEFAULT_COORDINATES[str(district_code)]
             return d_lat, d_lng, "DISTRICT_CENTROID"
 
-        if province_code and province_code in PROVINCE_DEFAULT_COORDINATES:
-            p_lat, p_lng = PROVINCE_DEFAULT_COORDINATES[province_code]
-            return p_lat, p_lng, "PROVINCE_CENTROID"
+        if province_code:
+            p_code_str = str(province_code).zfill(2) if str(province_code).isdigit() else str(province_code)
+            if p_code_str in PROVINCE_DEFAULT_COORDINATES:
+                p_lat, p_lng = PROVINCE_DEFAULT_COORDINATES[p_code_str]
+                return p_lat, p_lng, "PROVINCE_CENTROID"
+
+        if address_text:
+            text_lower = address_text.lower()
+            for keywords, coords in PROVINCE_KEYWORDS:
+                if any(kw in text_lower for kw in keywords):
+                    return coords[0], coords[1], "ADDRESS_KEYWORD_MATCH"
 
         # Tọa độ mặc định: Trung tâm TP. Hồ Chí Minh
         return 10.7769, 106.7009, "FALLBACK_DEFAULT"

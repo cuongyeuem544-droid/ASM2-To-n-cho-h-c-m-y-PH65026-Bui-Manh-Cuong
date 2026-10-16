@@ -590,13 +590,17 @@ def checkout_order(
         db.add(order)
         db.flush()
 
-        # Điều phối kho và phân bổ lô theo FEFO
+        # Điều phối kho và phân bổ lô theo FEFO (ưu tiên kho đã tạo gần nhất, tuyệt đối không chuyển kho chưa tạo)
         FulfillmentRoutingService.route_and_allocate_order(
             db=db,
             order=order,
             items=order_items_to_add,
             shipping_city=payload.shipping_city,
             shipping_address=payload.shipping_address,
+            lat=payload.lat,
+            lng=payload.lng,
+            province_code=payload.province_code,
+            district_code=payload.district_code,
         )
 
         # Ghi nhận giao dịch thanh toán khởi tạo trong PaymentTransaction

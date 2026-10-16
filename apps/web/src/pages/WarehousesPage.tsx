@@ -15,6 +15,7 @@ import {
   Search,
   ShieldCheck,
   Tag,
+  Trash2,
   X,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
@@ -86,6 +87,30 @@ export function WarehousesPage() {
   const [error, setError] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [editingWh, setEditingWh] = useState<WarehouseItem | null>(null)
+
+  // Delete Warehouse State
+  const [deletingWh, setDeletingWh] = useState<WarehouseItem | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
+
+  const handleDeleteWarehouse = async () => {
+    if (!deletingWh) return
+    try {
+      setIsDeleting(true)
+      setDeleteError(null)
+      const res = await api.delete<{ success: boolean; message: string; action: string }>(
+        `/warehouses/${deletingWh.id}`
+      )
+      setToastMessage(res.message || 'Thao tác xóa kho thành công')
+      setDeletingWh(null)
+      await loadWarehouses()
+    } catch (err: any) {
+      setDeleteError(err.message || 'Không thể xóa kho')
+    } finally {
+      setIsDeleting(false)
+    }
+  }
 
   // Warehouse Stocks Detail Modal State
   const [detailModalOpen, setDetailModalOpen] = useState(false)
@@ -256,6 +281,33 @@ export function WarehousesPage() {
         </div>
       </div>
 
+      {toastMessage && (
+        <div
+          className="alert alert-success"
+          style={{
+            marginBottom: '16px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            background: '#ecfdf5',
+            borderColor: '#a7f3d0',
+            color: '#065f46',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <CheckCircle2 size={16} />
+            <span>{toastMessage}</span>
+          </div>
+          <button
+            className="icon-button"
+            onClick={() => setToastMessage(null)}
+            style={{ padding: '2px', color: '#065f46' }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       {error && <div className="alert alert-error" style={{ marginBottom: '16px' }}>{error}</div>}
 
       {/* Warehouse Cards Grid */}
@@ -296,7 +348,7 @@ export function WarehousesPage() {
                     <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#0f172a', margin: 0 }}>
                       {wh.name}
                     </h3>
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '3px' }}>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '3px', flexWrap: 'wrap' }}>
                       <span style={{ fontSize: '11px', fontFamily: 'monospace', fontWeight: 600, color: '#64748b' }}>
                         {wh.code}
                       </span>
@@ -314,18 +366,45 @@ export function WarehousesPage() {
                           Kho Tổng Trung Tâm
                         </span>
                       )}
+                      {!wh.is_active && (
+                        <span
+                          style={{
+                            fontSize: '10px',
+                            fontWeight: 700,
+                            background: '#fee2e2',
+                            color: '#b91c1c',
+                            padding: '1px 6px',
+                            borderRadius: '4px',
+                          }}
+                        >
+                          Ngừng hoạt động
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
 
-                <button
-                  className="icon-button"
-                  title="Chỉnh sửa thông tin kho"
-                  onClick={() => openEditModal(wh)}
-                  style={{ padding: '6px' }}
-                >
-                  <Edit2 size={15} />
-                </button>
+                <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                  <button
+                    className="icon-button"
+                    title="Chỉnh sửa thông tin kho"
+                    onClick={() => openEditModal(wh)}
+                    style={{ padding: '6px' }}
+                  >
+                    <Edit2 size={15} />
+                  </button>
+                  <button
+                    className="icon-button"
+                    title="Xóa kho"
+                    onClick={() => {
+                      setDeletingWh(wh)
+                      setDeleteError(null)
+                    }}
+                    style={{ padding: '6px', color: '#ef4444' }}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
               </div>
 
               {/* Address & Contact */}
@@ -600,6 +679,93 @@ export function WarehousesPage() {
           </div>
         </div>
       )}
+      {/* Delete Warehouse Confirmation Modal */}
+      {deletingWh && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.6)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 200,
+            padding: '16px',
+          }}
+          onClick={() => !isDeleting && setDeletingWh(null)}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: '16px',
+              maxWidth: '480px',
+              width: '100%',
+              padding: '24px',
+              boxShadow: '0 10px 25px rgba(0,0,0,0.15)',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: '#fee2e2', color: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Trash2 size={20} />
+                </div>
+                <h2 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: '#0f172a' }}>
+                  Xác Nhận Xóa Kho
+                </h2>
+              </div>
+              <button
+                className="icon-button"
+                onClick={() => !isDeleting && setDeletingWh(null)}
+                disabled={isDeleting}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {deleteError && (
+              <div className="alert alert-error" style={{ marginBottom: '14px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <AlertCircle size={16} style={{ flexShrink: 0 }} />
+                <span>{deleteError}</span>
+              </div>
+            )}
+
+            <div style={{ fontSize: '14px', color: '#334155', lineHeight: 1.6, marginBottom: '16px' }}>
+              Bạn có chắc chắn muốn xóa kho <strong>{deletingWh.name}</strong> (<code>{deletingWh.code}</code>)?
+            </div>
+
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px 14px', fontSize: '12.5px', color: '#475569', marginBottom: '20px', lineHeight: 1.5 }}>
+              <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: '6px' }}>Quy tắc bảo toàn dữ liệu:</div>
+              <ul style={{ margin: 0, paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <li>Nếu kho mới tạo và chưa phát sinh dữ liệu: Hệ thống sẽ <strong>xóa vĩnh viễn</strong> khỏi cơ sở dữ liệu.</li>
+                <li>Nếu kho đã có tồn kho, đơn hàng hoặc lịch sử giao dịch: Hệ thống sẽ chuyển sang trạng thái <strong>Ngừng hoạt động</strong> để bảo toàn toàn vẹn dữ liệu kế toán và loại bỏ khỏi hệ thống điều phối đơn mới.</li>
+              </ul>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setDeletingWh(null)}
+                disabled={isDeleting}
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={handleDeleteWarehouse}
+                disabled={isDeleting}
+                style={{ background: '#ef4444', borderColor: '#ef4444' }}
+              >
+                {isDeleting ? 'Đang xử lý…' : 'Xác nhận xóa'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal View Warehouse Stock & Medicine Details */}
       {detailModalOpen && (
         <div
