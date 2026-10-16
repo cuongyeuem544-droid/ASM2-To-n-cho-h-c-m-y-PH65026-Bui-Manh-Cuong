@@ -100,6 +100,30 @@ class WarehouseNotificationService:
         )
 
     @classmethod
+    def notify_order_cancelled(
+        cls,
+        db: Session,
+        order: Order,
+        warehouse_id: int,
+        reason: Optional[str] = None,
+    ) -> WarehouseNotification:
+        """ORDER_CANCELLED: Dispatched when an allocated order is cancelled by customer or admin."""
+        reason_text = f" (Lý do: {reason})" if reason else ""
+        return cls.create_notification(
+            db,
+            warehouse_id=warehouse_id,
+            notification_type="ORDER_CANCELLED",
+            title=f"Khách hủy đơn: {order.order_code}",
+            message=f"Khách hàng hoặc hệ thống đã hủy đơn {order.order_code}{reason_text}. Vui lòng dừng soạn hàng và đóng gói.",
+            severity="CRITICAL",
+            recipient_user_id=None,  # Broadcast to both warehouse manager and staff
+            entity_type="Order",
+            entity_id=str(order.id),
+            action_url=f"/warehouse/orders?order_id={order.id}&status=CANCELLED",
+            deduplication_key=f"ORDER_CANCELLED_{order.id}_{warehouse_id}",
+        )
+
+    @classmethod
     def notify_order_assigned(
         cls,
         db: Session,

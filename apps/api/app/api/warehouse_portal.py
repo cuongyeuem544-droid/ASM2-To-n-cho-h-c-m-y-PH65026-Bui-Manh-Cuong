@@ -382,6 +382,7 @@ def get_my_warehouse_info(
 
 @router.get("/orders")
 def get_warehouse_orders(
+    status: Optional[str] = None,
     fulfillment_status: Optional[str] = None,
     order_status: Optional[str] = None,
     warehouse_id: Optional[int] = None,
@@ -400,10 +401,22 @@ def get_warehouse_orders(
 
     query = select(Order).options(selectinload(Order.items)).where(Order.assigned_warehouse_id == wh.id)
 
-    if fulfillment_status and fulfillment_status != "ALL":
-        query = query.where(Order.fulfillment_status == fulfillment_status)
-    if order_status and order_status != "ALL":
-        query = query.where(Order.order_status == order_status)
+    effective_tab = (status or fulfillment_status or "").upper()
+    if effective_tab == "CANCELLED" or (order_status and order_status.upper() == "CANCELLED"):
+        query = query.where(
+            or_(
+                Order.fulfillment_status == "CANCELLED",
+                Order.order_status == "CANCELLED",
+            )
+        )
+    elif effective_tab and effective_tab != "ALL":
+        # Với các tab hoạt động (ALLOCATED, PICKING, PACKED, SHIPPED, DELIVERED), không hiển thị đơn đã hủy
+        query = query.where(
+            Order.fulfillment_status == effective_tab,
+            Order.order_status != "CANCELLED",
+        )
+    elif order_status and order_status.upper() != "ALL":
+        query = query.where(Order.order_status == order_status.upper())
     if search and search.strip():
         term = f"%{search.strip()}%"
         query = query.where(
@@ -570,10 +583,10 @@ def update_order_fulfillment_status(
 
     before_status = order.fulfillment_status
 
-    if order.order_status in ["COMPLETED", "CANCELLED"] and new_status not in ["DELIVERED", "CANCELLED"]:
+    if (order.order_status in ["COMPLETED", "CANCELLED"] or order.fulfillment_status == "CANCELLED") and new_status not in ["DELIVERED", "CANCELLED"]:
         raise HTTPException(
             status_code=400,
-            detail=f"Đơn hàng này đã ở trạng thái '{order.order_status}', không thể thay đổi tiến trình.",
+            detail=f"Đơn hàng này đã bị hủy (hoặc đã hoàn tất), không thể thay đổi tiến trình xử lý tại kho.",
         )
 
     # Idempotent: Nếu đơn đã ở đúng trạng thái này, trả về kết quả an toàn
@@ -2828,7 +2841,7 @@ def get_warehouse_notifications(
                 WarehouseNotification.recipient_user_id == user.id,
                 and_(
                     WarehouseNotification.recipient_user_id.is_(None),
-                    WarehouseNotification.notification_type == "ORDER_NEW",
+                    WarehouseNotification.notification_type.in_(["ORDER_NEW", "ORDER_CANCELLED"]),
                 ),
             )
         )
@@ -2852,7 +2865,7 @@ def get_warehouse_notifications(
                 WarehouseNotification.recipient_user_id == user.id,
                 and_(
                     WarehouseNotification.recipient_user_id.is_(None),
-                    WarehouseNotification.notification_type == "ORDER_NEW",
+                    WarehouseNotification.notification_type.in_(["ORDER_NEW", "ORDER_CANCELLED"]),
                 ),
             )
         )
@@ -2913,7 +2926,7 @@ def get_warehouse_notifications_unread_count(
                 WarehouseNotification.recipient_user_id == user.id,
                 and_(
                     WarehouseNotification.recipient_user_id.is_(None),
-                    WarehouseNotification.notification_type == "ORDER_NEW",
+                    WarehouseNotification.notification_type.in_(["ORDER_NEW", "ORDER_CANCELLED"]),
                 ),
             )
         )
@@ -2941,7 +2954,7 @@ def mark_warehouse_notification_as_read(
 
     if user.role == UserRole.WAREHOUSE_STAFF:
         is_my_task = notif.recipient_user_id == user.id
-        is_order_broadcast = notif.recipient_user_id is None and notif.notification_type == "ORDER_NEW"
+        is_order_broadcast = notif.recipient_user_id is None and notif.notification_type in ["ORDER_NEW", "ORDER_CANCELLED"]
         if not (is_my_task or is_order_broadcast):
             raise HTTPException(status_code=403, detail="Bạn không có quyền thao tác trên thông báo này")
 
@@ -2974,7 +2987,7 @@ def mark_all_warehouse_notifications_as_read(
                 WarehouseNotification.recipient_user_id == user.id,
                 and_(
                     WarehouseNotification.recipient_user_id.is_(None),
-                    WarehouseNotification.notification_type == "ORDER_NEW",
+                    WarehouseNotification.notification_type.in_(["ORDER_NEW", "ORDER_CANCELLED"]),
                 ),
             )
         )

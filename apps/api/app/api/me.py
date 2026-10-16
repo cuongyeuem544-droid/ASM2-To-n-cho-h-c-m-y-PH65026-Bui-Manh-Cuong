@@ -537,6 +537,7 @@ def cancel_my_order(
     )
 
     order.order_status = "CANCELLED"
+    order.fulfillment_status = "CANCELLED"
 
     write_audit(
         db,

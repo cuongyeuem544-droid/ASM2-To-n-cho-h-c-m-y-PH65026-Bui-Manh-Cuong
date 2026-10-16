@@ -19,6 +19,7 @@ interface OrderItem {
   customer_name: string
   customer_phone: string
   shipping_address: string
+  order_status?: string
   fulfillment_status: string
   items_count: number
   created_at: string | null
@@ -44,6 +45,7 @@ interface PickDetailResponse {
   customer_name: string
   customer_phone: string
   shipping_address: string
+  order_status?: string
   fulfillment_status: string
   lines: PickDetailLine[]
 }
@@ -194,13 +196,14 @@ export function StaffPickingPackingPage() {
                 <div className="flex items-center justify-between">
                   <span className="font-mono font-black text-sm text-emerald-900">{o.order_code}</span>
                   <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                    (o.fulfillment_status === 'CANCELLED' || o.order_status === 'CANCELLED') ? 'bg-rose-100 text-rose-800' :
                     o.fulfillment_status === 'PICKING' ? 'bg-amber-100 text-amber-800' :
                     o.fulfillment_status === 'PACKED' ? 'bg-teal-100 text-teal-800' :
                     o.fulfillment_status === 'SHIPPED' ? 'bg-blue-100 text-blue-800' :
                     o.fulfillment_status === 'DELIVERED' ? 'bg-emerald-100 text-emerald-800' :
                     'bg-slate-200 text-slate-700'
                   }`}>
-                    {o.fulfillment_status}
+                    {(o.fulfillment_status === 'CANCELLED' || o.order_status === 'CANCELLED') ? 'ĐÃ HỦY' : o.fulfillment_status}
                   </span>
                 </div>
                 <div className="text-xs font-bold text-slate-800 truncate">{o.customer_name}</div>
@@ -219,6 +222,19 @@ export function StaffPickingPackingPage() {
           ) : (
             <>
               <div className="space-y-4">
+                {/* Cancelled Alert Banner */}
+                {(detail.fulfillment_status === 'CANCELLED' || detail.order_status === 'CANCELLED') && (
+                  <div className="bg-rose-50 border-2 border-rose-300 rounded-2xl p-4 text-rose-800 flex items-start gap-3">
+                    <AlertTriangle size={24} className="text-rose-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <div className="font-black text-sm uppercase tracking-wide">Đơn hàng này đã bị hủy</div>
+                      <div className="text-xs text-rose-700 mt-1 font-semibold">
+                        Khách hàng hoặc quản trị viên đã hủy đơn này. Toàn bộ thuốc đã được hoàn trả tồn kho. Vui lòng không thực hiện lấy thuốc, đóng gói hay giao hàng.
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Order Summary Card */}
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col sm:flex-row justify-between gap-4">
                   <div>
@@ -227,8 +243,12 @@ export function StaffPickingPackingPage() {
                     <div className="text-xs text-slate-500 mt-1">📍 {detail.shipping_address}</div>
                   </div>
                   <div className="text-right">
-                    <span className="px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider bg-emerald-100 text-emerald-800">
-                      {detail.fulfillment_status}
+                    <span className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${
+                      (detail.fulfillment_status === 'CANCELLED' || detail.order_status === 'CANCELLED')
+                        ? 'bg-rose-100 text-rose-800'
+                        : 'bg-emerald-100 text-emerald-800'
+                    }`}>
+                      {(detail.fulfillment_status === 'CANCELLED' || detail.order_status === 'CANCELLED') ? 'ĐÃ HỦY' : detail.fulfillment_status}
                     </span>
                   </div>
                 </div>
@@ -291,51 +311,57 @@ export function StaffPickingPackingPage() {
 
               {/* Big Stage Progression Buttons */}
               <div className="pt-4 border-t space-y-3">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  <button
-                    onClick={() => handleUpdateStatus('PICKING')}
-                    className={`py-4 rounded-xl font-black text-sm uppercase transition flex items-center justify-center gap-2 ${
-                      detail.fulfillment_status === 'PICKING'
-                        ? 'bg-amber-600 text-white shadow-md'
-                        : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'
-                    }`}
-                  >
-                    <Clock size={18} /> 1. Đang Soạn (PICKING)
-                  </button>
+                {(detail.fulfillment_status === 'CANCELLED' || detail.order_status === 'CANCELLED') ? (
+                  <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-center text-rose-700 font-bold text-sm">
+                    ⚠️ Đơn hàng đã bị hủy. Mọi thao tác soạn hàng và chuyển trạng thái đã bị khóa.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <button
+                      onClick={() => handleUpdateStatus('PICKING')}
+                      className={`py-4 rounded-xl font-black text-sm uppercase transition flex items-center justify-center gap-2 ${
+                        detail.fulfillment_status === 'PICKING'
+                          ? 'bg-amber-600 text-white shadow-md'
+                          : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'
+                      }`}
+                    >
+                      <Clock size={18} /> 1. Đang Soạn (PICKING)
+                    </button>
 
-                  <button
-                    onClick={() => handleUpdateStatus('PACKED')}
-                    className={`py-4 rounded-xl font-black text-sm uppercase transition flex items-center justify-center gap-2 ${
-                      detail.fulfillment_status === 'PACKED'
-                        ? 'bg-teal-700 text-white shadow-md'
-                        : 'bg-teal-50 text-teal-800 border border-teal-200 hover:bg-teal-100'
-                    }`}
-                  >
-                    <PackageCheck size={18} /> 2. Đã Đóng Gói (PACKED)
-                  </button>
+                    <button
+                      onClick={() => handleUpdateStatus('PACKED')}
+                      className={`py-4 rounded-xl font-black text-sm uppercase transition flex items-center justify-center gap-2 ${
+                        detail.fulfillment_status === 'PACKED'
+                          ? 'bg-teal-700 text-white shadow-md'
+                          : 'bg-teal-50 text-teal-800 border border-teal-200 hover:bg-teal-100'
+                      }`}
+                    >
+                      <PackageCheck size={18} /> 2. Đã Đóng Gói (PACKED)
+                    </button>
 
-                  <button
-                    onClick={() => handleUpdateStatus('SHIPPED')}
-                    className={`py-4 rounded-xl font-black text-sm uppercase transition flex items-center justify-center gap-2 ${
-                      detail.fulfillment_status === 'SHIPPED'
-                        ? 'bg-blue-700 text-white shadow-md'
-                        : 'bg-blue-50 text-blue-800 border border-blue-200 hover:bg-blue-100'
-                    }`}
-                  >
-                    <Truck size={18} /> 3. Bàn Giao Xe (SHIPPED)
-                  </button>
+                    <button
+                      onClick={() => handleUpdateStatus('SHIPPED')}
+                      className={`py-4 rounded-xl font-black text-sm uppercase transition flex items-center justify-center gap-2 ${
+                        detail.fulfillment_status === 'SHIPPED'
+                          ? 'bg-blue-700 text-white shadow-md'
+                          : 'bg-blue-50 text-blue-800 border border-blue-200 hover:bg-blue-100'
+                      }`}
+                    >
+                      <Truck size={18} /> 3. Bàn Giao Xe (SHIPPED)
+                    </button>
 
-                  <button
-                    onClick={() => handleUpdateStatus('DELIVERED')}
-                    className={`py-4 rounded-xl font-black text-sm uppercase transition flex items-center justify-center gap-2 ${
-                      detail.fulfillment_status === 'DELIVERED'
-                        ? 'bg-emerald-700 text-white shadow-md'
-                        : 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'
-                    }`}
-                  >
-                    <CheckCircle2 size={18} /> 4. Đã Giao (DELIVERED)
-                  </button>
-                </div>
+                    <button
+                      onClick={() => handleUpdateStatus('DELIVERED')}
+                      className={`py-4 rounded-xl font-black text-sm uppercase transition flex items-center justify-center gap-2 ${
+                        detail.fulfillment_status === 'DELIVERED'
+                          ? 'bg-emerald-700 text-white shadow-md'
+                          : 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'
+                      }`}
+                    >
+                      <CheckCircle2 size={18} /> 4. Đã Giao (DELIVERED)
+                    </button>
+                  </div>
+                )}
               </div>
             </>
           )}

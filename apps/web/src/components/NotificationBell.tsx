@@ -14,8 +14,10 @@ import {
   ExternalLink,
   Camera,
   RefreshCw,
+  XCircle,
 } from 'lucide-react'
 import { api } from '../services/api'
+import { useAuth } from '../services/auth'
 import { WarehouseNotificationItem } from '../types'
 
 interface NotificationBellProps {
@@ -25,6 +27,7 @@ interface NotificationBellProps {
 
 export function NotificationBell({ viewAllUrl, bellColor }: NotificationBellProps) {
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [isOpen, setIsOpen] = useState(false)
   const [unreadCount, setUnreadCount] = useState<number>(0)
   const [notifications, setNotifications] = useState<WarehouseNotificationItem[]>([])
@@ -145,7 +148,20 @@ export function NotificationBell({ viewAllUrl, bellColor }: NotificationBellProp
     }
     setIsOpen(false)
     if (notif.action_url) {
-      navigate(notif.action_url)
+      let targetUrl = notif.action_url
+      if (user?.role === 'WAREHOUSE_STAFF') {
+        if (targetUrl.startsWith('/warehouse/orders')) {
+          const orderId = notif.entity_id || new URLSearchParams(targetUrl.split('?')[1] || '').get('order_id')
+          targetUrl = orderId ? `/staff/picking-packing?order_id=${orderId}` : '/staff/picking-packing'
+        } else if (targetUrl.startsWith('/warehouse/returns')) {
+          targetUrl = '/staff/returns'
+        } else if (targetUrl.startsWith('/warehouse/transfers')) {
+          targetUrl = '/staff/transfers'
+        } else if (targetUrl.startsWith('/warehouse/stock') || targetUrl.startsWith('/warehouse/batches')) {
+          targetUrl = '/staff/stock'
+        }
+      }
+      navigate(targetUrl)
     }
   }
 
@@ -168,6 +184,16 @@ export function NotificationBell({ viewAllUrl, bellColor }: NotificationBellProp
   const getBadgeStyle = (notif: WarehouseNotificationItem) => {
     const type = notif.notification_type
     const sev = notif.severity
+
+    if (type === 'ORDER_CANCELLED') {
+      return {
+        bg: '#fef2f2',
+        color: '#dc2626',
+        border: '#fecaca',
+        icon: <XCircle size={16} className="text-red-600" />,
+        label: 'Khách hủy đơn',
+      }
+    }
 
     if (sev === 'CRITICAL' || sev === 'EXPIRED') {
       return {

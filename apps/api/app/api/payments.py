@@ -660,6 +660,7 @@ def cancel_order_and_release_stock(
         reason=payload.reason or "Khách hàng yêu cầu hủy đơn",
     )
     order.order_status = "CANCELLED"
+    order.fulfillment_status = "CANCELLED"
 
     write_audit(
         db,

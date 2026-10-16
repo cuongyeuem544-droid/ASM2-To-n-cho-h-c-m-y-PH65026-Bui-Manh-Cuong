@@ -660,6 +660,31 @@ class FulfillmentRoutingService:
         order = db.get(Order, order_id)
         if order and order.order_status not in ["COMPLETED", "SHIPPING"]:
             order.order_status = "CANCELLED"
+            order.fulfillment_status = "CANCELLED"
+
+        # Gửi thông báo hủy đơn đến kho được phân công và các kho liên quan
+        warehouse_ids_to_notify = set()
+        if order and order.assigned_warehouse_id:
+            warehouse_ids_to_notify.add(order.assigned_warehouse_id)
+        for f in ffs:
+            if f.warehouse_id:
+                warehouse_ids_to_notify.add(f.warehouse_id)
+        for res in reservations:
+            if res.warehouse_id:
+                warehouse_ids_to_notify.add(res.warehouse_id)
+
+        if order and warehouse_ids_to_notify:
+            try:
+                from app.services.warehouse_notification_service import WarehouseNotificationService
+                for wh_id in warehouse_ids_to_notify:
+                    WarehouseNotificationService.notify_order_cancelled(
+                        db=db,
+                        order=order,
+                        warehouse_id=wh_id,
+                        reason=reason,
+                    )
+            except Exception as e:
+                logger.warning(f"Could not dispatch cancel notification to warehouses {warehouse_ids_to_notify}: {e}")
 
         db.commit()
         logger.info(f"[INVENTORY RESERVATION] Đã giải phóng {released_count} đơn vị thuốc cho đơn #{order_id} (Lý do: {reason})")

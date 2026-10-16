@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   ShoppingBag,
   Search,
@@ -13,6 +14,7 @@ import {
   Layers,
   MapPin,
   ChevronRight,
+  XCircle,
 } from 'lucide-react'
 import { api } from '../../services/api'
 
@@ -61,6 +63,7 @@ interface PickDetailResponse {
   customer_name: string
   customer_phone: string
   shipping_address: string
+  order_status?: string
   fulfillment_status: string
   lines: PickDetailLine[]
 }
@@ -72,6 +75,7 @@ const STATUS_TABS = [
   { value: 'PACKED', label: 'Đã đóng gói' },
   { value: 'SHIPPED', label: 'Đang giao' },
   { value: 'DELIVERED', label: 'Hoàn tất' },
+  { value: 'CANCELLED', label: 'Đã hủy' },
 ]
 
 const FULFILLMENT_BADGES: Record<string, { label: string; bg: string; color: string }> = {
@@ -80,13 +84,16 @@ const FULFILLMENT_BADGES: Record<string, { label: string; bg: string; color: str
   PACKED: { label: 'Đã đóng gói', bg: '#f0fdfa', color: '#0f766e' },
   SHIPPED: { label: 'Đang giao hàng', bg: '#eff6ff', color: '#1d4ed8' },
   DELIVERED: { label: 'Đã hoàn tất', bg: '#ecfdf5', color: '#047857' },
+  CANCELLED: { label: 'Đã hủy đơn', bg: '#fef2f2', color: '#dc2626' },
 }
 
 export function WarehouseOrdersPage() {
+  const [searchParams] = useSearchParams()
+  const initialStatus = searchParams.get('status') || 'ALL'
   const [orders, setOrders] = useState<OrderItem[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
-  const [statusFilter, setStatusFilter] = useState('ALL')
+  const [statusFilter, setStatusFilter] = useState(initialStatus)
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
 
@@ -116,6 +123,17 @@ export function WarehouseOrdersPage() {
   useEffect(() => {
     fetchOrders()
   }, [page, statusFilter])
+
+  useEffect(() => {
+    const qStatus = searchParams.get('status')
+    if (qStatus && qStatus !== statusFilter) {
+      setStatusFilter(qStatus)
+    }
+    const qOrderId = searchParams.get('order_id')
+    if (qOrderId) {
+      handleViewPickDetails(Number(qOrderId))
+    }
+  }, [searchParams])
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -323,20 +341,27 @@ export function WarehouseOrdersPage() {
                 </tr>
               ) : (
                 orders.map((o) => {
-                  const badge = FULFILLMENT_BADGES[o.fulfillment_status] || {
-                    label: o.fulfillment_status,
-                    bg: '#f1f5f9',
-                    color: '#475569',
-                  }
+                  const isCancelled = o.order_status === 'CANCELLED' || o.fulfillment_status === 'CANCELLED'
+                  const badge = isCancelled
+                    ? FULFILLMENT_BADGES['CANCELLED']
+                    : (FULFILLMENT_BADGES[o.fulfillment_status] || {
+                        label: o.fulfillment_status,
+                        bg: '#f1f5f9',
+                        color: '#475569',
+                      })
                   return (
                     <tr
                       key={o.id}
-                      style={{ borderBottom: '1px solid #f1f5f9', transition: 'background 0.15s ease' }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = 'white')}
+                      style={{
+                        borderBottom: '1px solid #f1f5f9',
+                        transition: 'background 0.15s ease',
+                        background: isCancelled ? '#fffafa' : 'white',
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = isCancelled ? '#fff1f2' : '#f8fafc')}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = isCancelled ? '#fffafa' : 'white')}
                     >
                       <td style={{ padding: '14px 18px' }}>
-                        <div style={{ fontFamily: 'monospace', fontWeight: 900, color: '#047857', fontSize: '13.5px' }}>
+                        <div style={{ fontFamily: 'monospace', fontWeight: 900, color: isCancelled ? '#e11d48' : '#047857', fontSize: '13.5px' }}>
                           {o.order_code}
                         </div>
                         <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
@@ -377,10 +402,10 @@ export function WarehouseOrdersPage() {
                           style={{
                             fontSize: '10.5px',
                             fontWeight: 700,
-                            color: o.payment_status === 'PAID' ? '#047857' : '#d97706',
+                            color: isCancelled ? '#e11d48' : o.payment_status === 'PAID' ? '#047857' : '#d97706',
                           }}
                         >
-                          {o.payment_status === 'PAID' ? 'Đã thanh toán' : 'Chờ thu tiền (COD)'}
+                          {isCancelled ? 'Đã hủy đơn' : o.payment_status === 'PAID' ? 'Đã thanh toán' : 'Chờ thu tiền (COD)'}
                         </span>
                       </td>
 
@@ -399,7 +424,7 @@ export function WarehouseOrdersPage() {
                               borderRadius: '8px',
                               border: '1px solid #cbd5e1',
                               background: loadingDetailId === o.id ? '#f1f5f9' : 'white',
-                              color: '#0284c7',
+                              color: isCancelled ? '#dc2626' : '#0284c7',
                               fontSize: '12px',
                               fontWeight: 700,
                               cursor: loadingDetailId === o.id ? 'not-allowed' : 'pointer',
@@ -411,87 +436,105 @@ export function WarehouseOrdersPage() {
                             <Eye size={13} /> {loadingDetailId === o.id ? 'Đang mở…' : 'Phiếu Soạn'}
                           </button>
 
-                          {o.fulfillment_status === 'ALLOCATED' && (
-                            <button
-                              type="button"
-                              disabled={updatingId === o.id}
-                              onClick={() => handleUpdateStatus(o.id, 'PICKING')}
+                          {isCancelled ? (
+                            <span
                               style={{
-                                padding: '6px 12px',
+                                padding: '5px 10px',
                                 borderRadius: '8px',
-                                border: 'none',
-                                background: '#f59e0b',
-                                color: 'white',
-                                fontSize: '12px',
+                                fontSize: '11px',
                                 fontWeight: 800,
-                                cursor: 'pointer',
+                                background: '#fef2f2',
+                                color: '#dc2626',
+                                border: '1px solid #fecaca',
                               }}
                             >
-                              Soạn hàng
-                            </button>
+                              Khách đã hủy
+                            </span>
+                          ) : (
+                            <>
+                              {o.fulfillment_status === 'ALLOCATED' && (
+                                <button
+                                  type="button"
+                                  disabled={updatingId === o.id}
+                                  onClick={() => handleUpdateStatus(o.id, 'PICKING')}
+                                  style={{
+                                    padding: '6px 12px',
+                                    borderRadius: '8px',
+                                    border: 'none',
+                                    background: '#f59e0b',
+                                    color: 'white',
+                                    fontSize: '12px',
+                                    fontWeight: 800,
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  Soạn hàng
+                                </button>
+                              )}
+
+                              {o.fulfillment_status === 'PICKING' && (
+                                <button
+                                  type="button"
+                                  disabled={updatingId === o.id}
+                                  onClick={() => handleUpdateStatus(o.id, 'PACKED')}
+                                  style={{
+                                    padding: '6px 12px',
+                                    borderRadius: '8px',
+                                    border: 'none',
+                                    background: '#0d9488',
+                                    color: 'white',
+                                    fontSize: '12px',
+                                    fontWeight: 800,
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  Đóng gói
+                                </button>
+                              )}
+
+                              {o.fulfillment_status === 'PACKED' && (
+                                <button
+                                  type="button"
+                                  disabled={updatingId === o.id}
+                                  onClick={() => handleUpdateStatus(o.id, 'SHIPPED')}
+                                  style={{
+                                    padding: '6px 12px',
+                                    borderRadius: '8px',
+                                    border: 'none',
+                                    background: '#2563eb',
+                                    color: 'white',
+                                    fontSize: '12px',
+                                    fontWeight: 800,
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  Bàn giao
+                                </button>
+                              )}
+
+                              {o.fulfillment_status === 'SHIPPED' && (
+                                <button
+                                  type="button"
+                                  disabled={updatingId === o.id}
+                                  onClick={() => handleUpdateStatus(o.id, 'DELIVERED')}
+                                  style={{
+                                    padding: '6px 12px',
+                                    borderRadius: '8px',
+                                    border: 'none',
+                                    background: '#059669',
+                                    color: 'white',
+                                    fontSize: '12px',
+                                    fontWeight: 800,
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  Giao thành công
+                                </button>
+                              )}
+                            </>
                           )}
 
-                          {o.fulfillment_status === 'PICKING' && (
-                            <button
-                              type="button"
-                              disabled={updatingId === o.id}
-                              onClick={() => handleUpdateStatus(o.id, 'PACKED')}
-                              style={{
-                                padding: '6px 12px',
-                                borderRadius: '8px',
-                                border: 'none',
-                                background: '#0d9488',
-                                color: 'white',
-                                fontSize: '12px',
-                                fontWeight: 800,
-                                cursor: 'pointer',
-                              }}
-                            >
-                              Đóng gói
-                            </button>
-                          )}
-
-                          {o.fulfillment_status === 'PACKED' && (
-                            <button
-                              type="button"
-                              disabled={updatingId === o.id}
-                              onClick={() => handleUpdateStatus(o.id, 'SHIPPED')}
-                              style={{
-                                padding: '6px 12px',
-                                borderRadius: '8px',
-                                border: 'none',
-                                background: '#2563eb',
-                                color: 'white',
-                                fontSize: '12px',
-                                fontWeight: 800,
-                                cursor: 'pointer',
-                              }}
-                            >
-                              Bàn giao
-                            </button>
-                          )}
-
-                          {o.fulfillment_status === 'SHIPPED' && (
-                            <button
-                              type="button"
-                              disabled={updatingId === o.id}
-                              onClick={() => handleUpdateStatus(o.id, 'DELIVERED')}
-                              style={{
-                                padding: '6px 12px',
-                                borderRadius: '8px',
-                                border: 'none',
-                                background: '#059669',
-                                color: 'white',
-                                fontSize: '12px',
-                                fontWeight: 800,
-                                cursor: 'pointer',
-                              }}
-                            >
-                              Giao thành công
-                            </button>
-                          )}
-
-                          {o.fulfillment_status === 'DELIVERED' && (
+                          {o.fulfillment_status === 'DELIVERED' && !isCancelled && (
                             <span
                               style={{
                                 display: 'inline-flex',
@@ -552,8 +595,8 @@ export function WarehouseOrdersPage() {
             {/* Modal Header */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e2e8f0', paddingBottom: '14px' }}>
               <div>
-                <div style={{ fontSize: '11px', fontWeight: 800, color: '#047857', textTransform: 'uppercase' }}>
-                  PHIẾU SOẠN HÀNG (PICKING SLIP)
+                <div style={{ fontSize: '11px', fontWeight: 800, color: (selectedOrder.fulfillment_status === 'CANCELLED' || selectedOrder.order_status === 'CANCELLED') ? '#dc2626' : '#047857', textTransform: 'uppercase' }}>
+                  {(selectedOrder.fulfillment_status === 'CANCELLED' || selectedOrder.order_status === 'CANCELLED') ? 'ĐƠN HÀNG ĐÃ HỦY' : 'PHIẾU SOẠN HÀNG (PICKING SLIP)'}
                 </div>
                 <h3 style={{ margin: '2px 0 0', fontSize: '18px', fontWeight: 900, color: '#0f172a' }}>
                   {selectedOrder.order_code}
@@ -570,6 +613,29 @@ export function WarehouseOrdersPage() {
                 <X size={20} />
               </button>
             </div>
+
+            {/* Cancelled Warning Banner */}
+            {(selectedOrder.fulfillment_status === 'CANCELLED' || selectedOrder.order_status === 'CANCELLED') && (
+              <div
+                style={{
+                  background: '#fef2f2',
+                  borderRadius: '12px',
+                  border: '1px solid #fecaca',
+                  padding: '12px 16px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  fontSize: '12.5px',
+                  color: '#dc2626',
+                  fontWeight: 700,
+                }}
+              >
+                <AlertTriangle size={18} style={{ color: '#dc2626', flexShrink: 0 }} />
+                <div>
+                  Đơn hàng này đã bị khách hàng hoặc hệ thống hủy. Toàn bộ thuốc giữ chỗ đã được giải phóng lại vào kho. Vui lòng dừng mọi thao tác soạn hoặc bàn giao.
+                </div>
+              </div>
+            )}
 
             {/* Address Banner */}
             <div
