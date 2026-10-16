@@ -688,14 +688,14 @@ export function WarehouseImportsPage() {
             <div>
               <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 700 }}>TỔNG SẢN PHẨM NHẬP</div>
               <div style={{ fontSize: '18px', fontWeight: 900, color: '#059669', marginTop: '2px' }}>
-                {commitResult.total_items.toLocaleString()} đơn vị
+                {(commitResult.total_items ?? 0).toLocaleString()} đơn vị
               </div>
             </div>
             <div style={{ borderLeft: '1px solid #e2e8f0' }} />
             <div>
               <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 700 }}>TỔNG GIÁ TRỊ NHẬP</div>
               <div style={{ fontSize: '18px', fontWeight: 900, color: '#0f172a', marginTop: '2px' }}>
-                {commitResult.total_amount.toLocaleString('vi-VN')} đ
+                {(commitResult.total_amount ?? 0).toLocaleString('vi-VN')} đ
               </div>
             </div>
           </div>

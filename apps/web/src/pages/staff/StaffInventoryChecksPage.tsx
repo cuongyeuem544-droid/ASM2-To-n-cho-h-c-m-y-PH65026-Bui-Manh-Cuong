@@ -11,9 +11,23 @@ interface AdjustmentItem {
   items_count: number
 }
 
+interface BatchOption {
+  batch_id: number
+  batch_number: string
+  product_name: string
+  sku_code: string
+  unit_name: string
+  expiry_date: string | null
+  quantity_on_hand: number
+}
+
 export function StaffInventoryChecksPage() {
   const [adjustments, setAdjustments] = useState<AdjustmentItem[]>([])
   const [loading, setLoading] = useState(true)
+
+  // Batch list for shelf check selection
+  const [batches, setBatches] = useState<BatchOption[]>([])
+  const [loadingBatches, setLoadingBatches] = useState(false)
 
   // Quick count modal
   const [showModal, setShowModal] = useState(false)
@@ -31,9 +45,37 @@ export function StaffInventoryChecksPage() {
       .finally(() => setLoading(false))
   }
 
+  const fetchBatches = () => {
+    setLoadingBatches(true)
+    api<{ items: BatchOption[] }>('/warehouse-portal/batches?page_size=100')
+      .then((res) => {
+        const list = res.items || []
+        setBatches(list)
+        if (list.length > 0 && (!batchId || batchId === 1)) {
+          setBatchId(list[0].batch_id)
+          setActualQty(list[0].quantity_on_hand ?? 0)
+        }
+      })
+      .catch((err) => console.error(err))
+      .finally(() => setLoadingBatches(false))
+  }
+
   useEffect(() => {
     fetchChecks()
+    fetchBatches()
   }, [])
+
+  const selectedBatch = batches.find((b) => b.batch_id === batchId)
+
+  const handleOpenModal = () => {
+    setFormError(null)
+    if (batches.length > 0) {
+      const defaultB = batches[0]
+      setBatchId(defaultB.batch_id)
+      setActualQty(defaultB.quantity_on_hand ?? 0)
+    }
+    setShowModal(true)
+  }
 
   const handleSubmitCheck = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -83,7 +125,7 @@ export function StaffInventoryChecksPage() {
         </div>
 
         <button
-          onClick={() => { setFormError(null); setShowModal(true) }}
+          onClick={handleOpenModal}
           className="bg-emerald-700 hover:bg-emerald-800 text-white px-5 py-2.5 rounded-xl font-bold text-xs shadow flex items-center gap-2 transition"
         >
           <Plus size={16} /> Nhập Kết Quả Đếm Kệ
@@ -129,7 +171,7 @@ export function StaffInventoryChecksPage() {
       {/* Quick Count Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b pb-3">
               <div className="flex items-center gap-2">
                 <ClipboardList className="text-emerald-700" size={20} />
@@ -148,25 +190,83 @@ export function StaffInventoryChecksPage() {
 
             <form onSubmit={handleSubmitCheck} className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Mã Lô Hàng (Batch ID)</label>
-                <input
-                  type="number"
-                  min={1}
-                  value={batchId}
-                  onChange={(e) => setBatchId(Number(e.target.value))}
-                  className="w-full px-3 py-2 border rounded-xl text-sm"
-                  required
-                />
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700 uppercase">Chọn Lô Thuốc Cần Kiểm Kê</label>
+                  {loadingBatches && <span className="text-[11px] text-emerald-600 font-semibold">Đang tải lô...</span>}
+                </div>
+                {batches.length > 0 ? (
+                  <select
+                    value={batchId}
+                    onChange={(e) => {
+                      const newId = Number(e.target.value)
+                      setBatchId(newId)
+                      const found = batches.find((b) => b.batch_id === newId)
+                      if (found) {
+                        setActualQty(found.quantity_on_hand ?? 0)
+                      }
+                    }}
+                    className="w-full px-3 py-2 border rounded-xl text-xs font-semibold bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    required
+                  >
+                    {batches.map((b) => (
+                      <option key={b.batch_id} value={b.batch_id}>
+                        {b.batch_number} - {b.product_name} ({b.unit_name || 'ĐV'}) - HSD: {b.expiry_date || 'N/A'} [Tồn: {b.quantity_on_hand}]
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="space-y-1">
+                    <input
+                      type="number"
+                      min={1}
+                      value={batchId}
+                      onChange={(e) => setBatchId(Number(e.target.value))}
+                      placeholder="Nhập mã Batch ID..."
+                      className="w-full px-3 py-2 border rounded-xl text-sm"
+                      required
+                    />
+                    <p className="text-[11px] text-slate-400">Chưa có danh mục lô tự động, vui lòng nhập mã Batch ID trực tiếp.</p>
+                  </div>
+                )}
+
+                {selectedBatch && (
+                  <div className="mt-2.5 p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1.5">
+                    <div className="flex justify-between items-center text-slate-700">
+                      <span className="text-slate-500">Tên thuốc:</span>
+                      <span className="font-bold text-slate-900 text-right max-w-[240px] truncate">{selectedBatch.product_name}</span>
+                    </div>
+                    <div className="flex justify-between text-slate-700">
+                      <span className="text-slate-500">Mã lô & HSD:</span>
+                      <span className="font-semibold text-emerald-800">{selectedBatch.batch_number} • HSD: {selectedBatch.expiry_date || 'N/A'}</span>
+                    </div>
+                    <div className="flex justify-between text-slate-700">
+                      <span className="text-slate-500">Tồn hệ thống máy:</span>
+                      <span className="font-bold text-slate-900">{(selectedBatch.quantity_on_hand ?? 0).toLocaleString()} {selectedBatch.unit_name || 'đơn vị'}</span>
+                    </div>
+                    {actualQty !== undefined && actualQty >= 0 && (
+                      <div className="flex justify-between pt-1.5 border-t border-slate-200">
+                        <span className="text-slate-600 font-semibold">Chênh lệch đối soát:</span>
+                        {actualQty === selectedBatch.quantity_on_hand ? (
+                          <span className="font-bold text-emerald-700">Khớp chuẩn 100% (0)</span>
+                        ) : actualQty > selectedBatch.quantity_on_hand ? (
+                          <span className="font-bold text-amber-700">Thừa thực tế +{actualQty - selectedBatch.quantity_on_hand} {selectedBatch.unit_name || 'đơn vị'}</span>
+                        ) : (
+                          <span className="font-bold text-rose-700">Thiếu thực tế -{selectedBatch.quantity_on_hand - actualQty} {selectedBatch.unit_name || 'đơn vị'}</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Số Lượng Thực Đếm (Hộp / Lọ)</label>
+                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Số Lượng Thực Đếm Tại Kệ (Hộp / Lọ)</label>
                 <input
                   type="number"
                   min={0}
                   value={actualQty}
                   onChange={(e) => setActualQty(Number(e.target.value))}
-                  className="w-full px-3 py-2 border rounded-xl text-sm font-bold text-emerald-800"
+                  className="w-full px-3 py-2 border rounded-xl text-sm font-bold text-emerald-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                   required
                 />
               </div>

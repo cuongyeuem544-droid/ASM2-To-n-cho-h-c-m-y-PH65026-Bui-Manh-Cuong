@@ -303,6 +303,7 @@ def get_my_warehouse_info(
     pending_fulfillment_count = db.scalar(
         select(func.count(Order.id)).where(
             Order.assigned_warehouse_id == wh.id,
+            Order.order_status != "CANCELLED",
             Order.fulfillment_status.in_(["ALLOCATED", "CONSOLIDATED", "PICKING"]),
         )
     ) or 0
@@ -1702,6 +1703,7 @@ def get_staff_today_tasks(
     orders_to_pick = db.scalars(
         select(Order).options(selectinload(Order.items)).where(
             Order.assigned_warehouse_id == wh.id,
+            Order.order_status != "CANCELLED",
             Order.fulfillment_status.in_(["ALLOCATED", "CONSOLIDATED", "PICKING"]),
         ).order_by(Order.created_at.asc()).limit(20)
     ).all()
@@ -1710,6 +1712,7 @@ def get_staff_today_tasks(
     orders_to_pack = db.scalars(
         select(Order).options(selectinload(Order.items)).where(
             Order.assigned_warehouse_id == wh.id,
+            Order.order_status != "CANCELLED",
             Order.fulfillment_status == "PICKING",
         ).order_by(Order.created_at.asc()).limit(20)
     ).all()
