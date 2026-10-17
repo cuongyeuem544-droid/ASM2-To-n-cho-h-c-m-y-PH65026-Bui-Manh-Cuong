@@ -219,11 +219,11 @@ echo   * Nhan Vien Kho Ha Noi:             staff.hn@pharmatrust.vn      / Staff@
 echo   * Khach Hang Mua Thuoc:             buyer@pharmatrust.vn         / Buyer@123456
 echo ===================================================================================
 echo Ba cua so Command Prompt doc lap da mo san sang giu log truc tiep.
-echo Nhan phim bat ky de mo trinh duyet...
-pause >nul
+echo Dang tu dong mo Google Chrome vao trang Storefront va Admin...
+ping 127.0.0.1 -n 2 >nul
 
-start http://localhost:3000
-start http://localhost:5173
+start chrome http://localhost:3000 2>nul || start http://localhost:3000
+start chrome http://localhost:5173 2>nul || start http://localhost:5173
 exit /b 0
 
 :: ===================================================================================

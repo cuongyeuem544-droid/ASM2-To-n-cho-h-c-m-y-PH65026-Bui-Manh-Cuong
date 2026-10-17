@@ -24,4 +24,8 @@ echo [OK] Ca hai giao dien Frontend da duoc khoi chay!
 echo   - Khach hang: http://localhost:3000
 echo   - Quan tri:   http://localhost:5173
 echo.
-pause
+echo Dang tu dong mo Google Chrome vao Storefront va Admin...
+ping 127.0.0.1 -n 3 >nul
+start chrome http://localhost:3000 2>nul || start http://localhost:3000
+start chrome http://localhost:5173 2>nul || start http://localhost:5173
+exit /b 0
