@@ -89,8 +89,9 @@ if !errorlevel! neq 0 (
 :: 5. Cai dat hoac cap nhat requirements backend
 echo.
 echo [5/16] Kiem tra va cai dat dependencies Backend...
-if not exist ".venv\Lib\site-packages\fastapi" (
-    echo   - Dang cai dat dependencies Backend qua pip...
+.venv\Scripts\python.exe -c "import alembic, fastapi, sqlalchemy, pydantic_settings, uvicorn" >nul 2>nul
+if !errorlevel! neq 0 (
+    echo   - Phat hien thieu goi backend hoac moi truong moi. Dang cai dat qua pip...
     .venv\Scripts\python.exe -m pip install -r apps\api\requirements.txt
     if !errorlevel! neq 0 (
         call :error_exit "5" "Cai dat dependencies Backend" "pip install requirements.txt that bai"
@@ -146,7 +147,7 @@ if not exist ".env" (
 echo.
 echo [9/16] Chay Alembic database migrations upgrade head...
 set PYTHONPATH=%ROOT%apps\api
-.venv\Scripts\python.exe -m alembic -c apps\api\alembic.ini upgrade head
+.venv\Scripts\python.exe apps\api\scripts\run_migrations.py
 if !errorlevel! neq 0 (
     call :error_exit "9" "Alembic upgrade head" "Alembic migration that bai"
 )

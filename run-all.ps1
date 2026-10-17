@@ -57,9 +57,9 @@ if (-not (Test-Path "$PSScriptRoot\.env")) {
 
 # 4. Kiem tra dependencies
 Write-Host "[4/9] Kiem tra dependencies backend va frontend..." -ForegroundColor White
-$fastapiPkg = "$PSScriptRoot\.venv\Lib\site-packages\fastapi"
-if (-not (Test-Path $fastapiPkg)) {
-    Write-Host "  -> Dang cai dat dependencies backend..." -ForegroundColor Yellow
+$hasPkg = & "$venvPython" -c "import alembic, fastapi, sqlalchemy, pydantic_settings; print(1)" 2>$null
+if ($hasPkg -ne "1") {
+    Write-Host "  -> Phat hien thieu goi backend hoac moi truong moi. Dang cai dat qua pip..." -ForegroundColor Yellow
     & "$venvPython" -m pip install -r "$PSScriptRoot\apps\api\requirements.txt"
 }
 if (-not (Test-Path "$PSScriptRoot\apps\storefront\node_modules")) {
@@ -78,16 +78,9 @@ if (-not (Test-Path "$PSScriptRoot\apps\web\node_modules")) {
 # 5. Chay Migration Alembic va kiem tra single head
 Write-Host "[5/9] Chay Alembic Database Migrations (upgrade head)..." -ForegroundColor White
 $env:PYTHONPATH = "$PSScriptRoot\apps\api"
-& "$venvPython" -m alembic -c "$PSScriptRoot\apps\api\alembic.ini" upgrade head
+& "$venvPython" "$PSScriptRoot\apps\api\scripts\run_migrations.py"
 if ($LASTEXITCODE -ne 0) {
     Write-Error "[LOI] Migration that bai! Vui long kiem tra file CSDL pharmatrust.db."
-    exit 1
-}
-
-# Kiem tra 1 head
-& "$venvPython" -c "import sys; sys.path.insert(0, 'apps/api'); from alembic.config import Config; from alembic.script import ScriptDirectory; cfg = Config('apps/api/alembic.ini'); s = ScriptDirectory.from_config(cfg); heads = s.get_heads(); print('  -> Alembic heads:', heads); sys.exit(0 if len(heads) == 1 else 1)"
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "[LOI] Phat hien xung dot hoac co nhieu hon 1 Alembic head revision!"
     exit 1
 }
 
