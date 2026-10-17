@@ -90,19 +90,31 @@ def run_migrations() -> bool:
         command.upgrade(cfg, "head")
     except Exception as e:
         err_str = str(e)
-        print(f"  - [LOI KHI UPGRADE] {err_str}")
-        if "Can't locate revision identified by" in err_str:
-            print("  - [TU DONG SUA] Thu don dep alembic_version va stamp head...")
+        print(f"  - [CANH BAO] Alembic upgrade gap su co: {err_str}")
+
+        if "locked" in err_str.lower() or "busy" in err_str.lower():
+            print("\n" + "=" * 70)
+            print("[LOI KHOA CO SO DU LIEU] Tep pharmatrust.db dang bi tien trinh khac khoa!")
+            print("GIAI PHAP: Vui long chay 'stop-all.bat' de dong tat ca tien trinh cu, sau do chay lai.")
+            print("=" * 70 + "\n")
+            return False
+
+        # Neu la loi schema / revision tren moi truong dev, tu dong sao luu va tao moi
+        is_dev = getattr(settings, "app_env", "development").lower() in ("development", "dev", "local", "test")
+        if is_dev and 'db_file_path' in locals() and db_file_path.exists():
+            import time
+            import shutil
+            bak_name = f"pharmatrust.db.conflict_{int(time.time())}.bak"
+            bak_path = ROOT_DIR / bak_name
+            print(f"  - [TU DONG PHUC HOI] Phat hien CSDL cuc bo cu bi xung dot schema/revision.")
+            print(f"  - [TU DONG PHUC HOI] Dang sao luu CSDL cu thanh '{bak_name}' de bao toan du lieu...")
             try:
-                if 'db_file_path' in locals() and db_file_path.exists():
-                    c = sqlite3.connect(str(db_file_path))
-                    c.execute("DROP TABLE IF EXISTS alembic_version")
-                    c.commit()
-                    c.close()
+                shutil.move(str(db_file_path), str(bak_path))
+                print("  - [TU DONG PHUC HOI] Dang chay lai Alembic upgrade head tren CSDL moi tinh...")
                 command.upgrade(cfg, "head")
-                print("  - [OK] Da tu dong khac phuc va upgrade thanh cong!")
+                print("  - [OK] Da tu dong khoi tao CSDL moi thanh cong tu Alembic!")
             except Exception as e2:
-                print(f"  - [LOI] Khong the tu dong khac phuc: {e2}")
+                print(f"  - [LOI] Khong the tu dong phuc hoi CSDL: {e2}")
                 return False
         else:
             return False
