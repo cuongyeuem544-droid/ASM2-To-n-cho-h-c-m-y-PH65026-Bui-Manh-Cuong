@@ -1,2 +1,6 @@
 @echo off
-call "%~dp0run-local.bat"
+setlocal
+cd /d "%~dp0"
+
+call "%~dp0start.bat" %*
+exit /b %ERRORLEVEL%

@@ -11,13 +11,13 @@ echo   [2] Giao dien Admin Data Hub (Vite): http://localhost:5173
 echo ======================================================================
 echo.
 
-where node >nul 2>&1 || set "PATH=C:\Users\AD\AppData\Local\Microsoft\WinGet\Packages\OpenJS.NodeJS.20_Microsoft.Winget.Source_8wekyb3d8bbwe\node-v20.20.2-win-x64;%PATH%"
+where node >nul 2>&1
 
 echo [1/2] Dang khoi dong Next.js Storefront tren cong 3000...
-start "H4CARE-Storefront-3000" cmd /k "title H4CARE Storefront :3000 && cd /d "%~dp0apps\storefront" && set "PATH=C:\Users\AD\AppData\Local\Microsoft\WinGet\Packages\OpenJS.NodeJS.20_Microsoft.Winget.Source_8wekyb3d8bbwe\node-v20.20.2-win-x64;%PATH%" && npm run dev -- -p 3000"
+start "H4CARE-Storefront-3000" cmd /k "title H4CARE Storefront :3000 && cd /d "%~dp0apps\storefront" && npm run dev -- -p 3000"
 
 echo [2/2] Dang khoi dong Vite Admin Data Hub tren cong 5173...
-start "PharmaTrust-Admin-5173" cmd /k "title PharmaTrust Admin :5173 && cd /d "%~dp0apps\web" && set "PATH=C:\Users\AD\AppData\Local\Microsoft\WinGet\Packages\OpenJS.NodeJS.20_Microsoft.Winget.Source_8wekyb3d8bbwe\node-v20.20.2-win-x64;%PATH%" && npm run dev"
+start "PharmaTrust-Admin-5173" cmd /k "title PharmaTrust Admin :5173 && cd /d "%~dp0apps\web" && npm run dev"
 
 echo.
 echo [OK] Ca hai giao dien Frontend da duoc khoi chay!

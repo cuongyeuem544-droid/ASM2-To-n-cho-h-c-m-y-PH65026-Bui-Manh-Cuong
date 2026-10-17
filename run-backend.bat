@@ -8,7 +8,7 @@ echo          PHARMATRUST / H4CARE - KHOI DONG BACKEND API (:8000)
 echo ======================================================================
 echo.
 
-where python >nul 2>&1 || set "PATH=C:\Users\AD\AppData\Local\Programs\Python\Python311;C:\Users\AD\AppData\Local\Programs\Python\Python311\Scripts;%PATH%"
+where python >nul 2>&1
 
 set "PYTHON_EXE="
 if exist "%~dp0.venv\Scripts\python.exe" (
