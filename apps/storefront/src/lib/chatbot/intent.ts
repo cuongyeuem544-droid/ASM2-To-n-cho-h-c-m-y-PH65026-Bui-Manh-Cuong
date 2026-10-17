@@ -1,6 +1,7 @@
 import { removeVietnameseTones } from "./product-search";
 import { StandardIntent } from "./types";
 import { extractActiveDrugFromHistory, hasDrugPronoun, trackSymptomContext } from "./context-tracker";
+import { normalizeVietnameseSlang } from "./vietnamese-nlp";
 
 export type UserIntent = StandardIntent;
 
@@ -15,7 +16,8 @@ export interface IntentClassificationResult {
  * Trích xuất từ khóa tìm kiếm thuốc thực tế bằng cách loại bỏ các từ phụ trợ tiếng Việt
  */
 export function extractProductSearchQuery(rawMessage: string): string {
-  let q = rawMessage.trim();
+  const normalizedRaw = normalizeVietnameseSlang(rawMessage).normalized;
+  let q = normalizedRaw.trim();
 
   // Loại bỏ các tiền tố câu hỏi thường gặp để lấy đúng tên thuốc / hoạt chất
   const stopPrefixes = [
@@ -37,10 +39,11 @@ export function extractProductSearchQuery(rawMessage: string): string {
 
   // Loại bỏ các hậu tố hỏi giá / tồn kho
   const stopSuffixes = [
-    /\s+(bao nhiêu tiền|bao nhieu tien|giá bao nhiêu|gia bao nhieu|bao nhiêu|bao nhieu)$/i,
-    /\s+(không shop|khong shop|không ạ|khong a|ko shop|không|khong)$/i,
-    /\s+(còn hàng không|con hang khong|còn không|con khong)$/i,
-    /\s+(đang bán|dang ban)$/i,
+    /\s+(bao nhiêu tiền|bao nhieu tien|giá bao nhiêu|gia bao nhieu|bao nhiêu|bao nhieu)[\s?]*$/i,
+    /\s+(không shop|khong shop|không ạ|khong a|ko shop|không|khong|ko)[\s?]*$/i,
+    /\s+(còn hàng không|con hang khong|còn không|con khong)[\s?]*$/i,
+    /\s+(đang bán|dang ban)[\s?]*$/i,
+    /[\s?]+$/,
   ];
 
   for (const regex of stopSuffixes) {
@@ -96,7 +99,8 @@ export function classifyUserIntent(
   rawMessage: string,
   history: Array<{ role: string; content: string }> = []
 ): IntentClassificationResult {
-  const trimmed = rawMessage.trim();
+  const normalizedRaw = normalizeVietnameseSlang(rawMessage).normalized;
+  const trimmed = normalizedRaw.trim();
   const norm = removeVietnameseTones(trimmed);
 
   // 1. DẤU HIỆU CẤP CỨU / RED FLAGS (P0 - EMERGENCY)
@@ -166,7 +170,9 @@ export function classifyUserIntent(
   }
 
   // 4. KIỂM TRA ĐANG TRONG TIẾN TRÌNH HỎI BỆNH ĐA LƯỢT (MULTI-TURN SYMPTOM TRIAGE CONTINUATION)
-  // Nếu đang trong cuộc tư vấn triệu chứng và người dùng trả lời: "từ hôm qua", "bên phải", "bên trái", "ở giữa", "không sốt", "có sốt"...
+  // Nếu câu hỏi hiện tại là tìm kiếm sản phẩm rõ ràng, hoặc hỏi thuốc cụ thể thì không gán nhầm sang triệu chứng!
+  const isAskingProductExplicitly = /\b(vitamin|thuoc|co ban|co khong|h4care co|gia bao nhieu|bao nhieu tien|mua|tim|shop co)\b/i.test(norm);
+
   const lastAssistant = [...history].reverse().find((m) => m.role === "assistant");
   const isAssistantAskingSymptom = lastAssistant && (
     lastAssistant.content.includes("từ khi nào") ||
@@ -180,7 +186,7 @@ export function classifyUserIntent(
 
   const isAnsweringSymptom = /\b(tu hom qua|hom qua|sang nay|moi bi|vua bi|2 ngay|3 ngay|ben phai|ben trai|o giua|giua bung|quanh ron|khong sot|co sot|co non|khong non|dau am i|chi dau am i|co dau|khong dau|co|khong)\b/i.test(norm);
 
-  if (isAssistantAskingSymptom && (isAnsweringSymptom || norm.length < 35)) {
+  if (!isAskingProductExplicitly && isAssistantAskingSymptom && (isAnsweringSymptom || (norm.length < 35 && !norm.includes("vitamin") && !norm.includes("thuoc") && !norm.includes("mua")))) {
     return {
       intent: "HEALTH_SYMPTOM",
       matchedKeywords: ["symptom_continuation"],
@@ -188,7 +194,7 @@ export function classifyUserIntent(
   }
 
   // Dự phòng an toàn: nếu lịch sử đã có triệu chứng chính và tin nhắn hiện tại là câu trả lời triệu chứng
-  if (isAnsweringSymptom && !/\b(mua|gia bao nhieu|bao nhieu tien|phi ship|don hang)\b/i.test(norm)) {
+  if (isAnsweringSymptom && !isAskingProductExplicitly && !/\b(mua|gia bao nhieu|bao nhieu tien|phi ship|don hang)\b/i.test(norm)) {
     const prevContext = trackSymptomContext(history, trimmed);
     if (prevContext.primarySymptom) {
       return {

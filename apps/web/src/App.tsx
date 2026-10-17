@@ -32,6 +32,7 @@ const ClassificationQueuePage = lazy(() => import('./pages/ClassificationQueuePa
 const ReturnsPage = lazy(() => import('./pages/ReturnsPage').then(module => ({ default: module.ReturnsPage })))
 const RefundsPage = lazy(() => import('./pages/RefundsPage').then(module => ({ default: module.RefundsPage })))
 const ExchangesPage = lazy(() => import('./pages/ExchangesPage').then(module => ({ default: module.ExchangesPage })))
+const LiveChatPage = lazy(() => import('./pages/LiveChatPage').then(module => ({ default: module.LiveChatPage })))
 
 // Warehouse Manager Pages & Layout
 const WarehouseManagerLayout = lazy(() =>
@@ -184,12 +185,14 @@ export default function App() {
             <Route path="emails" element={<AdminOnly><EmailsPage /></AdminOnly>} />
             <Route path="users" element={<AdminOnly><UsersPage /></AdminOnly>} />
             <Route path="audit" element={<AdminOnly><AuditPage /></AdminOnly>} />
+            <Route path="live-chat" element={<LiveChatPage />} />
           </Route>
 
           {/* 2. Warehouse Manager Dedicated Portal Routes */}
           <Route path="/warehouse" element={<WarehouseManagerGuard />}>
             <Route index element={<Navigate to="/warehouse/overview" replace />} />
             <Route path="overview" element={<WarehouseOverviewPage />} />
+            <Route path="live-chat" element={<LiveChatPage />} />
             <Route path="products" element={<WarehouseProductsPage />} />
             <Route path="orders" element={<WarehouseOrdersPage />} />
             <Route path="returns" element={<WarehouseReturnsPage />} />

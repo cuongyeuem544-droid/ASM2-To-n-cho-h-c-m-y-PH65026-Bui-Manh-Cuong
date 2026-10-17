@@ -66,8 +66,9 @@ export function handleSymptomTriage(
   if (ctx.primarySymptom?.includes("bụng")) {
     // Bước 1: Chưa biết thời gian xuất hiện
     if (!ctx.duration) {
+      const symptomName = ctx.primarySymptom || "đau bụng";
       return {
-        reply: `Mình có thể hỏi thêm vài thông tin để hỗ trợ bạn nhé. **Bạn ${ctx.primarySymptom} từ khi nào?**`,
+        reply: `Bạn bị ${symptomName} từ khi nào?`,
         quickReplies: ["Từ hôm qua", "Mới bị từ sáng nay", "Đã bị 2-3 ngày nay", "Bị cả tuần nay"],
         isEmergency: false,
       };
@@ -76,7 +77,7 @@ export function handleSymptomTriage(
     // Bước 2: Đã biết thời gian, nhưng chưa biết vị trí cụ thể
     if (!ctx.location) {
       return {
-        reply: `Dạ mình đã ghi nhận bạn bị ${ctx.duration}. **Cơn đau chủ yếu ở bên trái, bên phải hay giữa bụng dưới?**`,
+        reply: `Cơn đau chủ yếu ở bên trái, bên phải hay giữa bụng dưới?`,
         quickReplies: ["Bên phải", "Bên trái", "Ở giữa bụng dưới", "Đau lan tỏa khắp bụng"],
         isEmergency: false,
       };

@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:3b"
     ai_provider: str = "rule_based"
+    gemini_api_key: str = ""
+    openai_api_key: str = ""
+    ai_api_key: str = ""
+    ai_model: str = "gemini-1.5-flash"
+    ai_timeout_seconds: int = 25
     demo_mode: bool = True
     enable_crawler: bool = False
 
@@ -101,6 +106,7 @@ class Settings(BaseSettings):
                     raise ValueError("CORS_ORIGINS JSON must be an array of strings")
                 return [item.strip() for item in decoded if item.strip()]
             return [item.strip() for item in value.split(",") if item.strip()]
+        return value
     @field_validator("database_url", mode="after")
     @classmethod
     def canonicalize_sqlite_url(cls, v: str) -> str:

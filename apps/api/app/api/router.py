@@ -24,6 +24,8 @@ from app.api import (
     sources,
     storefront,
     chat,
+    ai_chat_history,
+    live_chat,
     warehouse_orders_returns,
     warehouse_portal,
 )
@@ -61,6 +63,8 @@ api_router.include_router(admin_returns.router)
 api_router.include_router(admin_refunds.router)
 api_router.include_router(admin_exchanges.router)
 api_router.include_router(chat.router)
+api_router.include_router(ai_chat_history.router)
+api_router.include_router(live_chat.router)
 api_router.include_router(admin_classification.router)
 api_router.include_router(me.me_router)
 api_router.include_router(warehouse_portal.router)

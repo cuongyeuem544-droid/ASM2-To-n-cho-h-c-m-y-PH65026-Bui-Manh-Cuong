@@ -41,6 +41,22 @@ export interface ChatSafetyAlert {
   emergencyNumber?: string;
 }
 
+export interface ChatAttachment {
+  id: string;
+  fileName: string;
+  name?: string;
+  storedFileName: string;
+  fileSize: number;
+  size?: number;
+  mimeType: string;
+  mime_type?: string;
+  type?: string;
+  url: string;
+  base64Data?: string;
+  data_base64?: string;
+  uploadedAt: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: MessageRole;
@@ -50,6 +66,10 @@ export interface ChatMessage {
   safetyAlert?: ChatSafetyAlert;
   quickReplies?: string[];
   isError?: boolean;
+  apiStatus?: "real_llm_success" | "quota_exceeded" | "api_error" | "offline_expert_system";
+  modelUsed?: string;
+  latencyMs?: number;
+  attachments?: ChatAttachment[];
 }
 
 export interface SymptomContext {
@@ -64,11 +84,51 @@ export interface SymptomContext {
   redFlagReason?: string;
 }
 
+export interface ExtractedMemory {
+  userName?: string;
+  age?: string;
+  gender?: string;
+  symptoms?: string[];
+  symptomDuration?: string;
+  symptomSeverity?: string;
+  symptomLocation?: string;
+  symptomEscalated?: boolean;
+  userMood?: string;
+  firstDiscussedProduct?: string;
+  currentMedicines?: string[];
+  requestedRealPharmacist?: boolean;
+  lastDiscussedProduct?: string;
+  lastTopic?: string;
+  unresolvedQuestion?: string;
+  contextSummary?: string;
+  lastAttachedImage?: {
+    fileName: string;
+    url: string;
+    description?: string;
+    activeDrug?: string;
+  };
+  correctedFacts?: Record<string, { previous: any; current: any; timestamp: string }>;
+}
+
+export interface ChatConversation {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: ChatMessage[];
+  extractedMemory: ExtractedMemory;
+  userId?: string | number | null;
+  sessionId: string;
+  isPinned?: boolean;
+}
+
 export interface ConversationContext {
   lastIntent?: StandardIntent;
   activeDrug?: string;          // e.g. "Paracetamol", "Ibuprofen", "Vitamin C"
   activeProductSlug?: string;
   symptomContext?: SymptomContext;
+  extractedMemory?: ExtractedMemory;
+  contextSummary?: string;
 }
 
 export interface ChatRequest {
@@ -78,6 +138,9 @@ export interface ChatRequest {
     content: string;
   }>;
   sessionId?: string;
+  conversationId?: string;
+  extractedMemory?: ExtractedMemory;
+  attachments?: ChatAttachment[];
   contextProduct?: {
     id: string;
     name: string;
@@ -105,4 +168,11 @@ export interface ChatResponse {
   intentDetected?: StandardIntent;
   sourceAttribution?: string;
   isHumanSupport?: boolean;
+  sessionId?: string;
+  extractedMemory?: ExtractedMemory;
+  handoffRequested?: boolean;
+  contextSummary?: string;
+  apiStatus?: "real_llm_success" | "quota_exceeded" | "api_error" | "offline_expert_system";
+  apiErrorDetail?: string;
+  latencyMs?: number;
 }

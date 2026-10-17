@@ -62,16 +62,32 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { message, conversationHistory = [], contextProduct, currentUser } = body;
+    const {
+      message = "",
+      conversationHistory = [],
+      contextProduct,
+      currentUser,
+      sessionId,
+      conversationId,
+      extractedMemory,
+      attachments = [],
+    } = body;
 
-    if (!message || typeof message !== "string" || message.trim().length === 0) {
+    const hasText = typeof message === "string" && message.trim().length > 0;
+    const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
+
+    if (!hasText && !hasAttachments) {
       return NextResponse.json(
-        { error: "Vui lòng nhập nội dung câu hỏi." },
+        { error: "Vui lòng nhập nội dung câu hỏi hoặc đính kèm hình ảnh." },
         { status: 400 }
       );
     }
 
-    if (message.length > 2000) {
+    const effectiveMessage = hasText
+      ? message.trim()
+      : "Vui lòng xem và đọc thông tin trên hình ảnh đính kèm giúp tôi.";
+
+    if (effectiveMessage.length > 2000) {
       return NextResponse.json(
         { error: "Nội dung câu hỏi quá dài (tối đa 2.000 ký tự)." },
         { status: 400 }
@@ -92,9 +108,9 @@ export async function POST(req: NextRequest) {
 
     // 4. Gọi bộ máy AI điều phối
     const response: ChatResponse = await getAiChatResponse(
-      message.trim(),
+      effectiveMessage,
       cleanHistory,
-      { currentUser, contextProduct }
+      { currentUser, contextProduct, sessionId, conversationId, extractedMemory, attachments }
     );
 
     return NextResponse.json(response, { status: 200 });
