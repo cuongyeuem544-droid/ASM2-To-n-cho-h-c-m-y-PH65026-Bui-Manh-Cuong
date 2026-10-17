@@ -172,12 +172,12 @@ class PricingService:
             qty = int(it.get("quantity", 1))
 
             prod = products_map.get(pid)
-            if not prod or prod.publish_status != PublishStatus.PUBLISHED:
+            if not prod:
                 all_eligible = False
                 calculated_items.append({
                     "product_id": pid,
                     "sku_id": sku_id,
-                    "product_name": prod.canonical_name if prod else f"Sản phẩm #{pid}",
+                    "product_name": f"Sản phẩm #{pid}",
                     "uom": "Hộp",
                     "unit_price": 0.0,
                     "quantity": qty,
@@ -185,6 +185,22 @@ class PricingService:
                     "available_stock": 0,
                     "can_checkout": False,
                     "rejection_reason": "Sản phẩm không tồn tại hoặc đã ngừng kinh doanh.",
+                })
+                continue
+
+            if prod.publish_status != PublishStatus.PUBLISHED:
+                all_eligible = False
+                calculated_items.append({
+                    "product_id": pid,
+                    "sku_id": sku_id,
+                    "product_name": prod.canonical_name,
+                    "uom": "Hộp",
+                    "unit_price": 0.0,
+                    "quantity": qty,
+                    "subtotal": 0.0,
+                    "available_stock": 0,
+                    "can_checkout": False,
+                    "rejection_reason": "Sản phẩm chưa sẵn sàng để đặt hàng (đang thẩm định hoặc bản thảo).",
                 })
                 continue
 

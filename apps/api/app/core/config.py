@@ -101,6 +101,7 @@ class Settings(BaseSettings):
                     raise ValueError("CORS_ORIGINS JSON must be an array of strings")
                 return [item.strip() for item in decoded if item.strip()]
             return [item.strip() for item in value.split(",") if item.strip()]
+        return value
     @field_validator("database_url", mode="after")
     @classmethod
     def canonicalize_sqlite_url(cls, v: str) -> str:

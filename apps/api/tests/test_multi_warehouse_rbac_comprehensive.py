@@ -9,7 +9,7 @@ Covers:
 6. RBAC isolation: Warehouse Manager cannot modify base product prices (Decision Q4).
 7. Warehouse Manager staff creation permissions (Decision Q5).
 """
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 import pytest
 from sqlalchemy import select
@@ -70,18 +70,17 @@ def test_fefo_180_days_cutoff_enforcement(client, database):
     today = date.today()
     with SessionLocal() as db:
         prod = db.scalar(select(CanonicalProduct).limit(1))
-        sku = db.scalar(select(ProductSku).where(ProductSku.canonical_product_id == prod.id).limit(1))
-        if not sku:
-            sku = ProductSku(
-                canonical_product_id=prod.id,
-                sku_code=f"SKU-FEFO-TEST",
-                conversion_rate=1,
-                base_price=Decimal("45000"),
-                is_default=True,
-                is_active=True,
-            )
-            db.add(sku)
-            db.commit()
+        unique_code = f"SKU-FEFO-TEST-{int(datetime.now().timestamp() * 1000)}"
+        sku = ProductSku(
+            canonical_product_id=prod.id,
+            sku_code=unique_code,
+            conversion_rate=1,
+            base_price=Decimal("45000"),
+            is_default=False,
+            is_active=True,
+        )
+        db.add(sku)
+        db.commit()
 
         wh = db.scalar(select(Warehouse).where(Warehouse.code == "KHO-HCM-01"))
 
@@ -130,7 +129,7 @@ def test_fefo_180_days_cutoff_enforcement(client, database):
 
         # Tạo đơn đặt hàng thử nghiệm
         order = Order(
-            order_code=f"ORD-FEFO-TEST-{int(date.today().day)}",
+            order_code=f"ORD-FEFO-TEST-{int(datetime.now().timestamp() * 1000)}",
             customer_name="Test FEFO Buyer",
             customer_phone="0911223344",
             shipping_address="12 Lê Duẩn, Quận 1, TP. HCM",

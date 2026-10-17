@@ -212,11 +212,11 @@ def validate_cart(payload: CartValidateRequest, db: Session = Depends(get_db)):
 
     for it in payload.items:
         prod = products_map.get(it.product_id)
-        if not prod or prod.publish_status != PublishStatus.PUBLISHED:
+        if not prod:
             results.append({
                 "product_id": it.product_id,
                 "sku_id": it.sku_id,
-                "product_name": prod.canonical_name if prod else f"Sản phẩm #{it.product_id}",
+                "product_name": f"Sản phẩm #{it.product_id}",
                 "uom": "Hộp",
                 "server_price": 0.0,
                 "client_price": it.client_price,
@@ -224,6 +224,23 @@ def validate_cart(payload: CartValidateRequest, db: Session = Depends(get_db)):
                 "available_stock": 0,
                 "is_eligible": False,
                 "rejection_reason": "Sản phẩm không tồn tại hoặc đã ngừng kinh doanh",
+                "can_checkout": False,
+            })
+            all_valid = False
+            continue
+
+        if prod.publish_status != PublishStatus.PUBLISHED:
+            results.append({
+                "product_id": it.product_id,
+                "sku_id": it.sku_id,
+                "product_name": prod.canonical_name,
+                "uom": "Hộp",
+                "server_price": 0.0,
+                "client_price": it.client_price,
+                "price_changed": False,
+                "available_stock": 0,
+                "is_eligible": False,
+                "rejection_reason": "Sản phẩm chưa sẵn sàng để đặt hàng (đang thẩm định hoặc bản thảo)",
                 "can_checkout": False,
             })
             all_valid = False

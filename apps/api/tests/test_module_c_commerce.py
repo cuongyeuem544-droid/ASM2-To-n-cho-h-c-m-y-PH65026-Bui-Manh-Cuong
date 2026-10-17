@@ -65,6 +65,10 @@ class TestModuleCCommerce(unittest.TestCase):
             self.db.add(self.wh)
             self.db.commit()
             self.db.refresh(self.wh)
+        else:
+            self.wh.lat = 10.7981
+            self.wh.lng = 106.6534
+            self.db.commit()
 
         from app.models.entities import User
         from app.models.enums import UserRole

@@ -69,8 +69,8 @@ async def validation_exception_handler(request, exc: RequestValidationError):
         else:
             msg = raw_msg
         msgs.append(f"{field_vi}: {msg}")
-    detail_str = "; ".join(msgs) if msgs else "Thông tin gửi lên không đúng định dạng."
-    return JSONResponse(status_code=422, content={"detail": detail_str, "errors": exc.errors()})
+    from fastapi.encoders import jsonable_encoder
+    return JSONResponse(status_code=422, content={"detail": detail_str, "errors": jsonable_encoder(exc.errors())})
 
 
 from pathlib import Path

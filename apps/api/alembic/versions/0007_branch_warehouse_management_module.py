@@ -71,19 +71,21 @@ def upgrade() -> None:
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False, index=True),
         )
 
-    # 3. Cột mới cho stock_adjustments sử dụng batch_alter_table cho SQLite
+    # 3. Cột mới cho stock_adjustments
     adj_cols = _get_existing_columns(conn, "stock_adjustments")
-    with op.batch_alter_table("stock_adjustments") as batch_op:
-        if "is_large_adjustment" not in adj_cols:
-            batch_op.add_column(sa.Column("is_large_adjustment", sa.Boolean(), server_default=sa.text("0"), nullable=True))
-        if "total_quantity_variance" not in adj_cols:
-            batch_op.add_column(sa.Column("total_quantity_variance", sa.Integer(), server_default=sa.text("0"), nullable=True))
-        if "total_amount_variance" not in adj_cols:
-            batch_op.add_column(sa.Column("total_amount_variance", sa.Numeric(14, 2), server_default=sa.text("0.0"), nullable=True))
-        if "admin_approved_by" not in adj_cols:
-            batch_op.add_column(sa.Column("admin_approved_by", sa.Integer(), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True))
-        if "admin_approved_at" not in adj_cols:
-            batch_op.add_column(sa.Column("admin_approved_at", sa.DateTime(timezone=True), nullable=True))
+    if "is_large_adjustment" not in adj_cols:
+        op.add_column("stock_adjustments", sa.Column("is_large_adjustment", sa.Boolean(), server_default=sa.text("0"), nullable=True))
+    if "total_quantity_variance" not in adj_cols:
+        op.add_column("stock_adjustments", sa.Column("total_quantity_variance", sa.Integer(), server_default=sa.text("0"), nullable=True))
+    if "total_amount_variance" not in adj_cols:
+        op.add_column("stock_adjustments", sa.Column("total_amount_variance", sa.Numeric(14, 2), server_default=sa.text("0.0"), nullable=True))
+    if "admin_approved_by" not in adj_cols:
+        col_args = [sa.Integer()]
+        if conn.dialect.name != "sqlite":
+            col_args.append(sa.ForeignKey("users.id", ondelete="SET NULL"))
+        op.add_column("stock_adjustments", sa.Column("admin_approved_by", *col_args, nullable=True))
+    if "admin_approved_at" not in adj_cols:
+        op.add_column("stock_adjustments", sa.Column("admin_approved_at", sa.DateTime(timezone=True), nullable=True))
 
 
 def downgrade() -> None:

@@ -41,7 +41,7 @@ def upgrade() -> None:
 
         if col_name not in user_cols:
             col_args = [col_type]
-            if fk is not None:
+            if fk is not None and conn.dialect.name != "sqlite":
                 col_args.append(fk)
             kwargs = {"nullable": True}
             if default_val is not None:
