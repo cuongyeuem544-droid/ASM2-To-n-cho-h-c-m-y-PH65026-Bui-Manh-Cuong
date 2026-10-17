@@ -27,6 +27,10 @@ from app.services.scoring import calculate_product_score
 
 DEMO_USERS = [
     ("admin@pharmatrust.vn", "Admin@123456", "Quản trị viên", UserRole.ADMIN),
+    ("manager.hcm@pharmatrust.vn", "Warehouse@2026", "Quản lý kho TP. Hồ Chí Minh", UserRole.WAREHOUSE_MANAGER),
+    ("staff.hcm@pharmatrust.vn", "Staff@2026", "Nhân viên kho TP. Hồ Chí Minh", UserRole.WAREHOUSE_STAFF),
+    ("manager.hn@pharmatrust.vn", "Warehouse@2026", "Quản lý kho Hà Nội", UserRole.WAREHOUSE_MANAGER),
+    ("staff.hn@pharmatrust.vn", "Staff@2026", "Nhân viên kho Hà Nội", UserRole.WAREHOUSE_STAFF),
     ("manager_hn@pharmatrust.vn", "Warehouse@2026", "Quản lý kho Hà Nội", UserRole.WAREHOUSE_MANAGER),
     ("staff_hn@pharmatrust.vn", "Staff@2026", "Nhân viên kho Hà Nội", UserRole.WAREHOUSE_STAFF),
     ("buyer@pharmatrust.vn", "Buyer@123456", "Người mua hàng", UserRole.CUSTOMER),
@@ -35,8 +39,13 @@ DEMO_USERS = [
 
 def seed_users(db):
     for email, password, name, role in DEMO_USERS:
-        if not db.scalar(select(User.id).where(User.email == email)):
-            db.add(User(email=email, password_hash=hash_password(password), full_name=name, role=role))
+        u = db.scalar(select(User).where(User.email == email))
+        if not u:
+            db.add(User(email=email, password_hash=hash_password(password), full_name=name, role=role, is_active=True))
+        else:
+            u.role = role
+            u.is_active = True
+            u.password_hash = hash_password(password)
 
 
 REAL_SOURCES = [

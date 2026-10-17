@@ -42,8 +42,14 @@ function LoginContent() {
   // Redirect if already authenticated
   useEffect(() => {
     if (isAuthenticated) {
-      if (user?.isAdmin) {
+      if (user?.isAdmin || user?.roleCode === "ADMIN") {
         router.push("/admin");
+      } else if (user?.isWarehouseManager || user?.roleCode === "WAREHOUSE_MANAGER") {
+        redirectToAdminPortal("/warehouse/overview", true);
+        router.push("/");
+      } else if (user?.isWarehouseStaff || user?.roleCode === "WAREHOUSE_STAFF") {
+        redirectToAdminPortal("/staff/today", true);
+        router.push("/");
       } else {
         router.push(redirectUrl);
       }
@@ -154,10 +160,22 @@ function LoginContent() {
       if (result.user) {
         saveRecentAccount(result.user.fullName, identifier.trim(), result.user.role);
       }
-      const isTargetAdmin = result.user?.isAdmin;
-      if (isTargetAdmin) {
+      const roleCode = result.user?.roleCode;
+      if (result.user?.isAdmin || roleCode === "ADMIN") {
         setSuccessMessage("Đăng nhập Quản trị viên thành công! Đang mở Cổng Quản Trị...");
         redirectToAdminPortal("", true);
+        setTimeout(() => {
+          router.push("/");
+        }, 850);
+      } else if (result.user?.isWarehouseManager || roleCode === "WAREHOUSE_MANAGER") {
+        setSuccessMessage("Đăng nhập Quản lý kho thành công! Đang mở Cổng Quản Lý Kho...");
+        redirectToAdminPortal("/warehouse/overview", true);
+        setTimeout(() => {
+          router.push("/");
+        }, 850);
+      } else if (result.user?.isWarehouseStaff || roleCode === "WAREHOUSE_STAFF") {
+        setSuccessMessage("Đăng nhập Nhân viên kho thành công! Đang mở Bàn Soạn Hàng...");
+        redirectToAdminPortal("/staff/today", true);
         setTimeout(() => {
           router.push("/");
         }, 850);
@@ -211,10 +229,22 @@ function LoginContent() {
 
     if (res.success) {
       setIsSuccess(true);
-      const isTargetAdmin = res.user?.isAdmin;
-      if (isTargetAdmin) {
+      const roleCode = res.user?.roleCode;
+      if (res.user?.isAdmin || roleCode === "ADMIN") {
         setSuccessMessage("Đăng nhập Quản trị viên thành công! Đang chuyển tới Cổng Quản Trị...");
         redirectToAdminPortal("", true);
+        setTimeout(() => {
+          router.push("/");
+        }, 850);
+      } else if (res.user?.isWarehouseManager || roleCode === "WAREHOUSE_MANAGER") {
+        setSuccessMessage("Đăng nhập Quản lý kho thành công! Đang mở Cổng Quản Lý Kho...");
+        redirectToAdminPortal("/warehouse/overview", true);
+        setTimeout(() => {
+          router.push("/");
+        }, 850);
+      } else if (res.user?.isWarehouseStaff || roleCode === "WAREHOUSE_STAFF") {
+        setSuccessMessage("Đăng nhập Nhân viên kho thành công! Đang mở Bàn Soạn Hàng...");
+        redirectToAdminPortal("/staff/today", true);
         setTimeout(() => {
           router.push("/");
         }, 850);
@@ -697,15 +727,15 @@ function LoginContent() {
                   <button
                     type="button"
                     onClick={() => {
-                      setIdentifier("reviewer@pharmatrust.vn");
-                      setPassword("Reviewer@123456");
+                      setIdentifier("manager.hn@pharmatrust.vn");
+                      setPassword("Warehouse@2026");
                       setUseOtpMode(false);
                       setErrorMessage(null);
                     }}
-                    className="p-2.5 rounded-xl border border-amber-200/80 bg-amber-50/80 hover:bg-amber-100/90 hover:border-amber-300 text-amber-700 text-[11px] font-semibold transition-all text-center group cursor-pointer shadow-xs"
-                    title="Dược sĩ Kiểm duyệt Dữ liệu"
+                    className="p-2.5 rounded-xl border border-sky-200/80 bg-sky-50/80 hover:bg-sky-100/90 hover:border-sky-300 text-sky-700 text-[11px] font-semibold transition-all text-center group cursor-pointer shadow-xs"
+                    title="Quản lý Kho TP. Hà Nội"
                   >
-                    <span className="block group-hover:scale-105 transition-transform">🔬 Dược sĩ</span>
+                    <span className="block group-hover:scale-105 transition-transform">📦 QL Kho HN</span>
                   </button>
                   <button
                     type="button"

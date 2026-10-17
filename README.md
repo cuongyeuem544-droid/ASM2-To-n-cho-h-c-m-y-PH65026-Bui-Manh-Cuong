@@ -25,16 +25,20 @@ Các script tự động hóa được đặt sẵn tại thư mục gốc của
 ### 1. Khởi động toàn bộ hệ sinh thái (Khuyên dùng)
 Nhấp đúp chuột vào:
 ```cmd
-run-local.bat
+start.bat
 ```
-*(Hoặc `run-all.bat`)*
-- Tự động kiểm tra môi trường Node.js và Python.
-- Tự động khởi tạo và nạp dữ liệu mẫu vào `pharmatrust.db` nếu chưa có.
-- Khởi động đồng thời:
-  1. Backend API (Cổng `8000`)
-  2. Storefront Web (Cổng `3000`)
-  3. Admin Data Hub (Cổng `5173`)
-- Tự động mở trình duyệt tại `http://localhost:3000`.
+*(Hoặc `run-local.bat` / `run-all.ps1` - tất cả đều đồng bộ chung một quy trình chuẩn hóa)*
+- Tự động kiểm tra phiên bản Python 3.11/3.12 và Node.js 20+.
+- Tự động tạo và kích hoạt môi trường ảo `.venv` nếu chưa có.
+- Tự động cài đặt dependencies cho Backend (`apps/api`), Storefront (`apps/storefront`) và Admin Web (`apps/web`).
+- Tự động khởi tạo file `.env` từ `.env.example` (bảo toàn cấu hình nếu `.env` đã có).
+- Tự động thực thi Alembic database migration (`upgrade head`) và kiểm tra tính toàn vẹn single head.
+- Tự động đồng bộ schema SQLite và nạp dữ liệu mẫu demo idempotent (kho hàng, tài khoản, danh mục thuốc).
+- Khởi động đồng thời 3 dịch vụ với 3 cửa sổ log độc lập:
+  1. **Backend FastAPI**: [http://localhost:8000](http://localhost:8000) (kèm Health Check tự động)
+  2. **Storefront Next.js**: [http://localhost:3000](http://localhost:3000)
+  3. **Admin Web Portal**: [http://localhost:5173](http://localhost:5173)
+- Tự động mở trình duyệt sau khi Backend Health Check phản hồi HTTP 200 OK.
 
 ### 2. Khởi động riêng lẻ từng dịch vụ
 - **Chỉ chạy Backend API (:8000)**: Chạy `run-backend.bat`
@@ -106,14 +110,16 @@ npm run dev
 
 ---
 
-## 🔐 Tài khoản Demo mặc định
+## 🔐 Danh sách Tài khoản Demo Chuẩn hóa
 
-| Hệ thống | Vai trò | Email đăng nhập | Mật khẩu |
-|---|---|---|---|
-| **Admin Hub & API** | Quản trị viên (Admin) | `admin@pharmatrust.vn` | `Admin@123456` |
-| **Admin Hub & API** | Dược sĩ / Kiểm duyệt (Reviewer) | `reviewer@pharmatrust.vn` | `Reviewer@123456` |
-| **Admin Hub & API** | Người xem (Viewer) | `viewer@pharmatrust.vn` | `Viewer@123456` |
-| **Storefront** | Khách hàng mẫu | `khachhang@h4care.vn` | `KhachHang@123` |
+| Cổng truy cập | Vai trò (Role) | Email đăng nhập | Mật khẩu demo | Quyền hạn chính |
+|---|---|---|---|---|
+| **Admin Portal (:5173)** | Quản trị toàn quyền (`ADMIN`) | `admin@pharmatrust.vn` | `Admin@123456` | Toàn quyền cấu hình, đối soát dữ liệu, quản trị hệ thống đa kho. |
+| **Admin Portal (:5173)** | Quản lý kho HCM (`WAREHOUSE_MANAGER`) | `manager.hcm@pharmatrust.vn` | `Warehouse@2026` | Điều phối đơn hàng, tồn kho, ca đổi trả thuộc Kho HCM. |
+| **Admin Portal (:5173)** | Nhân viên kho HCM (`WAREHOUSE_STAFF`) | `staff.hcm@pharmatrust.vn` | `Staff@2026` | Thực hiện soạn hàng, đóng gói, bàn giao vận chuyển tại Kho HCM. |
+| **Admin Portal (:5173)** | Quản lý kho Hà Nội (`WAREHOUSE_MANAGER`) | `manager.hn@pharmatrust.vn` | `Warehouse@2026` | Điều phối đơn hàng, tồn kho, ca đổi trả thuộc Kho Hà Nội. |
+| **Admin Portal (:5173)** | Nhân viên kho Hà Nội (`WAREHOUSE_STAFF`) | `staff.hn@pharmatrust.vn` | `Staff@2026` | Thực hiện soạn hàng, đóng gói, bàn giao vận chuyển tại Kho Hà Nội. |
+| **Storefront (:3000)** | Khách hàng mua sắm (`CUSTOMER`) | `buyer@pharmatrust.vn` | `Buyer@123456` | Đặt hàng thuốc OTC/Rx, tra cứu đơn hàng, gửi yêu cầu trả hàng. |
 
 ---
 

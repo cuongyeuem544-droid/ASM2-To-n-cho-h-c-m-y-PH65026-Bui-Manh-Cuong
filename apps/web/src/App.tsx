@@ -116,6 +116,7 @@ function ProtectedAdminLayout() {
   // Role redirection for warehouse managers and staff to their dedicated portals
   if (user.role === 'WAREHOUSE_MANAGER') return <Navigate to="/warehouse/overview" replace />
   if (user.role === 'WAREHOUSE_STAFF') return <Navigate to="/staff/today" replace />
+  if (user.role !== 'ADMIN') return <Navigate to="/login" replace />
   return (
     <Layout>
       <Outlet />

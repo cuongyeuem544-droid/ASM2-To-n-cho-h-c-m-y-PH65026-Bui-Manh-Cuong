@@ -5,7 +5,10 @@ export interface AuthUser {
   email?: string;
   avatarUrl?: string;
   role: "ADMIN" | "WAREHOUSE_MANAGER" | "WAREHOUSE_STAFF" | "CUSTOMER" | "Hội viên" | "Hội viên Thân thiết" | "Hội viên VIP" | string;
+  roleCode?: "ADMIN" | "WAREHOUSE_MANAGER" | "WAREHOUSE_STAFF" | "CUSTOMER" | string;
   isAdmin?: boolean;
+  isWarehouseManager?: boolean;
+  isWarehouseStaff?: boolean;
   points?: number;
   createdAt?: string;
 }
@@ -54,6 +57,8 @@ export interface AuthContextType {
   user: AuthUser | null;
   isAuthenticated: boolean;
   isAdmin: boolean;
+  isWarehouseManager: boolean;
+  isWarehouseStaff: boolean;
   isLoading: boolean;
   loginWithPhone: (phone: string, otp: string) => Promise<{ success: boolean; error?: string; user?: AuthUser }>;
   loginWithPassword: (identifier: string, password: string) => Promise<{ success: boolean; error?: string; user?: AuthUser }>;

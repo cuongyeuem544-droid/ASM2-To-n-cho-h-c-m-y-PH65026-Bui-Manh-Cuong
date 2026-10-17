@@ -84,10 +84,18 @@ def seed_demo_data(db: Session, force: bool = False):
     print("[1/7] Seeding Users...")
     users_data = [
         ("admin@pharmatrust.vn", "Admin@123456", "Quản Trị Viên Hệ Thống", UserRole.ADMIN, "0901234561"),
-        ("reviewer@pharmatrust.vn", "Reviewer@123456", "Quản Lý Kho Hà Nội (Cũ: Dược Sĩ)", UserRole.WAREHOUSE_MANAGER, "0901234562"),
-        ("viewer@pharmatrust.vn", "Viewer@123456", "Nhân Viên Kho Hà Nội (Cũ: Tra Cứu)", UserRole.WAREHOUSE_STAFF, "0901234563"),
+        ("manager.hcm@pharmatrust.vn", "Warehouse@2026", "Quản Lý Kho TP. Hồ Chí Minh", UserRole.WAREHOUSE_MANAGER, "0901234564"),
+        ("staff.hcm@pharmatrust.vn", "Staff@2026", "Nhân Viên Soạn Hàng HCM", UserRole.WAREHOUSE_STAFF, "0901234565"),
+        ("manager.hn@pharmatrust.vn", "Warehouse@2026", "Quản Lý Kho TP. Hà Nội", UserRole.WAREHOUSE_MANAGER, "0901234562"),
+        ("staff.hn@pharmatrust.vn", "Staff@2026", "Nhân Viên Soạn Hàng HN", UserRole.WAREHOUSE_STAFF, "0901234563"),
         ("buyer@pharmatrust.vn", "Buyer@123456", "Khách Hàng Mẫu Nguyễn Văn An", UserRole.CUSTOMER, "0901234567"),
+        # Legacy accounts compatibility: mapped to official warehouse roles without displaying legacy titles
+        ("reviewer@pharmatrust.vn", "Warehouse@2026", "Quản Lý Kho (Tài khoản cũ)", UserRole.WAREHOUSE_MANAGER, "0901234568"),
+        ("viewer@pharmatrust.vn", "Staff@2026", "Nhân Viên Kho (Tài khoản cũ)", UserRole.WAREHOUSE_STAFF, "0901234569"),
     ]
+
+    is_demo = settings.demo_mode or os.getenv("DEMO_MODE", "").lower() in ("true", "1")
+    is_dev = getattr(settings, "app_env", "development").lower() in ("development", "dev", "local", "test")
 
     buyer_user = None
     for email, pwd, name, role, phone in users_data:
@@ -110,6 +118,10 @@ def seed_demo_data(db: Session, force: bool = False):
             u.full_name = name
             u.phone = phone
             u.is_active = True
+            if is_demo and is_dev:
+                u.password_hash = hash_password(pwd)
+                if hasattr(u, "must_change_password"):
+                    u.must_change_password = False
         if role == UserRole.CUSTOMER:
             buyer_user = u
 

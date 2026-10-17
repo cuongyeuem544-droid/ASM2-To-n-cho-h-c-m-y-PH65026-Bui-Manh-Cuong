@@ -79,24 +79,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (res.ok) {
         const data = await res.json();
-        const role = data.user?.role || "CUSTOMER";
-        const isStaffOrAdmin = ["ADMIN", "DATA_REVIEWER", "WAREHOUSE_MANAGER", "WAREHOUSE_STAFF"].includes(role);
+        const rawRole = String(data.user?.role || "CUSTOMER").toUpperCase();
+        const isAdmin = rawRole === "ADMIN";
+        const isWarehouseManager = rawRole === "WAREHOUSE_MANAGER";
+        const isWarehouseStaff = rawRole === "WAREHOUSE_STAFF";
         const authUser: AuthUser = {
           id: data.user?.id || `usr_${cleanPhone}`,
           fullName: data.user?.full_name || `Khách hàng ${cleanPhone.slice(-4)}`,
           phone: data.user?.phone || cleanPhone,
           email: data.user?.email || `${cleanPhone}@customer.pharmatrust.vn`,
-          role: role === "ADMIN"
+          role: isAdmin
             ? "Quản trị viên"
-            : role === "WAREHOUSE_MANAGER"
+            : isWarehouseManager
             ? "Quản lý kho"
-            : role === "WAREHOUSE_STAFF"
+            : isWarehouseStaff
             ? "Nhân viên kho"
-            : role === "DATA_REVIEWER"
-            ? "Kiểm duyệt viên"
             : "Hội viên Thân thiết",
-          isAdmin: isStaffOrAdmin,
-          points: data.user?.loyalty_points ?? (isStaffOrAdmin ? 9999 : 50),
+          roleCode: rawRole,
+          isAdmin,
+          isWarehouseManager,
+          isWarehouseStaff,
+          points: data.user?.loyalty_points ?? (isAdmin ? 9999 : 50),
           createdAt: data.user?.created_at?.split("T")[0] || new Date().toISOString().split("T")[0],
         };
         if (data.access_token) {
@@ -141,26 +144,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (res.ok) {
         const data = await res.json();
-        const role = data.user?.role || "CUSTOMER";
-        const isStaffOrAdmin = ["ADMIN", "DATA_REVIEWER", "WAREHOUSE_MANAGER", "WAREHOUSE_STAFF"].includes(role);
+        const rawRole = String(data.user?.role || "CUSTOMER").toUpperCase();
+        const isAdmin = rawRole === "ADMIN";
+        const isWarehouseManager = rawRole === "WAREHOUSE_MANAGER";
+        const isWarehouseStaff = rawRole === "WAREHOUSE_STAFF";
         const authUser: AuthUser = {
           id: data.user?.id || Date.now(),
-          fullName: data.user?.full_name || (isStaffOrAdmin ? "Cán bộ quản trị" : cleanId),
+          fullName: data.user?.full_name || (isAdmin ? "Quản trị viên" : isWarehouseManager ? "Quản lý kho" : isWarehouseStaff ? "Nhân viên kho" : cleanId),
           phone: data.user?.phone || (cleanId.includes("@") ? "" : cleanId),
           email: data.user?.email || (cleanId.includes("@") ? cleanId : ""),
-          role: role === "ADMIN"
+          role: isAdmin
             ? "Quản trị viên"
-            : role === "WAREHOUSE_MANAGER"
+            : isWarehouseManager
             ? "Quản lý kho"
-            : role === "WAREHOUSE_STAFF"
+            : isWarehouseStaff
             ? "Nhân viên kho"
-            : role === "DATA_REVIEWER"
-            ? "Kiểm duyệt viên"
-            : role === "VIEWER"
-            ? "Người xem"
             : "Hội viên Thân thiết",
-          isAdmin: isStaffOrAdmin,
-          points: data.user?.loyalty_points ?? (isStaffOrAdmin ? 9999 : 50),
+          roleCode: rawRole,
+          isAdmin,
+          isWarehouseManager,
+          isWarehouseStaff,
+          points: data.user?.loyalty_points ?? (isAdmin ? 9999 : 50),
           createdAt: data.user?.created_at?.split("T")[0] || new Date().toISOString().split("T")[0],
         };
 
@@ -262,6 +266,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         isAuthenticated: !!user,
         isAdmin: !!user?.isAdmin,
+        isWarehouseManager: !!user?.isWarehouseManager,
+        isWarehouseStaff: !!user?.isWarehouseStaff,
         isLoading,
         loginWithPhone,
         loginWithPassword,

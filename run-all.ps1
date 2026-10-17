@@ -12,14 +12,14 @@ Set-Location $PSScriptRoot
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "         H4CARE / PHARMATRUST - KHOI DONG HE THONG (WINDOWS)" -ForegroundColor Green
 Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "  [1] Web Ban Hang Khach Hang:    http://localhost:3000" -ForegroundColor Yellow
-Write-Host "  [2] Admin Portal (Storefront):  http://localhost:3000/admin" -ForegroundColor Yellow
-Write-Host "  [3] Admin Doc Lap:              http://localhost:8000" -ForegroundColor Yellow
-Write-Host "  [4] API Documentation (Swagger):http://localhost:8000/docs" -ForegroundColor Yellow
+Write-Host "  [1] Web Ban Hang Khach Hang:       http://localhost:3000" -ForegroundColor Yellow
+Write-Host "  [2] Cong Quan Tri Vien & Kho (Web): http://localhost:5173" -ForegroundColor Yellow
+Write-Host "  [3] API Documentation (Swagger):   http://localhost:8000/docs" -ForegroundColor Yellow
+Write-Host "  [4] API Health Check:              http://localhost:8000/api/v1/health" -ForegroundColor Yellow
 Write-Host "======================================================================" -ForegroundColor Cyan
 
 # 1. Kiem tra Python 3.11/3.12 va Node.js 20+
-Write-Host "[1/7] Kiem tra phien ban moi truong (Python 3.11+ & Node.js 20+)..." -ForegroundColor White
+Write-Host "[1/9] Kiem tra phien ban moi truong (Python 3.11+ & Node.js 20+)..." -ForegroundColor White
 
 $venvPython = "$PSScriptRoot\.venv\Scripts\python.exe"
 if (-not (Test-Path $venvPython)) {
@@ -44,14 +44,21 @@ $nodeVer = & node -v
 Write-Host "  -> Node.js version: $nodeVer (Yeu cau: 20+)" -ForegroundColor Gray
 
 # 2. Kich hoat moi truong ao .venv
-Write-Host "[2/7] Kich hoat moi truong Python .venv..." -ForegroundColor White
+Write-Host "[2/9] Kich hoat moi truong Python .venv..." -ForegroundColor White
 $env:VIRTUAL_ENV = "$PSScriptRoot\.venv"
 $env:PATH = "$PSScriptRoot\.venv\Scripts;$env:PATH"
 
-# 3. Kiem tra dependencies
-Write-Host "[3/7] Kiem tra dependencies..." -ForegroundColor White
-$alembicExe = "$PSScriptRoot\.venv\Scripts\alembic.exe"
-if (-not (Test-Path $alembicExe)) {
+# 3. Kiem tra file .env tu .env.example neu chua ton tai
+Write-Host "[3/9] Kiem tra tap tin moi truong .env..." -ForegroundColor White
+if (-not (Test-Path "$PSScriptRoot\.env")) {
+    Write-Host "  -> Chua tim thay .env. Dang tao tu .env.example..." -ForegroundColor Yellow
+    Copy-Item "$PSScriptRoot\.env.example" "$PSScriptRoot\.env"
+}
+
+# 4. Kiem tra dependencies
+Write-Host "[4/9] Kiem tra dependencies backend va frontend..." -ForegroundColor White
+$fastapiPkg = "$PSScriptRoot\.venv\Lib\site-packages\fastapi"
+if (-not (Test-Path $fastapiPkg)) {
     Write-Host "  -> Dang cai dat dependencies backend..." -ForegroundColor Yellow
     & "$venvPython" -m pip install -r "$PSScriptRoot\apps\api\requirements.txt"
 }
@@ -61,35 +68,87 @@ if (-not (Test-Path "$PSScriptRoot\apps\storefront\node_modules")) {
     & npm install
     Pop-Location
 }
+if (-not (Test-Path "$PSScriptRoot\apps\web\node_modules")) {
+    Write-Host "  -> Dang cai dat dependencies web admin (npm install)..." -ForegroundColor Yellow
+    Push-Location "$PSScriptRoot\apps\web"
+    & npm install
+    Pop-Location
+}
 
-# 4. Chay Migration Alembic
-Write-Host "[4/7] Chay Alembic Database Migrations (upgrade head)..." -ForegroundColor White
+# 5. Chay Migration Alembic va kiem tra single head
+Write-Host "[5/9] Chay Alembic Database Migrations (upgrade head)..." -ForegroundColor White
 $env:PYTHONPATH = "$PSScriptRoot\apps\api"
-& "$alembicExe" -c "$PSScriptRoot\apps\api\alembic.ini" upgrade head
+& "$venvPython" -m alembic -c "$PSScriptRoot\apps\api\alembic.ini" upgrade head
 if ($LASTEXITCODE -ne 0) {
     Write-Error "[LOI] Migration that bai! Vui long kiem tra file CSDL pharmatrust.db."
     exit 1
 }
 
-# 5. Seed du lieu Demo Idempotent (neu bat DEMO_MODE hoac CSDL chua co san pham)
-Write-Host "[5/7] Kiem tra va khoi tao du lieu mau (Demo Seeder)..." -ForegroundColor White
+# Kiem tra 1 head
+& "$venvPython" -c "import sys; sys.path.insert(0, 'apps/api'); from alembic.config import Config; from alembic.script import ScriptDirectory; cfg = Config('apps/api/alembic.ini'); s = ScriptDirectory.from_config(cfg); heads = s.get_heads(); print('  -> Alembic heads:', heads); sys.exit(0 if len(heads) == 1 else 1)"
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "[LOI] Phat hien xung dot hoac co nhieu hon 1 Alembic head revision!"
+    exit 1
+}
+
+# 6. Chay dong bo schema an toan va Seed du lieu Demo Idempotent
+Write-Host "[6/9] Dong bo schema SQLite va Seeder du lieu demo..." -ForegroundColor White
+& "$venvPython" "$PSScriptRoot\apps\api\app\db\migrate_schema.py"
 if (-not $SkipSeed) {
     $env:DEMO_MODE = "true"
     & "$venvPython" "$PSScriptRoot\apps\api\scripts\seed_demo_data.py"
 }
 
-# 6. Chay Backend API tai cong 8000
-Write-Host "[6/7] Khoi dong Backend FastAPI tai cong 8000..." -ForegroundColor White
-Start-Process -FilePath "cmd.exe" -ArgumentList "/k title PharmaTrust Backend :8000 && cd /d `"$PSScriptRoot`" && `"$venvPython`" -m uvicorn app.main:app --app-dir apps\api --reload --host 0.0.0.0 --port 8000"
+# 7. Chay Backend API tai cong 8000
+Write-Host "[7/9] Khoi dong Backend FastAPI tai cong 8000..." -ForegroundColor White
+Start-Process -FilePath "cmd.exe" -ArgumentList "/k title PharmaTrust Backend :8000 && cd /d `"$PSScriptRoot`" && call .venv\Scripts\activate.bat && set PYTHONPATH=$PSScriptRoot\apps\api && `"$venvPython`" -m uvicorn app.main:app --app-dir apps\api --reload --host 0.0.0.0 --port 8000"
 
-# 7. Chay Frontend Storefront tai cong 3000
-Write-Host "[7/7] Khoi dong Storefront Next.js tai cong 3000..." -ForegroundColor White
+# 8. Cho Backend Health Check san sang
+Write-Host "[8/9] Cho Backend Health Check phan hoi (GET http://127.0.0.1:8000/api/v1/health)..." -ForegroundColor White
+$backendReady = $false
+for ($i = 0; $i -lt 35; $i++) {
+    try {
+        $resp = Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/v1/health" -Method Get -TimeoutSec 2 -ErrorAction Stop
+        if ($resp.status -eq "ok") {
+            $backendReady = $true
+            Write-Host "  -> [OK] Backend FastAPI da san sang va ket noi CSDL tot!" -ForegroundColor Green
+            break
+        }
+    } catch {
+        Start-Sleep -Seconds 1
+    }
+}
+
+if (-not $backendReady) {
+    Write-Error "[LOI] Backend khong phan hoi tren http://127.0.0.1:8000/api/v1/health sau 35 giay!"
+    exit 1
+}
+
+# 9. Khoi dong Frontends (Admin Web tren 5173 va Storefront tren 3000)
+Write-Host "[9/9] Khoi dong Admin Web (5173) va Storefront Next.js (3000)..." -ForegroundColor White
+Start-Process -FilePath "cmd.exe" -ArgumentList "/k title PharmaTrust Admin Web :5173 && cd /d `"$PSScriptRoot\apps\web`" && npm run dev -- --host 0.0.0.0 --port 5173"
 Start-Process -FilePath "cmd.exe" -ArgumentList "/k title PharmaTrust Storefront :3000 && cd /d `"$PSScriptRoot\apps\storefront`" && set NEXT_PUBLIC_DEMO_MODE=true && npm run dev -- -p 3000"
 
 Start-Sleep -Seconds 3
 if (-not $Headless) {
     Start-Process "http://localhost:3000"
+    Start-Process "http://localhost:5173"
 }
 
-Write-Host "`n[HOAN TAT] He thong da khoi dong thanh cong tren Windows!" -ForegroundColor Green
-Write-Host "Log duoc hien thi rieng biet tai 2 cua so Command Prompt de khong bi nuot log." -ForegroundColor Gray
+Write-Host "`n======================================================================" -ForegroundColor Cyan
+Write-Host "         HE THONG H4CARE DA KHOI DONG THANH CONG TREN WINDOWS!" -ForegroundColor Green
+Write-Host "======================================================================" -ForegroundColor Cyan
+Write-Host "  - Storefront:      http://localhost:3000" -ForegroundColor White
+Write-Host "  - Admin Portal:    http://localhost:5173" -ForegroundColor White
+Write-Host "  - Swagger API:     http://localhost:8000/docs" -ForegroundColor White
+Write-Host "  - Health Check:    http://localhost:8000/api/v1/health" -ForegroundColor White
+Write-Host "----------------------------------------------------------------------" -ForegroundColor Gray
+Write-Host "  TAI KHOAN DEMO CHUAN:" -ForegroundColor White
+Write-Host "  * Admin:           admin@pharmatrust.vn       / Admin@123456" -ForegroundColor Cyan
+Write-Host "  * QL Kho HCM:      manager.hcm@pharmatrust.vn / Warehouse@2026" -ForegroundColor Cyan
+Write-Host "  * NV Kho HCM:      staff.hcm@pharmatrust.vn   / Staff@2026" -ForegroundColor Cyan
+Write-Host "  * QL Kho HN:       manager.hn@pharmatrust.vn  / Warehouse@2026" -ForegroundColor Cyan
+Write-Host "  * NV Kho HN:       staff.hn@pharmatrust.vn    / Staff@2026" -ForegroundColor Cyan
+Write-Host "  * Khach Hang:      buyer@pharmatrust.vn       / Buyer@123456" -ForegroundColor Cyan
+Write-Host "======================================================================" -ForegroundColor Cyan
+Write-Host "Log duoc hien thi rieng biet tai 3 cua so Command Prompt de khong bi nuot log." -ForegroundColor Gray

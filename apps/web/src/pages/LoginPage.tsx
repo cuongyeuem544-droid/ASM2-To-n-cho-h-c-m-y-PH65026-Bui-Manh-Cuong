@@ -218,8 +218,8 @@ export function LoginPage() {
               <button
                 type="button"
                 onClick={() => {
-                  setEmail('viewer@pharmatrust.vn')
-                  setPassword('Viewer@123456')
+                  setEmail('staff.hn@pharmatrust.vn')
+                  setPassword('Staff@2026')
                   setError('')
                 }}
                 style={{ padding: '6px 8px', borderRadius: '8px', border: '1px solid #fde68a', background: '#fffbeb', color: '#b45309', fontSize: '11px', fontWeight: 600, cursor: 'pointer', textAlign: 'center' }}

@@ -157,46 +157,110 @@ export default function AdminPortalPage() {
                 <Lock className="w-8 h-8" />
               </div>
 
-              <div>
-                <span className="inline-block px-3 py-1 rounded-full bg-amber-50 text-amber-700 text-[11px] font-bold border border-amber-200/80 mb-2">
-                  Khu vực Quản trị Nội bộ
-                </span>
-                <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-                  Yêu Cầu Quyền Quản Trị Viên
-                </h1>
-                <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-                  Khu vực này dành riêng cho Quản trị viên và Dược sĩ phụ trách kiểm duyệt dữ liệu & vận hành hệ thống H4CARE PharmaTrust.
-                </p>
-              </div>
+              {user?.roleCode === "WAREHOUSE_MANAGER" || user?.isWarehouseManager ? (
+                <>
+                  <div>
+                    <span className="inline-block px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-bold border border-emerald-200/80 mb-2">
+                      Vai Trò: Quản Lý Kho
+                    </span>
+                    <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                      Cổng Quản Lý Kho Chi Nhánh
+                    </h1>
+                    <p className="text-xs text-slate-600 mt-2 leading-relaxed">
+                      Xin chào <strong className="text-slate-800">{user.fullName}</strong>. Khu vực Admin Gateway này chỉ dành cho Quản Trị Viên toàn hệ thống. Vui lòng chuyển sang Cổng Quản Lý Kho để vận hành đơn hàng và kho bãi của bạn.
+                    </p>
+                  </div>
+                  <div className="space-y-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => redirectToAdminPortal("/warehouse/overview", false)}
+                      className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs shadow-md hover:shadow-lg transition-all cursor-pointer"
+                    >
+                      <span>Mở Cổng Quản Lý Kho</span>
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                    <Link
+                      href="/"
+                      className="w-full block py-2.5 rounded-xl text-slate-600 hover:text-slate-900 text-xs font-semibold transition-colors"
+                    >
+                      Quay lại Mua sắm
+                    </Link>
+                  </div>
+                </>
+              ) : user?.roleCode === "WAREHOUSE_STAFF" || user?.isWarehouseStaff ? (
+                <>
+                  <div>
+                    <span className="inline-block px-3 py-1 rounded-full bg-teal-50 text-teal-700 text-[11px] font-bold border border-teal-200/80 mb-2">
+                      Vai Trò: Nhân Viên Kho
+                    </span>
+                    <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                      Bàn Làm Việc Nhân Viên Kho
+                    </h1>
+                    <p className="text-xs text-slate-600 mt-2 leading-relaxed">
+                      Xin chào <strong className="text-slate-800">{user.fullName}</strong>. Khu vực Admin Gateway này chỉ dành cho Quản Trị Viên toàn hệ thống. Vui lòng mở Bàn Soạn Hàng Kho để nhận các tác vụ trực ban hôm nay.
+                    </p>
+                  </div>
+                  <div className="space-y-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => redirectToAdminPortal("/staff/today", false)}
+                      className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-700 hover:to-cyan-700 text-white font-bold text-xs shadow-md hover:shadow-lg transition-all cursor-pointer"
+                    >
+                      <span>Mở Bàn Soạn Hàng Kho</span>
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                    <Link
+                      href="/"
+                      className="w-full block py-2.5 rounded-xl text-slate-600 hover:text-slate-900 text-xs font-semibold transition-colors"
+                    >
+                      Quay lại Mua sắm
+                    </Link>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <span className="inline-block px-3 py-1 rounded-full bg-amber-50 text-amber-700 text-[11px] font-bold border border-amber-200/80 mb-2">
+                      Khu vực Quản trị Nội bộ
+                    </span>
+                    <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                      Yêu Cầu Quyền Quản Trị Viên
+                    </h1>
+                    <p className="text-xs text-slate-600 mt-2 leading-relaxed">
+                      Khu vực này dành riêng cho Quản trị viên phụ trách kiểm duyệt dữ liệu & vận hành toàn hệ thống H4CARE PharmaTrust.
+                    </p>
+                  </div>
 
-              {/* Quick Demo Credentials Reminder */}
-              <div className="p-3.5 bg-sky-50/70 rounded-2xl border border-sky-200/80 text-left text-xs space-y-1.5 backdrop-blur-xs">
-                <div className="flex items-center justify-between text-slate-600 font-medium">
-                  <span>Tài khoản Admin:</span>
-                  <span className="font-mono text-sky-800 font-bold">admin@pharmatrust.vn</span>
-                </div>
-                <div className="flex items-center justify-between text-slate-600 font-medium">
-                  <span>Mật khẩu:</span>
-                  <span className="font-mono text-sky-800 font-bold">Admin@123456</span>
-                </div>
-              </div>
+                  {/* Quick Demo Credentials Reminder */}
+                  <div className="p-3.5 bg-sky-50/70 rounded-2xl border border-sky-200/80 text-left text-xs space-y-1.5 backdrop-blur-xs">
+                    <div className="flex items-center justify-between text-slate-600 font-medium">
+                      <span>Tài khoản Admin:</span>
+                      <span className="font-mono text-sky-800 font-bold">admin@pharmatrust.vn</span>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-600 font-medium">
+                      <span>Mật khẩu demo:</span>
+                      <span className="font-mono text-sky-800 font-bold">Admin@123456</span>
+                    </div>
+                  </div>
 
-              <div className="space-y-2 pt-2">
-                <Link
-                  href="/login?redirect=/admin"
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white font-bold text-xs shadow-md hover:shadow-lg transition-all"
-                >
-                  <span>Đăng Nhập Tài Khoản Quản Trị</span>
-                  <ChevronRight className="w-4 h-4" />
-                </Link>
+                  <div className="space-y-2 pt-2">
+                    <Link
+                      href="/login?redirect=/admin"
+                      className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white font-bold text-xs shadow-md hover:shadow-lg transition-all"
+                    >
+                      <span>Đăng Nhập Tài Khoản Quản Trị</span>
+                      <ChevronRight className="w-4 h-4" />
+                    </Link>
 
-                <Link
-                  href="/"
-                  className="w-full block py-2.5 rounded-xl text-slate-600 hover:text-slate-900 text-xs font-semibold transition-colors"
-                >
-                  Quay lại Mua sắm
-                </Link>
-              </div>
+                    <Link
+                      href="/"
+                      className="w-full block py-2.5 rounded-xl text-slate-600 hover:text-slate-900 text-xs font-semibold transition-colors"
+                    >
+                      Quay lại Mua sắm
+                    </Link>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </main>
