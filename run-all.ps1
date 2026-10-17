@@ -3,6 +3,7 @@
 [CmdletBinding()]
 param(
     [switch]$SkipSeed,
+    [switch]$ForceSeed,
     [switch]$Headless
 )
 
@@ -84,12 +85,17 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# 6. Chay dong bo schema an toan va Seed du lieu Demo Idempotent
-Write-Host "[6/9] Dong bo schema SQLite va Seeder du lieu demo..." -ForegroundColor White
-& "$venvPython" "$PSScriptRoot\apps\api\app\db\migrate_schema.py"
-if (-not $SkipSeed) {
-    $env:DEMO_MODE = "true"
-    & "$venvPython" "$PSScriptRoot\apps\api\scripts\seed_demo_data.py"
+# 6. Chay dong bo schema an toan va Seed du lieu Demo Idempotent (neu la lan dau hoac co -ForceSeed)
+$needSeed = (-not (Test-Path "$PSScriptRoot\pharmatrust.db")) -or $ForceSeed
+if ($needSeed) {
+    Write-Host "[6/9] Dong bo schema SQLite va Seeder du lieu demo..." -ForegroundColor White
+    & "$venvPython" "$PSScriptRoot\apps\api\app\db\migrate_schema.py"
+    if (-not $SkipSeed) {
+        $env:DEMO_MODE = "true"
+        & "$venvPython" "$PSScriptRoot\apps\api\scripts\seed_demo_data.py"
+    }
+} else {
+    Write-Host "[6/9] CSDL da san sang. Bo qua buoc Seed de khoi dong sieu toc ~2-3s (dung -ForceSeed neu muon seed lai)." -ForegroundColor Green
 }
 
 # 7. Chay Backend API tai cong 8000

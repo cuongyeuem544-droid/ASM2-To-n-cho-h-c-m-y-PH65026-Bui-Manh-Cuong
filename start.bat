@@ -10,8 +10,21 @@ title H4CARE / PharmaTrust - Windows Ecosystem Launcher
 set "ROOT=%~dp0"
 cd /d "%ROOT%"
 
+set "FORCE_SEED=0"
+if "%~1"=="--seed" set "FORCE_SEED=1"
+if "%~1"=="--reset" set "FORCE_SEED=1"
+if "%~1"=="-s" set "FORCE_SEED=1"
+
+set "IS_FIRST_RUN=0"
+if not exist "pharmatrust.db" set "IS_FIRST_RUN=1"
+if "!FORCE_SEED!"=="1" set "IS_FIRST_RUN=1"
+
 echo ===================================================================================
-echo               H4CARE / PHARMATRUST - KHOI DONG TOAN BO HE THONG - WINDOWS
+if "!IS_FIRST_RUN!"=="1" (
+    echo        H4CARE / PHARMATRUST - KHOI TAO CSDL LAN DAU TIEN / SEED DU LIEU
+) else (
+    echo        H4CARE / PHARMATRUST - KHOI DONG TOC DO CAO - FAST LAUNCH ~2-3s
+)
 echo ===================================================================================
 echo   [1] Cua Hang Truc Tuyen - Storefront:       http://localhost:3000
 echo   [2] Cong Quan Tri Vien va Quan Ly Kho:      http://localhost:5173
@@ -160,21 +173,26 @@ if !errorlevel! neq 0 (
     call :error_exit "10" "Kiem tra Alembic heads" "He thong Alembic co khac 1 head revision"
 )
 
-:: 11. Chay dong bo schema hien co neu thuc su can
-echo.
-echo [11/16] Chay dong bo schema an toan migrate_schema.py...
-.venv\Scripts\python.exe apps\api\app\db\migrate_schema.py
-if !errorlevel! neq 0 (
-    call :error_exit "11" "Dong bo schema SQLite" "migrate_schema.py that bai"
-)
+:: 11 & 12. Chay dong bo schema va Seed du lieu (chi chay khi CSDL chua co hoac khi co co --seed)
+if "!IS_FIRST_RUN!"=="1" (
+    echo.
+    echo [11/16] Chay dong bo schema an toan migrate_schema.py...
+    .venv\Scripts\python.exe apps\api\app\db\migrate_schema.py
+    if !errorlevel! neq 0 (
+        call :error_exit "11" "Dong bo schema SQLite" "migrate_schema.py that bai"
+    )
 
-:: 12. Chay seeder local idempotent
-echo.
-echo [12/16] Chay Seeder du lieu demo idempotent: Tai khoan, Vai tro, Kho hang...
-set DEMO_MODE=true
-.venv\Scripts\python.exe apps\api\scripts\seed_demo_data.py
-if !errorlevel! neq 0 (
-    call :error_exit "12" "Seed du lieu demo" "seed_demo_data.py that bai"
+    echo.
+    echo [12/16] Chay Seeder du lieu demo idempotent: Tai khoan, Vai tro, Kho hang...
+    set DEMO_MODE=true
+    .venv\Scripts\python.exe apps\api\scripts\seed_demo_data.py
+    if !errorlevel! neq 0 (
+        call :error_exit "12" "Seed du lieu demo" "seed_demo_data.py that bai"
+    )
+) else (
+    echo.
+    echo [11-12/16] CSDL da san sang - Bo qua Seed de khoi dong sieu toc ~2-3s.
+    echo            - Meo: Dung start.bat --seed neu ban muon nap lai toan bo du lieu mau.
 )
 
 :: 13. Khoi dong Backend tai cong 8000
