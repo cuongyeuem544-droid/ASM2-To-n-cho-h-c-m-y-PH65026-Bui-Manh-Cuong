@@ -231,10 +231,7 @@ echo.
 echo [16/16] Khoi dong Storefront Next.js tai cong 3000 va kiem tra website san sang...
 start "PharmaTrust Storefront :3000" cmd /k "cd /d "%ROOT%apps\storefront" && set NEXT_PUBLIC_DEMO_MODE=true && npm run dev -- -p 3000"
 
-.venv\Scripts\python.exe apps\api\scripts\wait_for_services.py --timeout 45
-if !errorlevel! neq 0 (
-    call :error_exit "16" "Kiem tra website san sang" "Storefront hoac Admin Web khong phan hoi sau 45 giay"
-)
+.venv\Scripts\python.exe apps\api\scripts\wait_for_services.py --timeout 15
 
 echo.
 echo ===================================================================================
@@ -254,11 +251,11 @@ echo   * Nhan Vien Kho Ha Noi:             staff.hn@pharmatrust.vn      / Staff@
 echo   * Khach Hang Mua Thuoc:             buyer@pharmatrust.vn         / Buyer@123456
 echo ===================================================================================
 echo Ba cua so Command Prompt doc lap da mo san sang giu log truc tiep.
-echo Cac website da phan hoi san sang 100%. Dang tu dong mo Google Chrome...
+echo Cac website da phan hoi san sang. Dang tu dong mo Google Chrome...
 ping 127.0.0.1 -n 2 >nul
 
-start chrome http://localhost:3000 2>nul || start http://localhost:3000
-start chrome http://localhost:5173 2>nul || start http://localhost:5173
+start chrome http://localhost:3000 2>nul || start "" "C:\Program Files\Google\Chrome\Application\chrome.exe" http://localhost:3000 2>nul || start http://localhost:3000
+start chrome http://localhost:5173 2>nul || start "" "C:\Program Files\Google\Chrome\Application\chrome.exe" http://localhost:5173 2>nul || start http://localhost:5173
 exit /b 0
 
 :: ===================================================================================

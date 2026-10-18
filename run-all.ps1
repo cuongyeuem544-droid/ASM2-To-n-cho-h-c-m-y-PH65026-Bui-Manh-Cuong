@@ -134,8 +134,13 @@ if (-not $Headless) {
         Start-Process "chrome.exe" "http://localhost:3000" -ErrorAction Stop
         Start-Process "chrome.exe" "http://localhost:5173" -ErrorAction Stop
     } catch {
-        Start-Process "http://localhost:3000"
-        Start-Process "http://localhost:5173"
+        try {
+            Start-Process "C:\Program Files\Google\Chrome\Application\chrome.exe" "http://localhost:3000" -ErrorAction Stop
+            Start-Process "C:\Program Files\Google\Chrome\Application\chrome.exe" "http://localhost:5173" -ErrorAction Stop
+        } catch {
+            Start-Process "http://localhost:3000"
+            Start-Process "http://localhost:5173"
+        }
     }
 }
 
