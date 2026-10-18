@@ -105,7 +105,10 @@ async function callGemini(
   currentMessage: string,
   timeoutMs: number
 ): Promise<string> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  let targetModel =
+    model === "gemini-1.5-flash" || model === "gemini-2.0-flash" || model === "gemini-2.5-flash"
+      ? "gemini-3.5-flash"
+      : model;
 
   const rawContents = [
     ...history.slice(-8).map((m) => ({
@@ -141,21 +144,40 @@ async function callGemini(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: {
-          parts: [{ text: systemPrompt }],
-        },
-        contents,
-        generationConfig: {
-          temperature: 0.2,
-          maxOutputTokens: 800,
-        },
-      }),
-      signal: controller.signal,
-    });
+    const postPayload = {
+      systemInstruction: {
+        parts: [{ text: systemPrompt }],
+      },
+      contents,
+      generationConfig: {
+        temperature: 0.2,
+        maxOutputTokens: 800,
+      },
+    };
+
+    let res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(postPayload),
+        signal: controller.signal,
+      }
+    );
+
+    // Tự động thử fallback sang gemini-3.5-flash nếu model cũ bị 404 deprecated
+    if (res.status === 404 && targetModel !== "gemini-3.5-flash") {
+      targetModel = "gemini-3.5-flash";
+      res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(postPayload),
+          signal: controller.signal,
+        }
+      );
+    }
 
     clearTimeout(timer);
 
@@ -538,7 +560,7 @@ export async function getAiChatResponse(
   // TH1: Gọi Google Gemini API
   if (geminiKey || (provider === "gemini" && genericKey)) {
     const key = geminiKey || genericKey;
-    const model = process.env.AI_MODEL || "gemini-1.5-flash";
+    const model = process.env.AI_MODEL || "gemini-3.5-flash";
     try {
       const reply = await callGemini(key, model, systemPrompt, history, cleanInput, timeoutMs);
       return {

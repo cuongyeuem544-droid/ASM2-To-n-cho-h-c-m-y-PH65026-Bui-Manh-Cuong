@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 from app.api import (
+    admin_chatbot,
     admin_classification,
     admin_exchanges,
     admin_refunds,
@@ -63,6 +64,7 @@ api_router.include_router(admin_returns.router)
 api_router.include_router(admin_refunds.router)
 api_router.include_router(admin_exchanges.router)
 api_router.include_router(chat.router)
+api_router.include_router(admin_chatbot.router)
 api_router.include_router(ai_chat_history.router)
 api_router.include_router(live_chat.router)
 api_router.include_router(admin_classification.router)

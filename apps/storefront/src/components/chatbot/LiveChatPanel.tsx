@@ -61,6 +61,9 @@ interface LiveChatPanelProps {
 const STORAGE_SESSION_KEY = "h4care_live_chat_session_code";
 const STORAGE_GUEST_TOKEN_KEY = "h4care_live_chat_guest_token";
 
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
+const WS_BASE = API_BASE.replace(/^http/, "ws");
+
 /**
  * Phát âm thanh thông báo nhẹ nhàng bằng Web Audio API
  */
@@ -99,6 +102,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
   const [messages, setMessages] = useState<LiveChatMessageItem[]>([]);
   const [inputText, setInputText] = useState("");
   const [isInitializing, setIsInitializing] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
@@ -135,7 +139,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
   useEffect(() => {
     const fetchStaffStatus = async () => {
       try {
-        const res = await fetch("http://127.0.0.1:8000/api/v1/live-chat/staff-status");
+        const res = await fetch(`${API_BASE}/api/v1/live-chat/staff-status`);
         if (res.ok) {
           const data = await res.json();
           setStaffOnlineInfo(data);
@@ -169,7 +173,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
       const authToken = localStorage.getItem("pharmatrust_access_token") || localStorage.getItem("token");
       if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
 
-      const res = await fetch(`http://127.0.0.1:8000/api/v1/live-chat/sessions/${code}`, { headers });
+      const res = await fetch(`${API_BASE}/api/v1/live-chat/sessions/${code}`, { headers });
       if (res.ok) {
         const data: LiveChatSessionData = await res.json();
         setSession(data);
@@ -195,7 +199,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
 
     const sessionCode = session.session_code;
     const guestToken = session.guest_session_token || "";
-    const wsUrl = `ws://127.0.0.1:8000/api/v1/live-chat/ws/client/${sessionCode}?token=${guestToken}`;
+    const wsUrl = `${WS_BASE}/api/v1/live-chat/ws/client/${sessionCode}?token=${guestToken}`;
 
     let socket: WebSocket;
     let pingTimer: any;
@@ -293,6 +297,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
   // 4. Bắt đầu phiên Live Chat
   const handleStartSession = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    setFormError(null);
     setIsInitializing(true);
 
     try {
@@ -311,7 +316,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
         shared_ai_history: includeAiContext && !!handoffContext,
       };
 
-      const res = await fetch("http://127.0.0.1:8000/api/v1/live-chat/sessions", {
+      const res = await fetch(`${API_BASE}/api/v1/live-chat/sessions`, {
         method: "POST",
         headers,
         body: JSON.stringify(bodyPayload),
@@ -333,7 +338,12 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
 
       if (onClearHandoff) onClearHandoff();
     } catch (err: any) {
-      alert(err.message || "Đã xảy ra sự cố khi kết nối tới nhân viên tư vấn.");
+      console.error("[LiveChat Init Error]:", err);
+      const msg =
+        err.message === "Failed to fetch"
+          ? "Không thể kết nối đến máy chủ hỗ trợ trực tiếp. Vui lòng kiểm tra lại kết nối mạng hoặc thử lại sau."
+          : (err.detail || err.message || "Đã xảy ra sự cố khi kết nối tới nhân viên tư vấn.");
+      setFormError(msg);
     } finally {
       setIsInitializing(false);
     }
@@ -356,7 +366,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
         const formData = new FormData();
         formData.append("file", selectedFile);
 
-        const uploadRes = await fetch("http://127.0.0.1:8000/api/v1/live-chat/upload", {
+        const uploadRes = await fetch(`${API_BASE}/api/v1/live-chat/upload`, {
           method: "POST",
           body: formData,
         });
@@ -367,7 +377,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
         }
 
         const uploadData = await uploadRes.json();
-        uploadedUrl = `http://127.0.0.1:8000${uploadData.url}`;
+        uploadedUrl = `${API_BASE}${uploadData.url}`;
         uploadedType = uploadData.content_type;
       } catch (err: any) {
         alert(err.message || "Lỗi tải ảnh");
@@ -405,7 +415,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
       const authToken = localStorage.getItem("pharmatrust_access_token") || localStorage.getItem("token");
       if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
 
-      const res = await fetch(`http://127.0.0.1:8000/api/v1/live-chat/sessions/${session.session_code}/messages`, {
+      const res = await fetch(`${API_BASE}/api/v1/live-chat/sessions/${session.session_code}/messages`, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -464,7 +474,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
       const authToken = localStorage.getItem("pharmatrust_access_token") || localStorage.getItem("token");
       if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
 
-      await fetch(`http://127.0.0.1:8000/api/v1/live-chat/sessions/${session.session_code}/close`, {
+      await fetch(`${API_BASE}/api/v1/live-chat/sessions/${session.session_code}/close`, {
         method: "POST",
         headers,
         body: JSON.stringify({ rating: ratingVal, feedback: feedbackText }),
@@ -493,7 +503,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
       const authToken = localStorage.getItem("pharmatrust_access_token") || localStorage.getItem("token");
       if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
 
-      await fetch(`http://127.0.0.1:8000/api/v1/live-chat/sessions/${session.session_code}/close`, {
+      await fetch(`${API_BASE}/api/v1/live-chat/sessions/${session.session_code}/close`, {
         method: "POST",
         headers,
         body: JSON.stringify({ rating: ratingVal, feedback: feedbackText }),
@@ -594,6 +604,13 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
               />
             </div>
           </div>
+
+          {formError && (
+            <div className="mt-3 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+              <span className="leading-relaxed">{formError}</span>
+            </div>
+          )}
 
           <div className="pt-4 space-y-2">
             <button

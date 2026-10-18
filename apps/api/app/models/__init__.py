@@ -94,6 +94,17 @@ from app.models.chat_models import (
     LiveChatMessage,
     LiveChatSession,
 )
+from app.models.chatbot import (
+    ChatbotAuditLog,
+    ChatbotSettings,
+    ChatFeedback,
+    ChatKnowledgeItem,
+    ChatKnowledgeSource,
+    ChatMessage,
+    ChatPromptVersion,
+    ChatProviderAttempt,
+    ChatSession,
+)
 
 __all__ = [
     "AdminAlert",
@@ -178,4 +189,13 @@ __all__ = [
     "AIChatMessage",
     "LiveChatMessage",
     "LiveChatSession",
+    "ChatbotAuditLog",
+    "ChatbotSettings",
+    "ChatFeedback",
+    "ChatKnowledgeItem",
+    "ChatKnowledgeSource",
+    "ChatMessage",
+    "ChatPromptVersion",
+    "ChatProviderAttempt",
+    "ChatSession",
 ]

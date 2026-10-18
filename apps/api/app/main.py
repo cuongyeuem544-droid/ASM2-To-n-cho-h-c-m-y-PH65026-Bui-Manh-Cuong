@@ -33,7 +33,7 @@ app.add_middleware(
     allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Order-Token", "X-Idempotency-Key"],
+    allow_headers=["*"],
 )
 app.add_middleware(RateLimitMiddleware)
 app.include_router(api_router)
@@ -69,6 +69,7 @@ async def validation_exception_handler(request, exc: RequestValidationError):
         else:
             msg = raw_msg
         msgs.append(f"{field_vi}: {msg}")
+    detail_str = "; ".join(msgs) if msgs else "Dữ liệu không hợp lệ"
     from fastapi.encoders import jsonable_encoder
     return JSONResponse(status_code=422, content={"detail": detail_str, "errors": jsonable_encoder(exc.errors())})
 

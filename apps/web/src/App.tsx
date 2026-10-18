@@ -33,6 +33,7 @@ const ReturnsPage = lazy(() => import('./pages/ReturnsPage').then(module => ({ d
 const RefundsPage = lazy(() => import('./pages/RefundsPage').then(module => ({ default: module.RefundsPage })))
 const ExchangesPage = lazy(() => import('./pages/ExchangesPage').then(module => ({ default: module.ExchangesPage })))
 const LiveChatPage = lazy(() => import('./pages/LiveChatPage').then(module => ({ default: module.LiveChatPage })))
+const ChatbotAdminPage = lazy(() => import('./pages/admin/ChatbotAdminPage').then(module => ({ default: module.ChatbotAdminPage })))
 
 // Warehouse Manager Pages & Layout
 const WarehouseManagerLayout = lazy(() =>
@@ -186,6 +187,8 @@ export default function App() {
             <Route path="users" element={<AdminOnly><UsersPage /></AdminOnly>} />
             <Route path="audit" element={<AdminOnly><AuditPage /></AdminOnly>} />
             <Route path="live-chat" element={<LiveChatPage />} />
+            <Route path="admin/chatbot" element={<ChatbotAdminPage />} />
+            <Route path="chatbot" element={<ChatbotAdminPage />} />
           </Route>
 
           {/* 2. Warehouse Manager Dedicated Portal Routes */}

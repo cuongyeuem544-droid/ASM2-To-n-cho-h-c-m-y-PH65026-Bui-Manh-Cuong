@@ -5,6 +5,7 @@ import {
   ArrowLeftRight,
   Boxes,
   Building2,
+  Bot,
   Database,
   ExternalLink,
   FileInput,
@@ -104,6 +105,7 @@ const navGroups: NavGroup[] = [
       { to: '/emails', label: 'Hộp thư & Outbox', icon: Mail, adminOnly: true },
       { to: '/users', label: 'Quản lý người dùng', icon: Users, adminOnly: true },
       { to: '/audit', label: 'Nhật ký thao tác', icon: History, adminOnly: true },
+      { to: '/admin/chatbot', label: 'Quản lý Chatbot AI', icon: Bot, adminOnly: true },
     ],
   },
 ]
