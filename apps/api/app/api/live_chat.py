@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import re
@@ -157,10 +158,37 @@ def verify_session_access(
         return
 
     # Nếu là khách vãng lai khớp guest_token
-    if guest_token and session.guest_session_token and guest_token == session.guest_session_token:
+    if guest_token and session.guest_session_token and hmac.compare_digest(guest_token, session.guest_session_token):
         return
 
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Bạn không có quyền truy cập phiên trò chuyện này")
+
+
+def resolve_websocket_user(db: Session, token: Optional[str]) -> Optional[User]:
+    """Validate JWT, active user, and token revocation before granting socket access."""
+    if not token:
+        return None
+    try:
+        payload = decode_token(token, "access")
+        user_id = int(payload["sub"])
+    except Exception:
+        return None
+    user = db.scalar(select(User).where(User.id == user_id, User.is_active.is_(True)))
+    if not user:
+        return None
+    version = payload.get("token_version")
+    if version is not None and version != (user.token_version or 1):
+        return None
+    return user
+
+
+def require_assigned_chat_staff(session: LiveChatSession, staff_user: User) -> None:
+    """Only assigned staff or an administrator may act on an active session."""
+    if session.assigned_staff_id not in (None, staff_user.id) and staff_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cuộc trò chuyện đã được phân công cho nhân viên khác.",
+        )
 
 
 # ===================== ENDPOINTS KHÁCH HÀNG =====================
@@ -217,7 +245,7 @@ async def create_or_resume_session(
             db.commit()
             db.refresh(existing_session)
 
-        return _build_session_detail(existing_session)
+        return _build_session_detail(existing_session, reveal_guest_token=True)
 
     # 2. Tạo phiên mới
     date_prefix = datetime.now(UTC).strftime("%y%m%d")
@@ -302,7 +330,7 @@ async def create_or_resume_session(
         },
     )
 
-    return _build_session_detail(new_session)
+    return _build_session_detail(new_session, reveal_guest_token=True)
 
 
 @router.get("/sessions/{session_code}")
@@ -323,7 +351,7 @@ def get_session_detail(
     effective_guest_token = x_chat_guest_token or guest_token
     verify_session_access(session, current_user, effective_guest_token)
 
-    return _build_session_detail(session)
+    return _build_session_detail(session, reveal_guest_token=(current_user is None or current_user.role == UserRole.CUSTOMER))
 
 
 @router.post("/sessions/{session_code}/messages")
@@ -844,7 +872,18 @@ async def client_websocket(
     session_code: str,
     token: Optional[str] = Query(None),
 ):
-    """WebSocket kết nối realtime cho khách hàng."""
+    """Require session ownership before subscribing to private chat events."""
+    with SessionLocal() as db:
+        session = db.scalar(select(LiveChatSession).where(LiveChatSession.session_code == session_code))
+        user = resolve_websocket_user(db, token)
+        owns_session = bool(session and user and session.customer_id == user.id)
+        guest_authorized = bool(
+            session and token and session.guest_session_token
+            and hmac.compare_digest(token, session.guest_session_token)
+        )
+        if not (owns_session or guest_authorized):
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
     await chat_manager.connect_client(session_code, websocket)
     try:
         while True:
@@ -868,19 +907,15 @@ async def staff_websocket(
     token: Optional[str] = Query(None),
 ):
     """WebSocket kết nối realtime cho nhân viên / Admin."""
-    if not token:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
-
-    try:
-        payload = decode_token(token, "access")
-        user_id = int(payload.get("sub", 0))
-        if not user_id:
+    with SessionLocal() as db:
+        user = resolve_websocket_user(db, token)
+        if not user or user.role not in (
+            UserRole.ADMIN, UserRole.PHARMACIST,
+            UserRole.WAREHOUSE_MANAGER, UserRole.WAREHOUSE_STAFF,
+        ):
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
-    except Exception:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
+        user_id = user.id
 
     await chat_manager.connect_staff(user_id, websocket)
     try:
@@ -917,7 +952,7 @@ def _build_message_response(msg: LiveChatMessage) -> dict[str, Any]:
     }
 
 
-def _build_session_detail(session: LiveChatSession) -> dict[str, Any]:
+def _build_session_detail(session: LiveChatSession, reveal_guest_token: bool = False) -> dict[str, Any]:
     messages_data = [_build_message_response(m) for m in session.messages]
     assigned_staff_title = get_role_title(session.assigned_staff) if session.assigned_staff else None
 
@@ -928,7 +963,7 @@ def _build_session_detail(session: LiveChatSession) -> dict[str, Any]:
         "customer_email": session.customer_email,
         "customer_phone": session.customer_phone,
         "customer_id": session.customer_id,
-        "guest_session_token": session.guest_session_token,
+        "guest_session_token": session.guest_session_token if reveal_guest_token else None,
         "assigned_staff_id": session.assigned_staff_id,
         "assigned_staff_name": session.assigned_staff.full_name if session.assigned_staff else None,
         "assigned_staff_title": assigned_staff_title,
