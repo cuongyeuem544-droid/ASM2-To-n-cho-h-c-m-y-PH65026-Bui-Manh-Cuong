@@ -109,6 +109,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [staffOnlineInfo, setStaffOnlineInfo] = useState<{ is_online: boolean; online_count: number } | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
+  const [authFailed, setAuthFailed] = useState(false);
 
   // Form đăng ký thông tin cho khách vãng lai
   const [customerName, setCustomerName] = useState("");
@@ -189,7 +190,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
 
   // 3. Quản lý WebSocket kết nối Realtime
   useEffect(() => {
-    if (!session || session.status === "CLOSED") {
+    if (!session || session.status === "CLOSED" || authFailed) {
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
@@ -198,8 +199,10 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
     }
 
     const sessionCode = session.session_code;
-    const guestToken = session.guest_session_token || "";
-    const wsUrl = `${WS_BASE}/api/v1/live-chat/ws/client/${sessionCode}?token=${guestToken}`;
+    const authToken = typeof window !== "undefined" ? (localStorage.getItem("pharmatrust_access_token") || localStorage.getItem("token") || "") : "";
+    const guestToken = session.guest_session_token || (typeof window !== "undefined" ? (localStorage.getItem(STORAGE_GUEST_TOKEN_KEY) || "") : "");
+    const activeToken = authToken || guestToken;
+    const wsUrl = `${WS_BASE}/api/v1/live-chat/ws/client/${sessionCode}?token=${encodeURIComponent(activeToken)}`;
 
     let socket: WebSocket;
     let pingTimer: any;
@@ -266,9 +269,13 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
         }
       };
 
-      socket.onclose = () => {
+      socket.onclose = (event) => {
         setWsConnected(false);
         clearInterval(pingTimer);
+        if (event.code === 4401 || event.code === 4403) {
+          console.warn("LiveChat WebSocket authentication rejected:", event.code);
+          setAuthFailed(true);
+        }
       };
 
       socket.onerror = () => {
@@ -278,9 +285,9 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
       setWsConnected(false);
     }
 
-    // Fallback polling mỗi 5 giây khi WebSocket không kết nối
+    // Fallback polling mỗi 5 giây khi WebSocket không kết nối (dừng nếu lỗi xác thực)
     const pollInterval = setInterval(() => {
-      if (!wsConnected && sessionCode) {
+      if (!wsConnected && sessionCode && !authFailed) {
         loadSessionDetail(sessionCode, session.guest_session_token || null);
       }
     }, 5000);
@@ -292,7 +299,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
         socket.close();
       }
     };
-  }, [session?.session_code, session?.status]);
+  }, [session?.session_code, session?.status, authFailed]);
 
   // 4. Bắt đầu phiên Live Chat
   const handleStartSession = async (e?: React.FormEvent) => {
@@ -649,6 +656,29 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
   // GIAO DIỆN 2: TRONG CUỘC TRÒ CHUYỆN (WAITING / ACTIVE / CLOSED)
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-50 overflow-hidden relative">
+      {/* Cảnh báo lỗi xác thực WebSocket */}
+      {authFailed && (
+        <div className="bg-rose-50 border-b border-rose-200 px-3.5 py-2.5 flex items-center justify-between text-xs text-rose-800 shrink-0">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>Phiên kết nối đã hết hạn hoặc xác thực không hợp lệ.</span>
+          </div>
+          <button
+            onClick={() => {
+              if (typeof window !== "undefined") {
+                localStorage.removeItem(STORAGE_SESSION_KEY);
+                localStorage.removeItem(STORAGE_GUEST_TOKEN_KEY);
+              }
+              setSession(null);
+              setAuthFailed(false);
+            }}
+            className="px-2.5 py-1 bg-rose-600 text-white rounded-lg text-[11px] font-semibold hover:bg-rose-700 transition-colors shrink-0"
+          >
+            Bắt đầu phiên mới
+          </button>
+        </div>
+      )}
+
       {/* Thanh trạng thái phiên Live Chat */}
       <div className="px-3.5 py-2 bg-white border-b border-slate-200/80 flex items-center justify-between text-xs shrink-0 shadow-2xs">
         <div className="flex items-center gap-2 truncate">

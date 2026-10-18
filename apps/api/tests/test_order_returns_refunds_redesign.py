@@ -612,6 +612,7 @@ def test_14_staff_inspects_and_submits(client, staff_hcm_headers):
                     "seal_intact": True,
                     "batch_matched": True,
                     "expiry_matched": True,
+                    "storage_condition_ok": True,
                     "suggested_action": "RESTOCK",
                 }
             ]
@@ -822,8 +823,55 @@ def test_25_stock_disposition_restock(client, manager_hcm_headers):
         wh_hcm = db.scalar(select(Warehouse).where(Warehouse.code == "KHO-HCM-01"))
         case = db.scalar(select(WarehouseReturnCase).where(WarehouseReturnCase.warehouse_id == wh_hcm.id))
         case.status = ReturnStatus.REFUNDED.value
+        case.disposition = None
         for it in case.items:
             it.approved_quantity = it.requested_quantity
+            alloc = db.scalar(select(OrderItemBatchAllocation).where(OrderItemBatchAllocation.order_item_id == it.order_item_id))
+            if not alloc:
+                sku = db.scalar(select(ProductSku).where(ProductSku.canonical_product_id == it.product_id))
+                if not sku:
+                    sku = ProductSku(
+                        canonical_product_id=it.product_id,
+                        sku_code=f"SKU-TEST-{it.product_id}",
+                        uom="Hộp",
+                        base_price=Decimal("50000"),
+                        is_active=True,
+                    )
+                    db.add(sku)
+                    db.flush()
+                batch = db.scalar(select(InventoryBatch).where(InventoryBatch.sku_id == sku.id))
+                if not batch:
+                    batch = InventoryBatch(
+                        sku_id=sku.id,
+                        batch_number=f"BAT-TEST-{uuid.uuid4().hex[:6].upper()}",
+                        manufacture_date=date.today() - timedelta(days=60),
+                        expiry_date=date.today() + timedelta(days=365),
+                        status=BatchStatus.ACTIVE,
+                    )
+                    db.add(batch)
+                    db.flush()
+                alloc = OrderItemBatchAllocation(
+                    order_item_id=it.order_item_id,
+                    batch_id=batch.id,
+                    allocated_quantity=max(it.requested_quantity, 5),
+                    warehouse_id=wh_hcm.id,
+                )
+                db.add(alloc)
+                batch_stock = db.scalar(
+                    select(WarehouseBatchStock).where(
+                        WarehouseBatchStock.warehouse_id == wh_hcm.id,
+                        WarehouseBatchStock.batch_id == batch.id,
+                    )
+                )
+                if not batch_stock:
+                    batch_stock = WarehouseBatchStock(
+                        warehouse_id=wh_hcm.id,
+                        batch_id=batch.id,
+                        quantity_on_hand=50,
+                        quantity_available=50,
+                        quantity_reserved=0,
+                    )
+                    db.add(batch_stock)
         db.commit()
         case_code = case.case_code
 
@@ -839,7 +887,7 @@ def test_25_stock_disposition_restock(client, manager_hcm_headers):
         headers=manager_hcm_headers,
         json={"disposition": "RESTOCK", "note": "Thuốc đạt chuẩn GSP nhập lại kho"},
     )
-    assert res.status_code == 200
+    assert res.status_code == 200, res.json()
 
     with SessionLocal() as db:
         c = db.scalar(select(WarehouseReturnCase).where(WarehouseReturnCase.case_code == case_code))

@@ -115,13 +115,13 @@ class ItemInspectionItem(BaseModel):
     received_quantity: int = Field(ge=0)
     accepted_quantity: int = Field(ge=0)
     rejected_quantity: Optional[int] = Field(default=0, ge=0)
-    package_condition: Optional[str] = "SEALED"
-    seal_intact: Optional[bool] = True
-    batch_matched: Optional[bool] = True
-    expiry_matched: Optional[bool] = True
-    storage_condition_ok: Optional[bool] = True
+    package_condition: str = Field(..., min_length=1, description="Trạng thái bao bì bắt buộc")
+    seal_intact: bool = Field(..., description="Tem niêm phong nguyên vẹn bắt buộc (True/False)")
+    batch_matched: bool = Field(..., description="Khớp số lô đã xuất bắt buộc (True/False)")
+    expiry_matched: bool = Field(..., description="Khớp hạn sử dụng bắt buộc (True/False)")
+    storage_condition_ok: bool = Field(..., description="Điều kiện bảo quản đạt bắt buộc (True/False)")
     damage_description: Optional[str] = None
-    suggested_action: Optional[str] = "RESTOCK"
+    suggested_action: str = Field(..., min_length=1, description="Đề xuất xử lý bắt buộc (RESTOCK/QUARANTINE/DISPOSE)")
     inspection_note: Optional[str] = None
 
 
@@ -141,11 +141,13 @@ class ReinspectionPayload(BaseModel):
 class ItemApprovalItem(BaseModel):
     return_item_id: int
     approved_quantity: int = Field(ge=0)
-    rejected_quantity: Optional[int] = Field(default=0, ge=0)
+    rejected_quantity: Optional[int] = Field(default=None, ge=0)
+    rejection_reason: Optional[str] = None
 
 
 class ApproveReturnPayload(BaseModel):
     items: Optional[List[ItemApprovalItem]] = None
+    accepted_items: Optional[List[ItemApprovalItem]] = None
     manager_note: Optional[str] = None
 
 
@@ -836,7 +838,8 @@ def approve_return_case(
     Quản lý kho phê duyệt đơn hoàn. Chuyển sang REFUND_PENDING.
     """
     manager, warehouse_id = auth
-    items_approval = [item.model_dump() for item in payload.items] if payload.items else None
+    raw_items = payload.items or payload.accepted_items
+    items_approval = [item.model_dump() for item in raw_items] if raw_items else None
     wcase = WarehouseReturnService.manager_approve_case(
         db=db,
         case_code=return_code,

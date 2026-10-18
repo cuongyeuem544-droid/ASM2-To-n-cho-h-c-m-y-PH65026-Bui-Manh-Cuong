@@ -26,6 +26,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { AdminPageHeader } from '../components/AdminPageHeader'
 import { FilterBar } from '../components/FilterBar'
 import { PaginationBar } from '../components/PaginationBar'
@@ -225,6 +226,7 @@ const FULFILLMENT_STATUS_LABELS: Record<string, { label: string; color: string; 
 }
 
 export function OrdersPage() {
+  const [searchParams] = useSearchParams()
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'ORDERS'>('OVERVIEW')
 
   // --- OVERVIEW TAB STATES ---
@@ -313,6 +315,14 @@ export function OrdersPage() {
       loadOrders()
     }
   }, [activeTab, timeRange, selectedProvince, selectedStatus])
+
+  useEffect(() => {
+    const qOrderId = searchParams.get('order_id')
+    if (qOrderId) {
+      setActiveTab('ORDERS')
+      openOrderDetail(Number(qOrderId))
+    }
+  }, [searchParams])
 
   const totalPages = Math.max(1, Math.ceil(orders.length / pageSize))
   const displayedOrders = useMemo(() => {

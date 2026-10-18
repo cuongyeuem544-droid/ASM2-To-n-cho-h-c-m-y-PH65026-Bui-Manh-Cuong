@@ -10,8 +10,11 @@ import io
 import csv
 import json
 import hashlib
+import logging
 from typing import Any, List, Optional
 import uuid
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile, status
 from pydantic import BaseModel, EmailStr, Field
@@ -570,74 +573,47 @@ def update_order_fulfillment_status(
     if not order:
         raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng")
 
-    if not check_warehouse_permission(user, order.assigned_warehouse_id or -1, db):
-        raise HTTPException(status_code=403, detail="Đơn hàng này không thuộc phạm vi xử lý của kho bạn")
-
     raw_status = payload.fulfillment_status or payload.status
     if not raw_status:
         raise HTTPException(status_code=400, detail="Vui lòng cung cấp trạng thái thực hiện đơn hàng (fulfillment_status)")
 
     new_status = raw_status.upper()
-    valid_statuses = {"ALLOCATED", "PICKING", "PACKED", "SHIPPED", "DELIVERED", "CANCELLED", "CONSOLIDATED"}
+    valid_statuses = {"ALLOCATED", "PICKING", "PICKED", "PACKED", "SHIPPED", "DELIVERED", "CANCELLED", "CONSOLIDATED"}
     if new_status not in valid_statuses:
         raise HTTPException(status_code=400, detail=f"Trạng thái '{new_status}' không hợp lệ")
 
-    before_status = order.fulfillment_status
-
-    if (order.order_status in ["COMPLETED", "CANCELLED"] or order.fulfillment_status == "CANCELLED") and new_status not in ["DELIVERED", "CANCELLED"]:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Đơn hàng này đã bị hủy (hoặc đã hoàn tất), không thể thay đổi tiến trình xử lý tại kho.",
-        )
-
-    # Idempotent: Nếu đơn đã ở đúng trạng thái này, trả về kết quả an toàn
-    if before_status == new_status:
-        return {
-            "success": True,
-            "order_code": order.order_code,
-            "fulfillment_status": order.fulfillment_status,
-            "order_status": order.order_status,
-            "message": f"Đơn hàng đã ở trạng thái {new_status}.",
-        }
-
-    # Chống chạy đè đơn đã được nhân viên khác xử lý trước
-    stage_order = {"ALLOCATED": 1, "WAITING_INTERNAL_TRANSFER": 1, "CONSOLIDATED": 1, "PICKING": 2, "PACKED": 3, "SHIPPED": 4, "DELIVERED": 5}
-    if new_status in stage_order and before_status in stage_order:
-        if stage_order[new_status] < stage_order[before_status]:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Đơn hàng đã được nhân viên khác xử lý đến bước '{before_status}'. Không thể lùi về '{new_status}'.",
-            )
-
-    order.fulfillment_status = new_status
-
-    now_dt = datetime.now(UTC)
-    if new_status == "PICKING":
-        order.order_status = "PROCESSING"
-    elif new_status == "PACKED":
-        order.order_status = "PROCESSING"
-    elif new_status == "SHIPPED":
-        order.order_status = "SHIPPING"
-    elif new_status == "DELIVERED":
-        order.order_status = "COMPLETED"
-    elif new_status == "CANCELLED":
-        order.order_status = "CANCELLED"
-        FulfillmentRoutingService.release_order_reservations(db, order.id, reason=payload.note or "WAREHOUSE_CANCELLED")
-
-    # Đồng bộ trạng thái và timestamp vào các bản ghi OrderFulfillment liên quan
+    # Lấy danh sách kiện hàng của đơn hàng này
     fulfillments = db.scalars(
         select(OrderFulfillment).where(OrderFulfillment.order_id == order.id)
     ).all()
-    for ff in fulfillments:
-        ff.status = new_status
-        if new_status == "PICKING" and not ff.picked_at:
-            ff.picked_at = now_dt
-        elif new_status == "PACKED" and not ff.packed_at:
-            ff.packed_at = now_dt
-        elif new_status == "SHIPPED" and not ff.shipped_at:
-            ff.shipped_at = now_dt
-        elif new_status == "DELIVERED" and not ff.delivered_at:
-            ff.delivered_at = now_dt
+    if not fulfillments:
+        raise HTTPException(status_code=404, detail="Đơn hàng chưa có kiện hàng fulfillment nào.")
+
+    # Kiểm tra phân quyền kho nghiêm ngặt:
+    # Nhân viên / Quản lý kho chỉ được phép cập nhật kiện hàng thuộc đúng kho của mình
+    if user.role != UserRole.ADMIN:
+        user_wh_id = user.warehouse_id
+        if not user_wh_id:
+            raise HTTPException(status_code=403, detail="Tài khoản chưa được phân công quản lý kho cụ thể.")
+
+        target_ffs = [ff for ff in fulfillments if ff.warehouse_id == user_wh_id]
+        if not target_ffs:
+            raise HTTPException(status_code=403, detail="Đơn hàng này không có kiện hàng thuộc phạm vi xử lý của kho bạn.")
+    else:
+        target_ffs = fulfillments
+
+    before_status = order.fulfillment_status
+
+    # Chuyển trạng thái từng kiện hàng qua FulfillmentRoutingService để tuân thủ State Machine và xuất kho thực tế
+    for ff in target_ffs:
+        FulfillmentRoutingService.transition_fulfillment_status(
+            db=db,
+            fulfillment_id=ff.id,
+            new_status=new_status,
+            user_id=user.id,
+        )
+
+    db.refresh(order)
 
     write_audit(
         db,
@@ -647,7 +623,7 @@ def update_order_fulfillment_status(
         user=user,
         request=request,
         before={"fulfillment_status": before_status},
-        after={"fulfillment_status": new_status, "note": payload.note},
+        after={"fulfillment_status": order.fulfillment_status, "note": payload.note},
     )
     db.commit()
     db.refresh(order)
@@ -2820,24 +2796,36 @@ def get_warehouse_notifications(
     db: Session = Depends(get_db),
 ):
     """
-    Lấy danh sách thông báo dành riêng cho người dùng kho (Quản lý kho hoặc Nhân viên kho).
-    Phân quyền nghiêm ngặt và chống IDOR:
+    Lấy danh sách thông báo dành cho người dùng:
+    - ADMIN: Xem toàn bộ thông báo hệ thống (hoặc lọc theo warehouse_id nếu có chỉ định).
     - Quản lý kho: Xem toàn bộ thông báo thuộc kho mình phụ trách.
-    - Nhân viên kho: Chỉ nhận đơn mới (ORDER_NEW) và công việc được giao trực tiếp cho mình.
+    - Nhân viên kho: Xem đơn mới (ORDER_NEW, ORDER_CANCELLED) và công việc được giao trực tiếp cho mình trong kho.
     """
     user, _ = current_user
-    wh = _resolve_caller_warehouse(user, db, warehouse_id)
+    wh = None
+    if user.role == UserRole.ADMIN:
+        if warehouse_id:
+            wh = db.get(Warehouse, warehouse_id)
+    else:
+        wh = _resolve_caller_warehouse(user, db, warehouse_id)
 
-    # Nếu là Quản lý kho, kích hoạt quét tự động hạn sử dụng (FEFO 60 ngày), tồn kho và đơn quá hạn
+    # Kích hoạt quét tự động hạn sử dụng (FEFO), tồn kho và đơn quá hạn
     if user.role in [UserRole.WAREHOUSE_MANAGER, UserRole.ADMIN]:
         try:
-            WarehouseNotificationService.run_all_scans(db, warehouse_id=wh.id)
+            if wh:
+                WarehouseNotificationService.run_all_scans(db, warehouse_id=wh.id)
+            elif user.role == UserRole.ADMIN:
+                active_whs = db.scalars(select(Warehouse).where(Warehouse.is_active == True)).all()
+                for aw in active_whs:
+                    WarehouseNotificationService.run_all_scans(db, warehouse_id=aw.id)
         except Exception as e:
-            logger.warning(f"Error running notification scans for warehouse {wh.id}: {e}")
+            logger.warning(f"Error running notification scans: {e}")
 
-    query = select(WarehouseNotification).where(WarehouseNotification.warehouse_id == wh.id)
+    query = select(WarehouseNotification).options(selectinload(WarehouseNotification.warehouse))
+    if wh is not None:
+        query = query.where(WarehouseNotification.warehouse_id == wh.id)
 
-    # Lọc phân quyền theo vai trò
+    # Lọc phân quyền theo vai trò nhân viên kho
     if user.role == UserRole.WAREHOUSE_STAFF:
         query = query.where(
             or_(
@@ -2858,10 +2846,11 @@ def get_warehouse_notifications(
 
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
 
-    unread_q = select(func.count()).where(
-        WarehouseNotification.warehouse_id == wh.id,
+    unread_q = select(func.count()).select_from(WarehouseNotification).where(
         WarehouseNotification.is_read.is_(False),
     )
+    if wh is not None:
+        unread_q = unread_q.where(WarehouseNotification.warehouse_id == wh.id)
     if user.role == UserRole.WAREHOUSE_STAFF:
         unread_q = unread_q.where(
             or_(
@@ -2885,6 +2874,8 @@ def get_warehouse_notifications(
         items.append({
             "id": n.id,
             "warehouse_id": n.warehouse_id,
+            "warehouse_code": n.warehouse.code if n.warehouse else None,
+            "warehouse_name": n.warehouse.name if n.warehouse else None,
             "recipient_user_id": n.recipient_user_id,
             "notification_type": n.notification_type,
             "title": n.title,
@@ -2914,15 +2905,22 @@ def get_warehouse_notifications_unread_count(
     db: Session = Depends(get_db),
 ):
     """
-    Endpoint phản hồi nhanh số lượng thông báo chưa đọc (phục vụ Polling 30s của chuông thông báo).
+    Endpoint phản hồi nhanh số lượng thông báo chưa đọc (phục vụ Polling chuông thông báo).
     """
     user, _ = current_user
-    wh = _resolve_caller_warehouse(user, db, warehouse_id)
+    wh = None
+    if user.role == UserRole.ADMIN:
+        if warehouse_id:
+            wh = db.get(Warehouse, warehouse_id)
+    else:
+        wh = _resolve_caller_warehouse(user, db, warehouse_id)
 
-    unread_q = select(func.count()).where(
-        WarehouseNotification.warehouse_id == wh.id,
+    unread_q = select(func.count()).select_from(WarehouseNotification).where(
         WarehouseNotification.is_read.is_(False),
     )
+    if wh is not None:
+        unread_q = unread_q.where(WarehouseNotification.warehouse_id == wh.id)
+
     if user.role == UserRole.WAREHOUSE_STAFF:
         unread_q = unread_q.where(
             or_(
@@ -2949,17 +2947,20 @@ def mark_warehouse_notification_as_read(
     Bảo vệ chống IDOR: Nếu thông báo thuộc kho khác hoặc của nhân viên khác, trả HTTP 404 hoặc 403.
     """
     user, _ = current_user
-    wh = _resolve_caller_warehouse(user, db, warehouse_id)
-
     notif = db.get(WarehouseNotification, notification_id)
-    if not notif or notif.warehouse_id != wh.id:
+    if not notif:
         raise HTTPException(status_code=404, detail="Không tìm thấy thông báo")
 
-    if user.role == UserRole.WAREHOUSE_STAFF:
-        is_my_task = notif.recipient_user_id == user.id
-        is_order_broadcast = notif.recipient_user_id is None and notif.notification_type in ["ORDER_NEW", "ORDER_CANCELLED"]
-        if not (is_my_task or is_order_broadcast):
-            raise HTTPException(status_code=403, detail="Bạn không có quyền thao tác trên thông báo này")
+    if user.role != UserRole.ADMIN:
+        wh = _resolve_caller_warehouse(user, db, warehouse_id)
+        if notif.warehouse_id != wh.id:
+            raise HTTPException(status_code=403, detail="Bạn không có quyền thao tác trên thông báo của kho khác")
+
+        if user.role == UserRole.WAREHOUSE_STAFF:
+            is_my_task = notif.recipient_user_id == user.id
+            is_order_broadcast = notif.recipient_user_id is None and notif.notification_type in ["ORDER_NEW", "ORDER_CANCELLED"]
+            if not (is_my_task or is_order_broadcast):
+                raise HTTPException(status_code=403, detail="Bạn không có quyền thao tác trên thông báo này")
 
     notif.is_read = True
     notif.read_at = utcnow()
@@ -2975,15 +2976,22 @@ def mark_all_warehouse_notifications_as_read(
     db: Session = Depends(get_db),
 ):
     """
-    Đánh dấu tất cả thông báo hợp lệ của người dùng trong kho là đã đọc.
+    Đánh dấu tất cả thông báo hợp lệ của người dùng là đã đọc.
     """
     user, _ = current_user
-    wh = _resolve_caller_warehouse(user, db, warehouse_id)
+    wh = None
+    if user.role == UserRole.ADMIN:
+        if warehouse_id:
+            wh = db.get(Warehouse, warehouse_id)
+    else:
+        wh = _resolve_caller_warehouse(user, db, warehouse_id)
 
     query = select(WarehouseNotification).where(
-        WarehouseNotification.warehouse_id == wh.id,
         WarehouseNotification.is_read.is_(False),
     )
+    if wh is not None:
+        query = query.where(WarehouseNotification.warehouse_id == wh.id)
+
     if user.role == UserRole.WAREHOUSE_STAFF:
         query = query.where(
             or_(

@@ -33,19 +33,23 @@ import {
   CheckCircle2,
   FileSpreadsheet,
   Headphones,
+  PackageCheck,
 } from 'lucide-react'
 import { useState, useEffect, useRef, type ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
 import { LiveClock } from './LiveClock'
+import { NotificationBell } from './NotificationBell'
 import { useAuth } from '../services/auth'
 import { useServerHealth } from '../services/useServerHealth'
 import { api } from '../services/api'
 
 const ROLE_NAMES: Record<string, string> = {
   ADMIN: 'Quản trị viên',
+  DATA_REVIEWER: 'Kiểm duyệt viên',
+  VIEWER: 'Nhân viên tra cứu',
+  CUSTOMER: 'Khách hàng',
   WAREHOUSE_MANAGER: 'Quản lý kho',
   WAREHOUSE_STAFF: 'Nhân viên kho',
-  CUSTOMER: 'Khách hàng',
 }
 
 interface NavItem {
@@ -88,6 +92,8 @@ const navGroups: NavGroup[] = [
     groupLabel: 'KHO VẬN & LÔ HẠN DÙNG',
     items: [
       { to: '/warehouses', label: 'Kho & Chi nhánh', icon: Building2 },
+      { to: '/warehouse/orders', label: 'Đơn hàng kho', icon: ShoppingBag },
+      { to: '/staff/picking-packing', label: 'Soạn & Đóng gói hàng', icon: PackageCheck },
       { to: '/inventory/batches', label: 'Lô thuốc & Hạn dùng', icon: Layers },
       { to: '/inventory/receipts', label: 'Nhập kho (GSP)', icon: ArrowDownToLine },
       { to: '/inventory/transfers', label: 'Điều chuyển kho', icon: ArrowLeftRight },
@@ -331,17 +337,17 @@ export function Layout({ children }: { children: ReactNode }) {
           </div>
 
           <div className="header-right">
-            {/* Notification Bell for Returns / Alerts */}
-            {user?.role === 'ADMIN' && (
+            {/* 1. Yêu cầu đổi/trả thuốc (Admin & Data Reviewer) */}
+            {(user?.role === 'ADMIN' || user?.role === 'DATA_REVIEWER') && (
               <div className="admin-notif-container">
                 <button
                   type="button"
                   className={`admin-notif-btn ${(returnStats?.pending_count || 0) > 0 ? 'has-unread' : ''}`}
                   onClick={() => setShowNotifMenu(!showNotifMenu)}
-                  title="Thông báo đơn đổi/trả hàng cần duyệt"
-                  aria-label="Thông báo"
+                  title="Yêu cầu đổi/trả thuốc cần duyệt"
+                  aria-label="Đổi/trả thuốc"
                 >
-                  <Bell size={18} />
+                  <RotateCcw size={17} />
                   {(returnStats?.pending_count || 0) > 0 && (
                     <span className="notif-count-pill">
                       {returnStats?.pending_count}
@@ -413,6 +419,11 @@ export function Layout({ children }: { children: ReactNode }) {
                   </div>
                 )}
               </div>
+            )}
+
+            {/* 2. Chuông thông báo Đơn Hàng Mới & Kho Vận (Admin, Quản lý kho, Nhân viên kho) */}
+            {(user?.role === 'ADMIN' || user?.role === 'WAREHOUSE_MANAGER' || user?.role === 'WAREHOUSE_STAFF') && (
+              <NotificationBell />
             )}
 
             <a

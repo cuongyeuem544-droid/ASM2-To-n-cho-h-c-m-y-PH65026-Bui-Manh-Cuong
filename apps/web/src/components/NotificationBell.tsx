@@ -34,22 +34,47 @@ export function NotificationBell({ viewAllUrl, bellColor }: NotificationBellProp
   const [loading, setLoading] = useState(false)
   const [markingAll, setMarkingAll] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [latestToast, setLatestToast] = useState<{ id: number; title: string; message: string; action_url?: string | null } | null>(null)
 
   const dropdownRef = useRef<HTMLDivElement>(null)
   const bellButtonRef = useRef<HTMLButtonElement>(null)
+  const prevCountRef = useRef<number>(-1)
 
   // 1. Tải số lượng chưa đọc (phục vụ badge & polling)
   const fetchUnreadCount = useCallback(async () => {
+    if (!user) return
     try {
       const res = await api<{ unread_count: number }>('/warehouse-portal/notifications/unread-count')
-      setUnreadCount(res.unread_count || 0)
+      const count = res.unread_count || 0
+
+      // Nếu số lượng chưa đọc tăng lên trong phiên làm việc -> hiển thị toast nổi
+      if (prevCountRef.current !== -1 && count > prevCountRef.current) {
+        try {
+          const latestRes = await api<{ items: WarehouseNotificationItem[] }>('/warehouse-portal/notifications?page=1&page_size=1')
+          const newest = latestRes.items?.[0]
+          if (newest && !newest.is_read) {
+            setLatestToast({
+              id: newest.id,
+              title: newest.title,
+              message: newest.message,
+              action_url: newest.action_url,
+            })
+            setTimeout(() => setLatestToast(null), 8000)
+          }
+        } catch {
+          // Âm thầm bỏ qua lỗi phụ
+        }
+      }
+      prevCountRef.current = count
+      setUnreadCount(count)
     } catch {
       // Âm thầm bỏ qua khi mạng chập chờn
     }
-  }, [])
+  }, [user])
 
   // 2. Tải danh sách 10 thông báo mới nhất khi mở dropdown
   const fetchNotifications = useCallback(async () => {
+    if (!user) return
     setLoading(true)
     setError(null)
     try {
@@ -65,15 +90,16 @@ export function NotificationBell({ viewAllUrl, bellColor }: NotificationBellProp
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [user])
 
-  // Polling 30 giây & Lắng nghe tab focus (visibilitychange)
+  // Polling 10 giây & Lắng nghe tab focus (visibilitychange)
   useEffect(() => {
+    if (!user) return
     fetchUnreadCount()
 
     const intervalId = window.setInterval(() => {
       fetchUnreadCount()
-    }, 30000)
+    }, 10000)
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
@@ -90,7 +116,7 @@ export function NotificationBell({ viewAllUrl, bellColor }: NotificationBellProp
       window.clearInterval(intervalId)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [fetchUnreadCount, isOpen, fetchNotifications])
+  }, [user, fetchUnreadCount, isOpen, fetchNotifications])
 
   // Khi mở dropdown, tải dữ liệu thông báo
   const handleToggle = () => {
@@ -156,9 +182,20 @@ export function NotificationBell({ viewAllUrl, bellColor }: NotificationBellProp
         } else if (targetUrl.startsWith('/warehouse/returns')) {
           targetUrl = '/staff/returns'
         } else if (targetUrl.startsWith('/warehouse/transfers')) {
-          targetUrl = '/staff/transfers'
+          targetUrl = '/inventory/transfers'
         } else if (targetUrl.startsWith('/warehouse/stock') || targetUrl.startsWith('/warehouse/batches')) {
-          targetUrl = '/staff/stock'
+          targetUrl = '/inventory/batches'
+        }
+      } else if (user?.role === 'ADMIN') {
+        if (targetUrl.startsWith('/warehouse/orders')) {
+          const orderId = notif.entity_id || new URLSearchParams(targetUrl.split('?')[1] || '').get('order_id')
+          targetUrl = orderId ? `/orders?order_id=${orderId}` : '/orders'
+        } else if (targetUrl.startsWith('/warehouse/returns')) {
+          targetUrl = '/returns'
+        } else if (targetUrl.startsWith('/warehouse/transfers')) {
+          targetUrl = '/inventory/transfers'
+        } else if (targetUrl.startsWith('/warehouse/stock') || targetUrl.startsWith('/warehouse/batches')) {
+          targetUrl = '/inventory/batches'
         }
       }
       navigate(targetUrl)
@@ -277,62 +314,97 @@ export function NotificationBell({ viewAllUrl, bellColor }: NotificationBellProp
       <button
         ref={bellButtonRef}
         type="button"
+        className={`admin-notif-btn ${unreadCount > 0 ? 'has-unread' : ''}`}
         onClick={handleToggle}
+        title="Thông báo đơn hàng & vận hành kho"
         aria-label="Thông báo"
         aria-expanded={isOpen}
-        style={{
-          position: 'relative',
-          padding: '8px',
-          borderRadius: '10px',
-          background: isOpen ? (bellColor ? 'rgba(255,255,255,0.2)' : '#f1f5f9') : 'transparent',
-          border: 'none',
-          color: bellColor || '#475569',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          transition: 'all 0.15s ease',
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = bellColor ? 'rgba(255,255,255,0.2)' : '#f1f5f9'
-          if (!bellColor) e.currentTarget.style.color = '#0f172a'
-        }}
-        onMouseLeave={(e) => {
-          if (!isOpen) {
-            e.currentTarget.style.background = 'transparent'
-            e.currentTarget.style.color = bellColor || '#475569'
-          }
-        }}
+        style={
+          bellColor === 'white'
+            ? {
+                background: 'rgba(255,255,255,0.2)',
+                borderColor: 'rgba(255,255,255,0.3)',
+                color: 'white',
+              }
+            : undefined
+        }
       >
-        <Bell size={20} />
+        <Bell size={18} />
 
         {/* Badge đỏ hiển thị số lượng chưa đọc */}
         {unreadCount > 0 && (
-          <span
-            style={{
-              position: 'absolute',
-              top: '4px',
-              right: '4px',
-              minWidth: '18px',
-              height: '18px',
-              padding: '0 4px',
-              background: '#ef4444',
-              color: 'white',
-              fontSize: '10px',
-              fontWeight: 800,
-              borderRadius: '9999px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              lineHeight: 1,
-              boxShadow: '0 1px 3px rgba(239, 68, 68, 0.4)',
-              border: '2px solid white',
-            }}
-          >
+          <span className="notif-count-pill">
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}
       </button>
+
+      {/* Realtime Toast khi có đơn mới phát sinh */}
+      {latestToast && (
+        <div
+          style={{
+            position: 'fixed',
+            top: '70px',
+            right: '24px',
+            zIndex: 9999,
+            background: '#ffffff',
+            borderRadius: '12px',
+            boxShadow: '0 12px 30px rgba(0, 0, 0, 0.15)',
+            border: '1px solid #10b981',
+            padding: '12px 16px',
+            maxWidth: '380px',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '12px',
+          }}
+        >
+          <div style={{ background: '#ecfdf5', color: '#059669', padding: '6px', borderRadius: '8px' }}>
+            <Bell size={18} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>{latestToast.title}</div>
+            <div style={{ fontSize: '12px', color: '#475569', marginTop: '2px', lineHeight: 1.4 }}>{latestToast.message}</div>
+            <button
+              type="button"
+              onClick={() => {
+                const actionUrl = latestToast.action_url
+                setLatestToast(null)
+                if (actionUrl) {
+                  let dest = actionUrl
+                  if (user?.role === 'ADMIN' && dest.startsWith('/warehouse/orders')) {
+                    const oid = new URLSearchParams(dest.split('?')[1] || '').get('order_id')
+                    dest = oid ? `/orders?order_id=${oid}` : '/orders'
+                  } else if (user?.role === 'WAREHOUSE_STAFF' && dest.startsWith('/warehouse/orders')) {
+                    const oid = new URLSearchParams(dest.split('?')[1] || '').get('order_id')
+                    dest = oid ? `/staff/picking-packing?order_id=${oid}` : '/staff/picking-packing'
+                  }
+                  navigate(dest)
+                }
+              }}
+              style={{
+                marginTop: '8px',
+                padding: '4px 10px',
+                background: '#059669',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                fontSize: '11.5px',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Xem ngay
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => setLatestToast(null)}
+            style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '2px' }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {/* Bảng Dropdown Thông Báo */}
       {isOpen && (
@@ -576,6 +648,20 @@ export function NotificationBell({ viewAllUrl, bellColor }: NotificationBellProp
                         >
                           {badge.label}
                         </span>
+                        {item.warehouse_name && (
+                          <span
+                            style={{
+                              padding: '1px 6px',
+                              borderRadius: '4px',
+                              background: '#f1f5f9',
+                              color: '#334155',
+                              fontWeight: 600,
+                              fontSize: '10px',
+                            }}
+                          >
+                            📍 {item.warehouse_name}
+                          </span>
+                        )}
                         <span>{formatTime(item.created_at)}</span>
                       </div>
                     </div>
@@ -600,8 +686,12 @@ export function NotificationBell({ viewAllUrl, bellColor }: NotificationBellProp
                 setIsOpen(false)
                 if (viewAllUrl) {
                   navigate(viewAllUrl)
+                } else if (user?.role === 'WAREHOUSE_STAFF') {
+                  navigate('/staff/picking-packing')
+                } else if (user?.role === 'WAREHOUSE_MANAGER') {
+                  navigate('/warehouse/orders')
                 } else {
-                  navigate('/warehouse/alerts')
+                  navigate('/orders')
                 }
               }}
               style={{

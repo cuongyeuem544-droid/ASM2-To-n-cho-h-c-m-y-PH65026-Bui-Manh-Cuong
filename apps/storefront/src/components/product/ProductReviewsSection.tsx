@@ -34,7 +34,7 @@ interface ProductReviewsSectionProps {
 export function ProductReviewsSection({
   productId,
   productName,
-  defaultRating = 5,
+  defaultRating = 0,
   defaultReviewCount = 0,
 }: ProductReviewsSectionProps) {
   const [data, setData] = useState<ReviewSummary | null>(null);
@@ -117,8 +117,8 @@ export function ProductReviewsSection({
     }
   };
 
-  const avgRating = data?.total_reviews ? data.average_rating : defaultRating;
-  const totalReviews = data?.total_reviews ?? defaultReviewCount;
+  const avgRating = data ? (data.total_reviews > 0 ? data.average_rating : 0.0) : (defaultRating ?? 0);
+  const totalReviews = data?.total_reviews ?? (defaultReviewCount ?? 0);
   const verifiedCount = data?.verified_reviews_count ?? 0;
   const distribution = data?.rating_distribution || { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
 
@@ -285,7 +285,7 @@ export function ProductReviewsSection({
               <Star
                 key={star}
                 className={`w-5 h-5 ${
-                  star <= Math.round(avgRating)
+                  totalReviews > 0 && star <= Math.round(avgRating)
                     ? "fill-amber-400 text-amber-400"
                     : "text-slate-200"
                 }`}

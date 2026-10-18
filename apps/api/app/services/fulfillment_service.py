@@ -217,12 +217,12 @@ class FulfillmentRoutingService:
             logger.info(f"[ROUTING] Đơn {order.order_code}: Đáp ứng 100% tại kho {single_fulfill_wh.code}")
             order.assigned_warehouse_id = single_fulfill_wh.id
             order.assignment_method = "NEAREST_SINGLE"
-            order.fulfillment_status = "ALLOCATED"
-            order.assigned_at = utcnow()
-            if order.lat is not None and order.lng is not None and single_fulfill_wh.lat is not None and single_fulfill_wh.lng is not None:
+            o_lat = getattr(order, "lat", None)
+            o_lng = getattr(order, "lng", None)
+            if o_lat is not None and o_lng is not None and single_fulfill_wh.lat is not None and single_fulfill_wh.lng is not None:
                 from app.services.geo_service import calculate_haversine_distance
                 order.assignment_distance_km = round(
-                    calculate_haversine_distance(order.lat, order.lng, single_fulfill_wh.lat, single_fulfill_wh.lng), 2
+                    calculate_haversine_distance(o_lat, o_lng, single_fulfill_wh.lat, single_fulfill_wh.lng), 2
                 )
 
             ff = cls._create_fulfillment(
@@ -251,7 +251,7 @@ class FulfillmentRoutingService:
 
             if system_shortages:
                 # Kịch bản 3: Không đủ hàng trong toàn hệ thống (đáp ứng điều kiện HSD >= 180 ngày)
-                err_detail = "Số lượng tồn kho (đáp ứng hạn sử dụng an toàn >= 180 ngày) không đủ: " + "; ".join(system_shortages)
+                err_detail = "Số lượng tồn kho không đủ (đáp ứng hạn sử dụng an toàn >= 180 ngày): " + "; ".join(system_shortages)
                 raise HTTPException(status_code=400, detail=err_detail)
 
             # Kịch bản 2: Điều phối điều chuyển gom hàng (Consolidation Transfer)
@@ -261,10 +261,12 @@ class FulfillmentRoutingService:
             order.assignment_method = "CONSOLIDATED_TRANSFER"
             order.fulfillment_status = "WAITING_INTERNAL_TRANSFER"
             order.assigned_at = utcnow()
-            if order.lat is not None and order.lng is not None and consolidation_hub.lat is not None and consolidation_hub.lng is not None:
+            o_lat = getattr(order, "lat", None)
+            o_lng = getattr(order, "lng", None)
+            if o_lat is not None and o_lng is not None and consolidation_hub.lat is not None and consolidation_hub.lng is not None:
                 from app.services.geo_service import calculate_haversine_distance
                 order.assignment_distance_km = round(
-                    calculate_haversine_distance(order.lat, order.lng, consolidation_hub.lat, consolidation_hub.lng), 2
+                    calculate_haversine_distance(o_lat, o_lng, consolidation_hub.lat, consolidation_hub.lng), 2
                 )
 
             wh_item_alloc: dict[int, dict[int, int]] = {w.id: {} for w in ordered_warehouses}
@@ -293,7 +295,6 @@ class FulfillmentRoutingService:
                         transfer_code=f"TRF-{order.order_code}-{w.code[:6]}-{consolidation_hub.code[:6]}",
                         from_warehouse_id=w.id,
                         to_warehouse_id=consolidation_hub.id,
-                        order_id=order.id,
                         status="IN_TRANSIT",
                         note=f"Điều chuyển hàng phục vụ đơn hàng {order.order_code}",
                         shipped_at=utcnow(),
@@ -319,12 +320,19 @@ class FulfillmentRoutingService:
                     )
                     fulfillments_to_return.append(ff)
 
+        warehouses_to_notify = set()
         if order.assigned_warehouse_id:
+            warehouses_to_notify.add(order.assigned_warehouse_id)
+        for ff in fulfillments_to_return:
+            if ff.warehouse_id:
+                warehouses_to_notify.add(ff.warehouse_id)
+
+        for wid in warehouses_to_notify:
             try:
                 from app.services.warehouse_notification_service import WarehouseNotificationService
-                WarehouseNotificationService.notify_order_new(db, order, order.assigned_warehouse_id)
+                WarehouseNotificationService.notify_order_new(db, order, wid)
             except Exception as e:
-                logger.warning(f"Failed to create ORDER_NEW notification: {e}")
+                logger.warning(f"Failed to create ORDER_NEW notification for warehouse {wid}: {e}")
 
         db.flush()
         return fulfillments_to_return
@@ -492,10 +500,25 @@ class FulfillmentRoutingService:
             raise HTTPException(status_code=404, detail="Không tìm thấy kiện hàng")
 
         old_status = ff.status
-        if new_status == old_status:
+
+        # Chuẩn hóa tên trạng thái (hỗ trợ PICKING và PICKED tương đương)
+        target_status = new_status.upper()
+        if target_status == "PICKING":
+            target_status = "PICKED"
+
+        curr_status = old_status.upper()
+        if curr_status in ["PENDING", "ALLOCATED", "WAITING_INTERNAL_TRANSFER", "CONSOLIDATED"]:
+            curr_status = "PENDING"
+        elif curr_status == "PICKING":
+            curr_status = "PICKED"
+
+        if target_status == curr_status:
             return ff
 
-        valid_transitions: dict[str, set[str]] = {
+        # State machine nghiêm ngặt, bắt buộc tuần tự:
+        # PENDING -> PICKED -> PACKED -> SHIPPED -> DELIVERED
+        # CANCELLED chỉ cho phép từ các trạng thái chưa kết thúc
+        strict_transitions: dict[str, set[str]] = {
             "PENDING": {"PICKED", "CANCELLED"},
             "PICKED": {"PACKED", "CANCELLED"},
             "PACKED": {"SHIPPED", "CANCELLED"},
@@ -504,26 +527,39 @@ class FulfillmentRoutingService:
             "CANCELLED": set(),
         }
 
-        allowed = valid_transitions.get(old_status)
-        if allowed is None or new_status not in allowed:
+        allowed = strict_transitions.get(curr_status)
+        if allowed is None or target_status not in allowed:
             raise HTTPException(
                 status_code=400,
-                detail=f"Không thể chuyển trạng thái kiện hàng từ '{old_status}' sang '{new_status}'."
+                detail=f"Không thể chuyển trạng thái kiện hàng từ '{old_status}' sang '{new_status}'. Quy trình bắt buộc tuần tự: Lấy hàng (PICKED) -> Đóng gói (PACKED) -> Xuất kho (SHIPPED) -> Giao hàng (DELIVERED).",
             )
 
-        ff.status = new_status
+        ff.status = target_status
         now = utcnow()
 
-        # Khi kiện hàng được XUẤT KHO VẬN CHUYỂN (SHIPPED)
-        if new_status == "SHIPPED" and old_status != "SHIPPED":
+        if target_status == "PICKED" and not ff.picked_at:
+            ff.picked_at = now
+        elif target_status == "PACKED" and not ff.packed_at:
+            ff.packed_at = now
+        elif target_status == "SHIPPED" and old_status != "SHIPPED":
             ff.shipped_at = now
 
-            # Lấy tất cả phân bổ lô của kiện hàng này
+            # Lấy tất cả phân bổ lô của kiện hàng này (hỗ trợ cả fulfillment_item_id lẫn order_item_id)
             allocations = db.scalars(
                 select(OrderItemBatchAllocation).where(
                     OrderItemBatchAllocation.fulfillment_item_id.in_([it.id for it in ff.items])
                 )
             ).all()
+
+            if not allocations:
+                order_item_ids = [it.order_item_id for it in ff.items if it.order_item_id]
+                if order_item_ids:
+                    allocations = db.scalars(
+                        select(OrderItemBatchAllocation).where(
+                            OrderItemBatchAllocation.order_item_id.in_(order_item_ids),
+                            OrderItemBatchAllocation.warehouse_id == ff.warehouse_id,
+                        )
+                    ).all()
 
             for alloc in allocations:
                 stock = db.scalar(
@@ -605,12 +641,16 @@ class FulfillmentRoutingService:
 
             if all(s == "DELIVERED" for s in all_statuses):
                 order.order_status = "COMPLETED"
+                order.fulfillment_status = "DELIVERED"
             elif any(s in ["SHIPPED", "DELIVERED"] for s in all_statuses):
                 order.order_status = "SHIPPING"
+                order.fulfillment_status = "SHIPPED"
             elif any(s in ["PICKED", "PACKED"] for s in all_statuses):
                 order.order_status = "PROCESSING"
+                order.fulfillment_status = "PACKED" if any(s == "PACKED" for s in all_statuses) else "PICKING"
             elif all(s == "CANCELLED" for s in all_statuses):
                 order.order_status = "CANCELLED"
+                order.fulfillment_status = "CANCELLED"
 
         db.commit()
         return ff
@@ -862,3 +902,95 @@ class FulfillmentRoutingService:
             "transfer_id": transfer_id,
             "order_fulfillment_status": order.fulfillment_status if order else None,
         }
+
+    @classmethod
+    def reroute_unfulfilled_orders_on_new_warehouse(
+        cls,
+        db: Session,
+        new_warehouse: Warehouse,
+    ) -> list[dict[str, Any]]:
+        """
+        Khi Admin tạo một kho mới hoặc kích hoạt lại một kho:
+        Quét tất cả các đơn hàng chưa đóng gói / chưa giao (PENDING, CONFIRMED, PROCESSING).
+        Không điều phối lại các đơn đã đóng gói (PACKED), đang giao (SHIPPED), đã giao (DELIVERED) hoặc đã hủy (CANCELLED).
+        Nếu kho mới gần khách hơn kho hiện tại:
+        - Chuyển assigned_warehouse_id = new_warehouse.id
+        - Cập nhật assignment_distance_km, assignment_method = 'AUTO_REROUTED_NEW_WAREHOUSE', assigned_at = utcnow()
+        - Cập nhật OrderFulfillment chưa xuất kho sang kho mới
+        - Gửi thông báo kho mới nhận đơn (ORDER_NEW)
+        """
+        if not new_warehouse.is_active:
+            return []
+        if new_warehouse.lat is None or new_warehouse.lng is None:
+            return []
+
+        from app.services.geo_service import GeoService, calculate_haversine_distance
+
+        candidate_orders = db.scalars(
+            select(Order).where(
+                Order.order_status.in_(["PENDING", "CONFIRMED", "PROCESSING"]),
+                ~Order.fulfillment_status.in_(["PACKED", "SHIPPED", "DELIVERED", "CANCELLED"]),
+            )
+        ).all()
+
+        rerouted = []
+        new_lat, new_lng = float(new_warehouse.lat), float(new_warehouse.lng)
+
+        for order in candidate_orders:
+            combined_addr = f"{order.shipping_city or ''} {order.shipping_address or ''}".strip()
+            cust_lat, cust_lng, _ = GeoService.resolve_customer_coordinates(
+                lat=order.lat,
+                lng=order.lng,
+                province_code=order.province_code,
+                district_code=order.district_code,
+                address_text=combined_addr,
+            )
+
+            dist_to_new = calculate_haversine_distance(cust_lat, cust_lng, new_lat, new_lng)
+
+            curr_dist = order.assignment_distance_km
+            if curr_dist is None and order.assigned_warehouse_id:
+                curr_wh = db.get(Warehouse, order.assigned_warehouse_id)
+                if curr_wh and curr_wh.lat is not None and curr_wh.lng is not None:
+                    curr_dist = calculate_haversine_distance(cust_lat, cust_lng, float(curr_wh.lat), float(curr_wh.lng))
+                else:
+                    curr_dist = 999999.0
+            elif curr_dist is None:
+                curr_dist = 999999.0
+
+            if dist_to_new < curr_dist and order.assigned_warehouse_id != new_warehouse.id:
+                old_wh_id = order.assigned_warehouse_id
+                order.assigned_warehouse_id = new_warehouse.id
+                order.assignment_distance_km = dist_to_new
+                order.assignment_method = "AUTO_REROUTED_NEW_WAREHOUSE"
+                order.assigned_at = utcnow()
+
+                # Cập nhật order_fulfillments nếu có và chưa xuất kho
+                order_ffs = db.scalars(
+                    select(OrderFulfillment).where(OrderFulfillment.order_id == order.id)
+                ).all()
+                for ff in order_ffs:
+                    if ff.status in ["PENDING", "ALLOCATED"]:
+                        ff.warehouse_id = new_warehouse.id
+                        ff.fulfillment_code = f"FF-{order.order_code}-{new_warehouse.code}"
+
+                try:
+                    from app.services.warehouse_notification_service import WarehouseNotificationService
+                    WarehouseNotificationService.notify_order_new(db, order, new_warehouse.id)
+                except Exception as e:
+                    logger.warning(f"Lỗi tạo thông báo khi điều phối lại sang kho mới {order.order_code}: {e}")
+
+                rerouted.append({
+                    "order_id": order.id,
+                    "order_code": order.order_code,
+                    "old_warehouse_id": old_wh_id,
+                    "new_warehouse_id": new_warehouse.id,
+                    "new_warehouse_code": new_warehouse.code,
+                    "distance_km": dist_to_new,
+                })
+
+        if rerouted:
+            db.flush()
+            logger.info(f"Đã điều phối lại {len(rerouted)} đơn hàng sang kho mới {new_warehouse.code}")
+
+        return rerouted

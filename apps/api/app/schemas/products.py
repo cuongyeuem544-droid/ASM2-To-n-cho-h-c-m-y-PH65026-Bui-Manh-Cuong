@@ -49,6 +49,8 @@ class ProductSummary(ORMModel):
     confidence_label: ConfidenceLabel
     publish_status: PublishStatus
     is_demo: bool
+    average_rating: float = 0.0
+    review_count: int = 0
     updated_at: datetime
 
 

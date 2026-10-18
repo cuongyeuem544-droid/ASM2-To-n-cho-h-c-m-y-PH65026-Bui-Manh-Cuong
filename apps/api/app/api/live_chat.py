@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -844,7 +845,56 @@ async def client_websocket(
     session_code: str,
     token: Optional[str] = Query(None),
 ):
-    """WebSocket kết nối realtime cho khách hàng."""
+    """
+    WebSocket kết nối realtime cho khách hàng.
+    Bắt buộc xác thực danh tính (JWT của khách hàng hoặc guest_session_token của khách vãng lai)
+    trước khi accept kết nối.
+    """
+    # 1. Bắt buộc phải truyền token
+    if not token or not str(token).strip():
+        await websocket.close(code=4401)
+        return
+
+    raw_token = str(token).strip()
+
+    db = SessionLocal()
+    try:
+        session = db.scalar(
+            select(LiveChatSession).where(LiveChatSession.session_code == session_code)
+        )
+        if not session:
+            await websocket.close(code=4404)
+            return
+
+        if session.status == "CLOSED":
+            await websocket.close(code=4403)
+            return
+
+        authenticated = False
+
+        # 2. Thử xác thực nếu là khách hàng đã đăng nhập (JWT access token)
+        try:
+            payload = decode_token(raw_token, "access")
+            user_id = int(payload.get("sub", 0))
+            if user_id and session.customer_id and user_id == session.customer_id:
+                user = db.get(User, user_id)
+                if user and user.is_active:
+                    authenticated = True
+        except Exception:
+            pass
+
+        # 3. Thử xác thực nếu là khách vãng lai (guest_session_token)
+        if not authenticated and session.guest_session_token:
+            if secrets.compare_digest(raw_token, session.guest_session_token):
+                authenticated = True
+
+        if not authenticated:
+            await websocket.close(code=4403)
+            return
+    finally:
+        db.close()
+
+    # 4. Khi đã xác thực an toàn mới accept và đưa vào chat_manager
     await chat_manager.connect_client(session_code, websocket)
     try:
         while True:

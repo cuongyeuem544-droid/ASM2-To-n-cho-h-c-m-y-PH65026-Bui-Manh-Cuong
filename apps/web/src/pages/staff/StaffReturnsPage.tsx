@@ -49,9 +49,24 @@ interface InspectionRecord {
   seal_intact: boolean
   batch_matched: boolean
   expiry_matched: boolean
+  storage_condition_ok?: boolean
   damage_description?: string
   suggested_action: string
   inspection_note?: string
+}
+
+interface InspectionDraftItem {
+  received_quantity: number
+  accepted_quantity: number
+  rejected_quantity: number
+  package_condition: string
+  seal_intact: boolean | null
+  batch_matched: boolean | null
+  expiry_matched: boolean | null
+  storage_condition_ok: boolean | null
+  damage_description: string
+  suggested_action: string
+  inspection_note: string
 }
 
 interface StaffReturnCase {
@@ -106,23 +121,7 @@ export function StaffReturnsPage() {
   const [uploadUrl, setUploadUrl] = useState('')
 
   // Step 3: Inspections Form
-  const [inspectionDrafts, setInspectionDrafts] = useState<
-    Record<
-      number,
-      {
-        received_quantity: number
-        accepted_quantity: number
-        rejected_quantity: number
-        package_condition: string
-        seal_intact: boolean
-        batch_matched: boolean
-        expiry_matched: boolean
-        damage_description: string
-        suggested_action: string
-        inspection_note: string
-      }
-    >
-  >({})
+  const [inspectionDrafts, setInspectionDrafts] = useState<Record<number, InspectionDraftItem>>({})
 
   const fetchCases = async () => {
     setLoading(true)
@@ -157,25 +156,27 @@ export function StaffReturnsPage() {
             received_quantity: existingInsp.received_quantity,
             accepted_quantity: existingInsp.accepted_quantity,
             rejected_quantity: existingInsp.rejected_quantity,
-            package_condition: existingInsp.package_condition,
-            seal_intact: existingInsp.seal_intact,
-            batch_matched: existingInsp.batch_matched,
-            expiry_matched: existingInsp.expiry_matched,
+            package_condition: existingInsp.package_condition || '',
+            seal_intact: existingInsp.seal_intact ?? null,
+            batch_matched: existingInsp.batch_matched ?? null,
+            expiry_matched: existingInsp.expiry_matched ?? null,
+            storage_condition_ok: existingInsp.storage_condition_ok ?? null,
             damage_description: existingInsp.damage_description || '',
-            suggested_action: existingInsp.suggested_action,
+            suggested_action: existingInsp.suggested_action || '',
             inspection_note: existingInsp.inspection_note || '',
           }
         } else {
           initialDrafts[item.id] = {
             received_quantity: item.requested_quantity,
-            accepted_quantity: item.requested_quantity,
+            accepted_quantity: 0,
             rejected_quantity: 0,
-            package_condition: 'SEALED',
-            seal_intact: true,
-            batch_matched: true,
-            expiry_matched: true,
+            package_condition: '',
+            seal_intact: null,
+            batch_matched: null,
+            expiry_matched: null,
+            storage_condition_ok: null,
             damage_description: '',
-            suggested_action: 'RESTOCK',
+            suggested_action: '',
             inspection_note: '',
           }
         }
@@ -243,15 +244,62 @@ export function StaffReturnsPage() {
     setActionLoading(true)
     setActionError('')
     try {
+      // Xác thực bắt buộc từng sản phẩm
+      for (const item of selectedCase.items) {
+        const draft = inspectionDrafts[item.id]
+        if (!draft) {
+          setActionError(`Vui lòng hoàn thành kiểm định cho "${item.product_name}".`)
+          setActionLoading(false)
+          return
+        }
+        if (!draft.package_condition) {
+          setActionError(`Vui lòng chọn tình trạng bao bì cho "${item.product_name}".`)
+          setActionLoading(false)
+          return
+        }
+        if (draft.seal_intact === null || draft.seal_intact === undefined) {
+          setActionError(`Vui lòng xác nhận tem niêm phong cho "${item.product_name}".`)
+          setActionLoading(false)
+          return
+        }
+        if (draft.batch_matched === null || draft.batch_matched === undefined) {
+          setActionError(`Vui lòng xác nhận khớp số lô cho "${item.product_name}".`)
+          setActionLoading(false)
+          return
+        }
+        if (draft.expiry_matched === null || draft.expiry_matched === undefined) {
+          setActionError(`Vui lòng xác nhận khớp hạn sử dụng cho "${item.product_name}".`)
+          setActionLoading(false)
+          return
+        }
+        if (draft.storage_condition_ok === null || draft.storage_condition_ok === undefined) {
+          setActionError(`Vui lòng xác nhận điều kiện bảo quản cho "${item.product_name}".`)
+          setActionLoading(false)
+          return
+        }
+        if (!draft.suggested_action) {
+          setActionError(`Vui lòng chọn đề xuất xử lý cho "${item.product_name}".`)
+          setActionLoading(false)
+          return
+        }
+        const isSafetyOk = draft.seal_intact && draft.batch_matched && draft.expiry_matched && draft.storage_condition_ok
+        if (!isSafetyOk && draft.suggested_action === 'RESTOCK') {
+          setActionError(`Sản phẩm "${item.product_name}" không đạt toàn bộ tiêu chí an toàn dược, không thể đề xuất Nhập lại kho (RESTOCK).`)
+          setActionLoading(false)
+          return
+        }
+      }
+
       const payloadItems = Object.entries(inspectionDrafts).map(([itemIdStr, draft]) => ({
         return_item_id: Number(itemIdStr),
         received_quantity: draft.received_quantity,
         accepted_quantity: draft.accepted_quantity,
         rejected_quantity: draft.rejected_quantity,
         package_condition: draft.package_condition,
-        seal_intact: draft.seal_intact,
-        batch_matched: draft.batch_matched,
-        expiry_matched: draft.expiry_matched,
+        seal_intact: Boolean(draft.seal_intact),
+        batch_matched: Boolean(draft.batch_matched),
+        expiry_matched: Boolean(draft.expiry_matched),
+        storage_condition_ok: Boolean(draft.storage_condition_ok),
         damage_description: draft.damage_description,
         suggested_action: draft.suggested_action,
         inspection_note: draft.inspection_note,
@@ -721,24 +769,43 @@ export function StaffReturnsPage() {
                   {selectedCase.items.map((item) => {
                     const draft = inspectionDrafts[item.id] || {
                       received_quantity: item.requested_quantity,
-                      accepted_quantity: item.requested_quantity,
+                      accepted_quantity: 0,
                       rejected_quantity: 0,
-                      package_condition: 'SEALED',
-                      seal_intact: true,
-                      batch_matched: true,
-                      expiry_matched: true,
+                      package_condition: '',
+                      seal_intact: null,
+                      batch_matched: null,
+                      expiry_matched: null,
+                      storage_condition_ok: null,
                       damage_description: '',
-                      suggested_action: 'RESTOCK',
+                      suggested_action: '',
                       inspection_note: '',
                     }
 
+                    const isSafetyPassed =
+                      draft.seal_intact === true &&
+                      draft.batch_matched === true &&
+                      draft.expiry_matched === true &&
+                      draft.storage_condition_ok === true
+
                     const updateField = (field: string, value: any) => {
+                      const nextDraft = {
+                        ...draft,
+                        [field]: value,
+                      }
+                      // Nếu có tiêu chí an toàn không đạt mà đang chọn RESTOCK -> Tự hủy RESTOCK
+                      const nextSafety =
+                        (field === 'seal_intact' ? value === true : nextDraft.seal_intact === true) &&
+                        (field === 'batch_matched' ? value === true : nextDraft.batch_matched === true) &&
+                        (field === 'expiry_matched' ? value === true : nextDraft.expiry_matched === true) &&
+                        (field === 'storage_condition_ok' ? value === true : nextDraft.storage_condition_ok === true)
+
+                      if (!nextSafety && nextDraft.suggested_action === 'RESTOCK') {
+                        nextDraft.suggested_action = ''
+                      }
+
                       setInspectionDrafts({
                         ...inspectionDrafts,
-                        [item.id]: {
-                          ...draft,
-                          [field]: value,
-                        },
+                        [item.id]: nextDraft,
                       })
                     }
 
@@ -763,6 +830,7 @@ export function StaffReturnsPage() {
                           </div>
                         </div>
 
+                        {/* Số lượng */}
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 12 }}>
                           <div>
                             <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#475569', marginBottom: 4 }}>
@@ -802,61 +870,138 @@ export function StaffReturnsPage() {
                           </div>
                         </div>
 
-                        {/* Checklist */}
+                        {/* Tình trạng bao bì */}
+                        <div style={{ marginBottom: 12 }}>
+                          <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#475569', marginBottom: 4 }}>
+                            Tình trạng bao bì vật lý <span style={{ color: '#ef4444' }}>*</span>:
+                          </label>
+                          <select
+                            value={draft.package_condition}
+                            onChange={(e) => updateField('package_condition', e.target.value)}
+                            style={{
+                              width: '100%',
+                              padding: '7px 10px',
+                              borderRadius: 6,
+                              border: draft.package_condition ? '1px solid #cbd5e1' : '1px solid #f87171',
+                              fontSize: 12,
+                              background: draft.package_condition ? '#fff' : '#fff1f2',
+                            }}
+                          >
+                            <option value="">-- Vui lòng chọn tình trạng bao bì --</option>
+                            <option value="SEALED">Bao bì nguyên vẹn, niêm phong hộp/chai đầy đủ</option>
+                            <option value="OPENED">Bao bì đã bị mở nắp / rách niêm phong</option>
+                            <option value="DAMAGED">Bao bì móp méo / rách nát / biến dạng / dơ bẩn</option>
+                          </select>
+                        </div>
+
+                        {/* 4 Tiêu chuẩn kiểm định an toàn dược */}
                         <div
                           style={{
                             display: 'grid',
-                            gridTemplateColumns: 'repeat(3, 1fr)',
+                            gridTemplateColumns: 'repeat(2, 1fr)',
                             gap: 12,
-                            padding: '10px 12px',
+                            padding: '12px',
                             background: '#f8fafc',
                             borderRadius: 8,
+                            border: '1px solid #e2e8f0',
                             marginBottom: 12,
                           }}
                         >
-                          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}>
-                            <input
-                              type="checkbox"
-                              checked={draft.seal_intact}
-                              onChange={(e) => updateField('seal_intact', e.target.checked)}
-                            />
-                            <span>Tem niêm phong nguyên vẹn</span>
-                          </label>
+                          {/* 1. Tem niêm phong */}
+                          <div>
+                            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
+                              1. Tem niêm phong nguyên vẹn <span style={{ color: '#ef4444' }}>*</span>
+                            </label>
+                            <select
+                              value={draft.seal_intact === null ? '' : draft.seal_intact ? 'true' : 'false'}
+                              onChange={(e) => updateField('seal_intact', e.target.value === '' ? null : e.target.value === 'true')}
+                              style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12 }}
+                            >
+                              <option value="">-- Chưa chọn --</option>
+                              <option value="true">Đạt (Nguyên vẹn)</option>
+                              <option value="false">Không đạt (Bị rách / mở)</option>
+                            </select>
+                          </div>
 
-                          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}>
-                            <input
-                              type="checkbox"
-                              checked={draft.batch_matched}
-                              onChange={(e) => updateField('batch_matched', e.target.checked)}
-                            />
-                            <span>Khớp số lô đã xuất từ kho</span>
-                          </label>
+                          {/* 2. Khớp số lô */}
+                          <div>
+                            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
+                              2. Khớp số lô xuất từ kho <span style={{ color: '#ef4444' }}>*</span>
+                            </label>
+                            <select
+                              value={draft.batch_matched === null ? '' : draft.batch_matched ? 'true' : 'false'}
+                              onChange={(e) => updateField('batch_matched', e.target.value === '' ? null : e.target.value === 'true')}
+                              style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12 }}
+                            >
+                              <option value="">-- Chưa chọn --</option>
+                              <option value="true">Đạt (Khớp số lô)</option>
+                              <option value="false">Không đạt (Sai lệch lô)</option>
+                            </select>
+                          </div>
 
-                          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}>
-                            <input
-                              type="checkbox"
-                              checked={draft.expiry_matched}
-                              onChange={(e) => updateField('expiry_matched', e.target.checked)}
-                            />
-                            <span>Khớp hạn sử dụng đã xuất</span>
-                          </label>
+                          {/* 3. Khớp hạn sử dụng */}
+                          <div>
+                            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
+                              3. Khớp hạn sử dụng xuất kho <span style={{ color: '#ef4444' }}>*</span>
+                            </label>
+                            <select
+                              value={draft.expiry_matched === null ? '' : draft.expiry_matched ? 'true' : 'false'}
+                              onChange={(e) => updateField('expiry_matched', e.target.value === '' ? null : e.target.value === 'true')}
+                              style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12 }}
+                            >
+                              <option value="">-- Chưa chọn --</option>
+                              <option value="true">Đạt (Khớp hạn sử dụng)</option>
+                              <option value="false">Không đạt (Sai lệch hạn)</option>
+                            </select>
+                          </div>
+
+                          {/* 4. Điều kiện bảo quản */}
+                          <div>
+                            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
+                              4. Bảo quản đạt chuẩn GSP <span style={{ color: '#ef4444' }}>*</span>
+                            </label>
+                            <select
+                              value={draft.storage_condition_ok === null ? '' : draft.storage_condition_ok ? 'true' : 'false'}
+                              onChange={(e) => updateField('storage_condition_ok', e.target.value === '' ? null : e.target.value === 'true')}
+                              style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12 }}
+                            >
+                              <option value="">-- Chưa chọn --</option>
+                              <option value="true">Đạt (Đạt chuẩn bảo quản)</option>
+                              <option value="false">Không đạt (Ẩm ướt / quá nhiệt)</option>
+                            </select>
+                          </div>
                         </div>
+
+                        {!isSafetyPassed && (
+                          <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, padding: '8px 12px', marginBottom: 12, fontSize: 12, color: '#b91c1c' }}>
+                            ⚠️ <strong>Quy tắc an toàn dược phẩm:</strong> Chỉ khi đạt 100% cả 4 tiêu chuẩn kiểm định an toàn trên mới được phép đề xuất Nhập lại kho bán (RESTOCK).
+                          </div>
+                        )}
 
                         {/* Đề xuất hướng xử lý */}
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 12 }}>
                           <div>
                             <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#475569', marginBottom: 4 }}>
-                              Đề xuất xử lý thuốc:
+                              Đề xuất xử lý thuốc <span style={{ color: '#ef4444' }}>*</span>:
                             </label>
                             <select
                               value={draft.suggested_action}
                               onChange={(e) => updateField('suggested_action', e.target.value)}
-                              style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12 }}
+                              style={{
+                                width: '100%',
+                                padding: '7px 10px',
+                                borderRadius: 6,
+                                border: draft.suggested_action ? '1px solid #cbd5e1' : '1px solid #f87171',
+                                fontSize: 12,
+                                background: draft.suggested_action ? '#fff' : '#fff1f2',
+                              }}
                             >
-                              <option value="RESTOCK">Nhập lại kho bán (Đạt GSP)</option>
-                              <option value="QUARANTINE">Cách ly theo dõi</option>
-                              <option value="DISPOSE">Xuất hủy theo biên bản</option>
-                              <option value="REJECT">Từ chối nhận hàng hoàn</option>
+                              <option value="">-- Vui lòng chọn hướng xử lý --</option>
+                              <option value="RESTOCK" disabled={!isSafetyPassed}>
+                                Nhập lại kho bán (RESTOCK) {!isSafetyPassed ? ' [BỊ KHÓA - Chưa đạt an toàn]' : ''}
+                              </option>
+                              <option value="QUARANTINE">Cách ly theo dõi (QUARANTINE)</option>
+                              <option value="DISPOSE">Xuất hủy theo biên bản (DISPOSE)</option>
                             </select>
                           </div>
                           <div>

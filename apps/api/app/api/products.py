@@ -22,6 +22,7 @@ from app.models import (
     User,
     WarehouseBatchStock,
 )
+from app.models.inventory import ProductReview
 from app.models.classification import Category, ProductCategory
 from app.models.enums import (
     ConfidenceLabel,
@@ -63,8 +64,22 @@ def _product_query():
     )
 
 
-def _detail(product: CanonicalProduct) -> ProductDetail:
+def _detail(product: CanonicalProduct, db: Session | None = None) -> ProductDetail:
     latest_score = max(product.scores, key=lambda item: item.calculated_at) if product.scores else None
+    r_cnt = 0
+    r_avg = 0.0
+    if db is not None:
+        rev_stat = db.query(
+            func.count(ProductReview.id),
+            func.avg(ProductReview.rating),
+        ).filter(
+            ProductReview.canonical_product_id == product.id,
+            ProductReview.is_approved == True,
+        ).first()
+        if rev_stat and rev_stat[0]:
+            r_cnt = int(rev_stat[0])
+            r_avg = round(float(rev_stat[1] or 0.0), 1)
+
     return ProductDetail(
         id=product.id,
         canonical_name=product.canonical_name,
@@ -84,6 +99,8 @@ def _detail(product: CanonicalProduct) -> ProductDetail:
         publish_status=product.publish_status,
         is_demo=product.is_demo,
         updated_at=product.updated_at,
+        average_rating=r_avg,
+        review_count=r_cnt,
         dosage_form=product.dosage_form,
         route=product.route,
         manufacturing_country=product.manufacturing_country,
@@ -164,6 +181,7 @@ def list_products(
     prices_map: dict[int, float] = {}
     stocks_map: dict[int, int] = {}
     near_expiry_map: dict[int, int] = {}
+    reviews_map: dict[int, tuple[int, float]] = {}
 
     if p_ids:
         # 1. Prices
@@ -204,6 +222,18 @@ def list_products(
         for pid, n_cnt in near_rows:
             near_expiry_map[pid] = int(n_cnt or 0)
 
+        # 4. Approved reviews summary (Batch query without N+1)
+        review_rows = db.query(
+            ProductReview.canonical_product_id,
+            func.count(ProductReview.id),
+            func.avg(ProductReview.rating),
+        ).filter(
+            ProductReview.canonical_product_id.in_(p_ids),
+            ProductReview.is_approved == True,
+        ).group_by(ProductReview.canonical_product_id).all()
+        for pid, r_cnt, r_avg in review_rows:
+            reviews_map[pid] = (int(r_cnt or 0), round(float(r_avg or 0.0), 1))
+
     items = []
     for p in products:
         item_dict = ProductSummary.model_validate(p).model_dump()
@@ -212,6 +242,9 @@ def list_products(
         item_dict["price"] = prices_map.get(p.id)
         item_dict["total_stock"] = stocks_map.get(p.id, 0)
         item_dict["near_expiry_count"] = near_expiry_map.get(p.id, 0)
+        r_cnt, r_avg = reviews_map.get(p.id, (0, 0.0))
+        item_dict["review_count"] = r_cnt
+        item_dict["average_rating"] = r_avg
         
         # Active ingredient
         ing_names = [pi.ingredient.normalized_name for pi in p.ingredients if pi.ingredient]
@@ -232,7 +265,7 @@ def get_product(product_id: int, _: User = Depends(get_current_user), db: Sessio
     product = db.scalar(_product_query().where(CanonicalProduct.id == product_id))
     if not product:
         raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm")
-    return _detail(product)
+    return _detail(product, db=db)
 
 
 @router.post("/products/{product_id}/recalculate", response_model=ScoreRecalculateResponse)
@@ -725,4 +758,4 @@ def public_product(product_id: int, db: Session = Depends(get_db)):
     )
     if not product:
         raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm đủ điều kiện công bố")
-    return _detail(product)
+    return _detail(product, db=db)

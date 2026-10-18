@@ -1,4 +1,4 @@
-export type UserRole = 'ADMIN' | 'WAREHOUSE_MANAGER' | 'WAREHOUSE_STAFF' | 'CUSTOMER'
+export type UserRole = 'ADMIN' | 'WAREHOUSE_MANAGER' | 'WAREHOUSE_STAFF' | 'CUSTOMER' | 'DATA_REVIEWER'
 
 export interface User {
   id: number
@@ -378,4 +378,6 @@ export interface WarehouseNotificationItem {
   is_read: boolean
   read_at: string | null
   created_at: string | null
+  warehouse_code?: string | null
+  warehouse_name?: string | null
 }
