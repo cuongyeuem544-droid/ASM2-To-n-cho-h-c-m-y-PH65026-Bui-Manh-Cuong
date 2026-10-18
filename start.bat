@@ -211,7 +211,7 @@ if "!IS_FIRST_RUN!"=="1" (
 :: 13. Khoi dong Backend tai cong 8000
 echo.
 echo [13/16] Khoi dong Backend FastAPI tai cong 8000...
-start "PharmaTrust Backend :8000" cmd /k "cd /d "%ROOT%" && call .venv\Scripts\activate.bat && set PYTHONPATH=%ROOT%apps\api && python -m uvicorn app.main:app --app-dir apps\api --reload --host 0.0.0.0 --port 8000"
+start "PharmaTrust Backend :8000" cmd /k "cd /d "%ROOT%" && call "%ROOT%.venv\Scripts\activate.bat" && set PYTHONPATH=%ROOT%apps\api && "%ROOT%.venv\Scripts\python.exe" -m uvicorn app.main:app --app-dir apps\api --reload --host 0.0.0.0 --port 8000"
 
 :: 14. Cho Backend Health Check thanh cong
 echo.
