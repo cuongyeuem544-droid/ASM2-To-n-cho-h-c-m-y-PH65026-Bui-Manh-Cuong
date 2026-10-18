@@ -20,7 +20,7 @@ export function parseUTCDate(dateStr: string | Date | null | undefined): Date | 
 
 export function formatDateTimeVN(dateStr: string | Date | null | undefined): string {
   const d = parseUTCDate(dateStr);
-  if (!d) return '-';
+  if (!d) return '—';
 
   return new Intl.DateTimeFormat('vi-VN', {
     timeZone: 'Asia/Ho_Chi_Minh',
@@ -36,7 +36,7 @@ export function formatDateTimeVN(dateStr: string | Date | null | undefined): str
 
 export function formatDateVN(dateStr: string | Date | null | undefined): string {
   const d = parseUTCDate(dateStr);
-  if (!d) return '-';
+  if (!d) return '—';
 
   return new Intl.DateTimeFormat('vi-VN', {
     timeZone: 'Asia/Ho_Chi_Minh',

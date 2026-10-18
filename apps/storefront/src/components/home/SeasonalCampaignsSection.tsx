@@ -89,7 +89,7 @@ export function SeasonalCampaignsSection() {
   };
 
   return (
-    <section className="py-12 sm:py-16 bg-linear-to-b from-sky-50/60 to-white border-t border-slate-200/80">
+    <section className="font-sans py-12 sm:py-16 bg-linear-to-b from-sky-50/60 to-white border-t border-slate-200/80">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8">
@@ -140,7 +140,7 @@ export function SeasonalCampaignsSection() {
                   <span className="text-xs text-slate-400">• Cập nhật chuẩn GPP</span>
                 </div>
 
-                <h3 className="text-xl sm:text-2xl font-black text-slate-900 leading-snug">
+                <h3 className="text-xl sm:text-2xl font-black text-slate-900 leading-snug break-words">
                   {activeCamp.title}
                 </h3>
 
@@ -150,7 +150,7 @@ export function SeasonalCampaignsSection() {
                     <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
                     <span>Dấu hiệu & Triệu chứng nhận biết sớm:</span>
                   </div>
-                  <p className="text-xs sm:text-sm text-amber-950 leading-relaxed">
+                  <p className="text-xs sm:text-sm text-amber-950 leading-relaxed break-words">
                     {activeCamp.symptoms}
                   </p>
                 </div>
@@ -161,7 +161,7 @@ export function SeasonalCampaignsSection() {
                     <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
                     <span>Lời khuyên phòng bệnh từ Dược sĩ:</span>
                   </div>
-                  <p className="text-xs sm:text-sm text-emerald-950 leading-relaxed">
+                  <p className="text-xs sm:text-sm text-emerald-950 leading-relaxed break-words">
                     {activeCamp.prevention}
                   </p>
                 </div>

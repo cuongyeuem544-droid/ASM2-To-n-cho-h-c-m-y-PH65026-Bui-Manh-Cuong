@@ -7,6 +7,7 @@ import smtplib
 import socket
 from datetime import datetime, timezone
 from typing import Optional, Tuple
+import uuid
 
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
@@ -522,4 +523,73 @@ Liên hệ Dược sĩ hỗ trợ: support@pharmatrust.vn
             db.commit()
             db.refresh(outbox)
 
+        return outbox
+
+    @classmethod
+    def queue_and_send_test_email(
+        cls,
+        db: Session,
+        recipient_email: str,
+    ) -> EmailOutbox:
+        """
+        Tạo bản ghi EmailOutbox cho thư kiểm tra SMTP và tiến hành gửi.
+        Lưu vết đầy đủ trạng thái PENDING -> SENT / FAILED, sent_at và mã tham chiếu duy nhất.
+        """
+        safe_email = recipient_email.strip()
+        ref_id = f"TEST-{uuid.uuid4().hex[:8].upper()}"
+        subject = "[PharmaTrust] Kiểm tra kết nối dịch vụ gửi Email Gmail SMTP"
+        body_html = f"""
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px;">
+          <h2 style="color: #0284c7; margin-top: 0;">Kiểm tra kết nối SMTP PharmaTrust / H4CARE</h2>
+          <p>Xin chào,</p>
+          <p>Đây là email kiểm tra được gửi trực tiếp từ máy chủ PharmaTrust qua giao thức <b>SMTP ({settings.smtp_host}:{settings.smtp_port})</b>.</p>
+          <p style="background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #cbd5e1; font-family: monospace; font-size: 13px;">
+            Sender: {settings.smtp_from_name} &lt;{settings.smtp_user or settings.smtp_from_email}&gt;<br>
+            Recipient: {html.escape(safe_email)}<br>
+            Host: {settings.smtp_host}:{settings.smtp_port}<br>
+            TLS: {settings.smtp_tls} | SSL: {settings.smtp_ssl}
+          </p>
+          <p style="color: #16a34a; font-weight: bold;">✓ Kết nối SMTP Gmail hoạt động hoàn hảo!</p>
+          <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
+          <p style="font-size: 11px; color: #64748b;">Hệ thống Thương mại Dược phẩm PharmaTrust & H4CARE. Tham chiếu: {ref_id}</p>
+        </div>
+        """.strip()
+        body_text = f"Email kiểm tra kết nối SMTP PharmaTrust gửi tới {safe_email}. Tham chiếu: {ref_id}. Kết nối thành công!"
+
+        outbox = EmailOutbox(
+            recipient_email=safe_email,
+            subject=subject,
+            body_html=body_html,
+            body_text=body_text,
+            reference_type="SMTP_TEST",
+            reference_id=ref_id,
+            status="PENDING",
+            retry_count=0,
+            max_retries=3,
+        )
+        db.add(outbox)
+        db.flush()
+
+        try:
+            cls.send_smtp_email(
+                recipient_email=outbox.recipient_email,
+                subject=outbox.subject,
+                body_html=outbox.body_html,
+                body_text=outbox.body_text,
+            )
+            outbox.status = "SENT"
+            outbox.sent_at = datetime.now(timezone.utc)
+            outbox.last_error = None
+        except Exception as e:
+            err_code, is_retryable, sanitized_msg = cls.classify_smtp_error(e)
+            logger.warning(f"[EMAIL] Gửi email kiểm tra thất bại tới '{safe_email}' [{err_code}]: {sanitized_msg}")
+            outbox.status = "FAILED"
+            outbox.last_error = f"[{err_code}] {sanitized_msg}"
+            outbox.retry_count += 1
+            db.commit()
+            db.refresh(outbox)
+            raise e
+
+        db.commit()
+        db.refresh(outbox)
         return outbox

@@ -384,13 +384,13 @@ export function CampaignsPage() {
                       <span className="font-mono text-muted">#{c.id}</span>
                     </td>
                     <td>
-                      <strong className="d-block text-truncate" style={{ maxWidth: '240px' }}>
+                      <strong className="d-block line-clamp-2" style={{ maxWidth: '240px', color: '#0f172a' }} title={c.title}>
                         {c.title}
                       </strong>
-                      <div className="text-xs text-muted mt-0.5">
+                      <div className="text-xs text-muted mt-0.5 line-clamp-1" title={c.disease_name}>
                         Bệnh: <span className="font-bold text-slate-800">{c.disease_name}</span>
                       </div>
-                      <div className="text-xs font-mono text-muted">/{c.slug}</div>
+                      <div className="text-xs font-mono text-muted text-truncate" style={{ maxWidth: '240px' }} title={`/${c.slug}`}>/{c.slug}</div>
                     </td>
                     <td>
                       <span className="tag tag-info" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
@@ -398,14 +398,14 @@ export function CampaignsPage() {
                         {c.season}
                       </span>
                     </td>
-                    <td>
+                    <td style={{ maxWidth: '340px' }}>
                       <div style={{ fontSize: '0.82rem', lineHeight: '1.4' }}>
                         <strong className="text-amber-800">Triệu chứng: </strong>
-                        <span className="text-muted line-clamp-1">{c.symptoms}</span>
+                        <span className="text-muted line-clamp-2" title={c.symptoms}>{c.symptoms}</span>
                       </div>
                       <div style={{ fontSize: '0.82rem', lineHeight: '1.4', marginTop: '4px' }}>
                         <strong className="text-emerald-800">Phòng bệnh: </strong>
-                        <span className="text-muted line-clamp-1">{c.prevention}</span>
+                        <span className="text-muted line-clamp-2" title={c.prevention}>{c.prevention}</span>
                       </div>
                     </td>
                     <td>
@@ -509,7 +509,7 @@ export function CampaignsPage() {
                   />
                 </div>
 
-                <div className="form-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className="form-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
                   <div className="form-group">
                     <label className="form-label">
                       Tên bệnh dịch tễ <span className="text-danger">*</span>
@@ -581,7 +581,7 @@ export function CampaignsPage() {
                   </div>
                 </div>
 
-                <div className="form-row" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem' }}>
+                <div className="form-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
                   <div className="form-group">
                     <label className="form-label">URL Ảnh bìa (tùy chọn)</label>
                     <input

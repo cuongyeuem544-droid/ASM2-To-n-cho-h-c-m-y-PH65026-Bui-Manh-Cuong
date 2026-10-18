@@ -180,10 +180,10 @@ function ProductsContent() {
           (a, b) => (b.salePrice || b.price) - (a.salePrice || a.price)
         );
       case "rating":
-        return list.sort((a, b) => b.rating - a.rating);
+        return list.sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
       case "popular":
       default:
-        return list.sort((a, b) => b.reviewCount - a.reviewCount);
+        return list.sort((a, b) => (b.reviewCount ?? 0) - (a.reviewCount ?? 0));
     }
   }, [filteredProducts, sortOption]);
 

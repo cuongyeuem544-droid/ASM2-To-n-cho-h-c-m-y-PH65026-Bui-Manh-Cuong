@@ -130,7 +130,11 @@ export function EmailsPage() {
       setNotification({ type: 'success', message: res?.message || 'Đã gửi email kiểm tra thành công!' })
       setIsTestModalOpen(false)
       setTestRecipient('')
-      await loadEmails()
+      if (statusFilter !== 'ALL') {
+        setStatusFilter('ALL')
+      } else {
+        await loadEmails()
+      }
     } catch (err: any) {
       setNotification({ type: 'error', message: err?.message || 'Không thể gửi email kiểm tra' })
     } finally {
@@ -329,6 +333,10 @@ export function EmailsPage() {
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700, background: '#fee2e2', color: '#b91c1c' }}>
                         <XCircle size={12} /> Lỗi gửi ({m.retry_count}/{m.max_retries})
                       </span>
+                    ) : m.status === 'SENDING' ? (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700, background: '#e0f2fe', color: '#0369a1' }}>
+                        <RefreshCw size={12} className="animate-spin" /> Đang gửi...
+                      </span>
                     ) : (
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700, background: '#fef3c7', color: '#b45309' }}>
                         <Clock size={12} /> Đang chờ
@@ -351,11 +359,17 @@ export function EmailsPage() {
                       </button>
                       <button
                         type="button"
-                        disabled={resendingId === m.id}
+                        disabled={resendingId === m.id || m.status === 'SENT'}
                         onClick={() => handleResend(m.id)}
                         className="primary-button"
-                        style={{ padding: '4px 8px', fontSize: 12, background: '#0284c7', borderColor: '#0284c7' }}
-                        title="Gửi lại email này"
+                        style={{
+                          padding: '4px 8px',
+                          fontSize: 12,
+                          background: m.status === 'SENT' ? '#94a3b8' : '#0284c7',
+                          borderColor: m.status === 'SENT' ? '#94a3b8' : '#0284c7',
+                          cursor: m.status === 'SENT' ? 'not-allowed' : 'pointer',
+                        }}
+                        title={m.status === 'SENT' ? 'Email đã gửi thành công, không gửi lại' : 'Gửi lại email này'}
                       >
                         <Send size={13} className={resendingId === m.id ? 'animate-spin' : ''} /> Gửi lại
                       </button>
@@ -449,12 +463,19 @@ export function EmailsPage() {
               </button>
               <button
                 type="button"
-                disabled={resendingId === selectedEmail.id}
+                disabled={resendingId === selectedEmail.id || selectedEmail.status === 'SENT'}
                 onClick={() => handleResend(selectedEmail.id)}
                 className="primary-button"
-                style={{ padding: '8px 18px', fontSize: 13, background: '#0284c7', borderColor: '#0284c7' }}
+                style={{
+                  padding: '8px 18px',
+                  fontSize: 13,
+                  background: selectedEmail.status === 'SENT' ? '#94a3b8' : '#0284c7',
+                  borderColor: selectedEmail.status === 'SENT' ? '#94a3b8' : '#0284c7',
+                  cursor: selectedEmail.status === 'SENT' ? 'not-allowed' : 'pointer',
+                }}
+                title={selectedEmail.status === 'SENT' ? 'Email đã gửi thành công, không gửi lại' : 'Gửi lại ngay'}
               >
-                <Send size={14} /> Gửi lại ngay
+                <Send size={14} className={resendingId === selectedEmail.id ? 'animate-spin' : ''} /> Gửi lại ngay
               </button>
             </div>
           </div>

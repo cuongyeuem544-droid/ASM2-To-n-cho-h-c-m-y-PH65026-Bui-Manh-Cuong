@@ -28,7 +28,6 @@ const EmailsPage = lazy(() => import('./pages/EmailsPage').then(module => ({ def
 const ReviewsPage = lazy(() => import('./pages/ReviewsPage').then(module => ({ default: module.ReviewsPage })))
 const CampaignsPage = lazy(() => import('./pages/CampaignsPage').then(module => ({ default: module.CampaignsPage })))
 const CategoriesPage = lazy(() => import('./pages/CategoriesPage').then(module => ({ default: module.CategoriesPage })))
-const ClassificationQueuePage = lazy(() => import('./pages/ClassificationQueuePage').then(module => ({ default: module.ClassificationQueuePage })))
 const ReturnsPage = lazy(() => import('./pages/ReturnsPage').then(module => ({ default: module.ReturnsPage })))
 const RefundsPage = lazy(() => import('./pages/RefundsPage').then(module => ({ default: module.RefundsPage })))
 const ExchangesPage = lazy(() => import('./pages/ExchangesPage').then(module => ({ default: module.ExchangesPage })))
@@ -166,7 +165,7 @@ export default function App() {
             <Route path="products" element={<ProductsPage />} />
             <Route path="products/:id" element={<ProductDetailPage />} />
             <Route path="categories" element={<CategoriesPage />} />
-            <Route path="classification/queue" element={<ClassificationQueuePage />} />
+            <Route path="classification/queue" element={<Navigate to="/products" replace />} />
             <Route path="orders" element={<OrdersPage />} />
             <Route path="returns" element={<ReturnsPage />} />
             <Route path="refunds" element={<RefundsPage />} />

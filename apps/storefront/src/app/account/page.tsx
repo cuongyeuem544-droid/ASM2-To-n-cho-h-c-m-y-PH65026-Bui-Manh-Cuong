@@ -39,6 +39,7 @@ import { CustomerAddressBook } from "@/components/account/CustomerAddressBook";
 import { CustomerReturnsSection } from "@/components/returns/CustomerReturnsSection";
 import { ReturnWizardModal } from "@/components/returns/ReturnWizardModal";
 import VietQrPaymentModal from "@/components/checkout/VietQrPaymentModal";
+import { formatDateTimeVN } from "@/lib/dateUtils";
 
 interface CustomerOrder {
   id: number;
@@ -665,7 +666,7 @@ export default function AccountPage() {
                             Đơn hàng #{order.order_code}
                           </span>
                           <span className="text-[10px] text-slate-400">
-                            {order.created_at ? new Date(order.created_at).toLocaleDateString("vi-VN") : ""}
+                            {order.created_at ? formatDateTimeVN(order.created_at) : "—"}
                           </span>
                         </div>
                         <p className="text-[11px] text-slate-600 mt-0.5">
@@ -738,10 +739,13 @@ export default function AccountPage() {
               <X className="w-5 h-5" />
             </button>
 
-            <div className="flex items-center gap-2 mb-3">
+            <div className="flex items-center gap-2 mb-1">
               <span className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse" />
               <h3 className="text-base font-black text-slate-900">Chi tiết đơn hàng #{selectedOrder.order_code}</h3>
             </div>
+            <p className="text-xs text-slate-500 mb-3">
+              Thời gian đặt đơn: <span className="font-semibold text-slate-700">{formatDateTimeVN(selectedOrder.created_at)}</span>
+            </p>
 
             {/* Tracking Progress */}
             <div className="p-3.5 bg-brand-blue-50 border border-brand-blue-100 rounded-xl mb-4">
@@ -812,7 +816,7 @@ export default function AccountPage() {
                       <div>
                         <span className="font-mono font-bold text-slate-800">{t.transaction_code}</span>
                         <span className="text-slate-400 block text-[10px]">
-                          Cổng: {t.provider} • {t.created_at ? new Date(t.created_at).toLocaleString("vi-VN") : ""}
+                          Cổng: {t.provider} • {t.created_at ? formatDateTimeVN(t.created_at) : "—"}
                         </span>
                       </div>
                       <div className="text-right">

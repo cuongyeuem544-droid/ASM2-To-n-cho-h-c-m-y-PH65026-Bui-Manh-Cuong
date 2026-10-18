@@ -139,42 +139,28 @@ def resend_outbox_email(
 @emails_router.post("/test")
 def send_test_email(
     payload: SendTestEmailRequest,
+    db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """
-    [ADMIN ONLY] Gửi email kiểm tra cấu hình SMTP tới địa chỉ được chỉ định.
+    [ADMIN ONLY] Gửi email kiểm tra cấu hình SMTP tới địa chỉ được chỉ định,
+    ghi nhận đầy đủ vào EmailOutbox.
     """
-    subject = "[PharmaTrust] Kiểm tra kết nối dịch vụ gửi Email Gmail SMTP"
-    body_html = f"""
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px;">
-      <h2 style="color: #0284c7; margin-top: 0;">Kiểm tra kết nối SMTP PharmaTrust / H4CARE</h2>
-      <p>Xin chào,</p>
-      <p>Đây là email kiểm tra được gửi trực tiếp từ máy chủ PharmaTrust qua giao thức <b>SMTP ({settings.smtp_host}:{settings.smtp_port})</b>.</p>
-      <p style="background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #cbd5e1; font-family: monospace; font-size: 13px;">
-        Sender: {settings.smtp_from_name} &lt;{settings.smtp_user or settings.smtp_from_email}&gt;<br>
-        Recipient: {payload.recipient_email}<br>
-        Host: {settings.smtp_host}:{settings.smtp_port}<br>
-        TLS: {settings.smtp_tls} | SSL: {settings.smtp_ssl}
-      </p>
-      <p style="color: #16a34a; font-weight: bold;">✓ Kết nối SMTP Gmail hoạt động hoàn hảo!</p>
-      <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
-      <p style="font-size: 11px; color: #64748b;">Hệ thống Thương mại Dược phẩm PharmaTrust & H4CARE.</p>
-    </div>
-    """
-    body_text = f"Email kiểm tra kết nối SMTP PharmaTrust gửi tới {payload.recipient_email}. Kết nối thành công!"
-
     try:
-        EmailService.send_smtp_email(
+        outbox = EmailService.queue_and_send_test_email(
+            db=db,
             recipient_email=str(payload.recipient_email),
-            subject=subject,
-            body_html=body_html,
-            body_text=body_text,
         )
         return {
             "success": True,
             "message": f"Đã gửi thành công email kiểm tra tới '{payload.recipient_email}'",
+            "outbox_id": outbox.id,
+            "status": outbox.status,
+            "sent_at": outbox.sent_at.isoformat() if outbox.sent_at else None,
+            "reference_id": outbox.reference_id,
             "host": settings.smtp_host,
             "port": settings.smtp_port,
         }
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Không thể gửi email kiểm tra: {str(e)}")
+        err_code, _, sanitized_msg = EmailService.classify_smtp_error(e)
+        raise HTTPException(status_code=400, detail=f"Không thể gửi email kiểm tra [{err_code}]: {sanitized_msg}")

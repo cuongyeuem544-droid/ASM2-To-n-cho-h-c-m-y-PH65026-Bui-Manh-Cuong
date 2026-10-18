@@ -136,15 +136,17 @@ export const ProductQuickViewModal: React.FC<ProductQuickViewModalProps> = ({
                         <Star
                           key={i}
                           className={`w-3.5 h-3.5 ${
-                            i < Math.floor(product.rating)
+                            (product.reviewCount ?? 0) > 0 && i < Math.floor(product.rating ?? 0)
                               ? "fill-current"
                               : "text-slate-200"
                           }`}
                         />
                       ))}
                     </div>
-                    <span className="font-bold text-slate-800">{product.rating}</span>
-                    <span className="text-slate-400">({product.reviewCount} đánh giá)</span>
+                    <span className="font-bold text-slate-800">
+                      {(product.reviewCount ?? 0) > 0 ? (product.rating ?? 0).toFixed(1) : "0.0"}
+                    </span>
+                    <span className="text-slate-400">({product.reviewCount ?? 0} đánh giá)</span>
                     <span className="text-slate-300">|</span>
                     {product.isPrescription ? (
                       <span className="text-rose-600 font-semibold flex items-center gap-1">

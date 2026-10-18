@@ -198,13 +198,17 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                 <Star
                   key={i}
                   className={`w-3 h-3 ${
-                    i < Math.floor(product.rating) ? "fill-current" : "text-slate-200"
+                    (product.reviewCount ?? 0) > 0 && i < Math.floor(product.rating ?? 0)
+                      ? "fill-current"
+                      : "text-slate-200"
                   }`}
                 />
               ))}
             </div>
-            <span className="text-[11px] font-bold text-slate-700">{product.rating}</span>
-            <span className="text-[10px] text-slate-400">({product.reviewCount})</span>
+            <span className="text-[11px] font-bold text-slate-700">
+              {(product.reviewCount ?? 0) > 0 ? (product.rating ?? 0).toFixed(1) : "0.0"}
+            </span>
+            <span className="text-[10px] text-slate-400">({product.reviewCount ?? 0})</span>
           </div>
         </div>
 
