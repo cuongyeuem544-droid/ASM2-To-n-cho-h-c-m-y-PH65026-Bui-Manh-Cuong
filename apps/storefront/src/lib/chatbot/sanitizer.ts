@@ -135,6 +135,6 @@ export function sanitizeProduct(p: Product): ChatProductItem {
     dosageForm: cleanMedicalText(p.dosageForm) || "Viên nén",
     stock: typeof p.stock === "number" ? p.stock : 100,
     isPrescription: !!p.isPrescription,
-    shortDescription: cleanDesc || "Sản phẩm chính hãng tại Hệ thống Nhà thuốc H4CARE chuẩn GPP.",
+    shortDescription: cleanDesc || "Sản phẩm chăm sóc sức khỏe chính hãng tại H4CARE.",
   };
 }

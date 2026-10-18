@@ -1,17 +1,50 @@
 "use client";
 
 import React from "react";
-import { ChatMessage } from "@/lib/chatbot/types";
+import { ChatAttachment, ChatMessage } from "@/lib/chatbot/types";
 import { MarkdownContent } from "./MarkdownContent";
 import { ChatProductCard } from "./ChatProductCard";
-import { AlertTriangle, Bot, User, PhoneCall, ShieldCheck } from "lucide-react";
+import {
+  AlertTriangle,
+  Bot,
+  User,
+  PhoneCall,
+  ShieldCheck,
+  FileText,
+  Download,
+  ExternalLink,
+  ZoomIn,
+} from "lucide-react";
 
 interface ChatMessageItemProps {
   message: ChatMessage;
+  onViewImage?: (attachment: ChatAttachment) => void;
 }
 
-export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message }) => {
+function formatFileSize(bytes?: number): string {
+  if (!bytes || bytes <= 0) return "";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i] || "MB"}`;
+}
+
+function isImageAttachment(att: ChatAttachment): boolean {
+  if (att.mimeType && att.mimeType.startsWith("image/")) return true;
+  if (att.type && att.type.startsWith("image/")) return true;
+  const name = (att.fileName || att.name || att.url || "").toLowerCase();
+  return (
+    name.endsWith(".jpg") ||
+    name.endsWith(".jpeg") ||
+    name.endsWith(".png") ||
+    name.endsWith(".webp") ||
+    name.endsWith(".gif")
+  );
+}
+
+export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onViewImage }) => {
   const isUser = message.role === "user";
+  const attachments = message.attachments || [];
 
   return (
     <div className={`flex gap-2.5 ${isUser ? "justify-end" : "justify-start"} group`}>
@@ -37,13 +70,13 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message }) => 
               : "bg-white border border-slate-200/90 text-slate-800 rounded-tl-xs shadow-2xs"
           }`}
         >
-          {/* Header nhỏ cho Bot: Tên & Badge chuẩn GPP */}
+          {/* Header nhỏ cho Bot: Tên & Phân loại */}
           {!isUser && (
             <div className="flex items-center gap-1.5 mb-1.5 pb-1 border-b border-slate-100 text-[10px] text-slate-400">
-              <span className="font-bold text-brand-blue-700">Dược sĩ AI H4CARE</span>
+              <span className="font-bold text-brand-blue-700">Trợ lý AI H4CARE</span>
               <span className="inline-flex items-center gap-0.5 text-emerald-600 font-semibold">
                 <ShieldCheck className="w-2.5 h-2.5" />
-                Chuẩn GPP
+                Y tế & Sức khỏe
               </span>
             </div>
           )}
@@ -75,11 +108,96 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message }) => 
             </div>
           )}
 
+          {/* Hiển thị tệp đính kèm (Attachments) */}
+          {attachments.length > 0 && (
+            <div className="mb-2 space-y-2">
+              {attachments.map((att, idx) => {
+                const isImg = isImageAttachment(att);
+                const displayUrl = att.url || (att.base64Data ? `data:${att.mimeType};base64,${att.base64Data}` : "");
+
+                if (isImg && displayUrl) {
+                  return (
+                    <div
+                      key={att.id || idx}
+                      onClick={() => onViewImage?.(att)}
+                      className="relative group/img cursor-pointer overflow-hidden rounded-xl border border-black/10 shadow-xs max-w-sm transition-all hover:shadow-md"
+                    >
+                      <img
+                        src={displayUrl}
+                        alt={att.fileName || "Ảnh đính kèm"}
+                        className="max-h-48 w-auto object-cover rounded-xl transition-transform duration-200 group-hover/img:scale-102"
+                        loading="lazy"
+                      />
+                      <div className="absolute inset-0 bg-black/30 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center gap-1.5 text-white text-xs font-semibold">
+                        <ZoomIn className="w-4 h-4" />
+                        <span>Xem ảnh lớn</span>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // Document / Non-image attachment card
+                return (
+                  <div
+                    key={att.id || idx}
+                    className={`flex items-center justify-between gap-3 p-2.5 rounded-xl border transition-all ${
+                      isUser
+                        ? "bg-brand-blue-700/60 border-brand-blue-400/50 text-white hover:bg-brand-blue-700/80"
+                        : "bg-slate-50 border-slate-200 text-slate-800 hover:bg-slate-100"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div
+                        className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                          isUser ? "bg-white/20 text-white" : "bg-brand-blue-50 text-brand-blue-600"
+                        }`}
+                      >
+                        <FileText className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-semibold truncate leading-tight">
+                          {att.fileName || "Tệp đính kèm"}
+                        </p>
+                        {att.fileSize ? (
+                          <p
+                            className={`text-[10px] mt-0.5 ${
+                              isUser ? "text-brand-blue-100" : "text-slate-400"
+                            }`}
+                          >
+                            {formatFileSize(att.fileSize)}
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    {att.url && (
+                      <a
+                        href={att.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`p-1.5 rounded-lg shrink-0 transition-colors ${
+                          isUser
+                            ? "bg-white/20 hover:bg-white/30 text-white"
+                            : "bg-slate-200 hover:bg-slate-300 text-slate-700"
+                        }`}
+                        title="Tải / Mở tệp"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                      </a>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           {/* Nội dung tin nhắn Markdown */}
-          <MarkdownContent
-            content={message.content}
-            className={isUser ? "!text-white *:!text-white" : ""}
-          />
+          {message.content && (
+            <MarkdownContent
+              content={message.content}
+              className={isUser ? "!text-white *:!text-white" : ""}
+            />
+          )}
 
           {/* Danh sách thẻ sản phẩm gợi ý (nếu có) */}
           {message.recommendedProducts && message.recommendedProducts.length > 0 && (

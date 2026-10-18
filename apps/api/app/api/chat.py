@@ -6,8 +6,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_current_user
 from app.db.session import get_db
-from app.models import CanonicalProduct, PriceObservation
+from app.models import CanonicalProduct, PriceObservation, User
 from app.models.enums import PublishStatus, RxOtcStatus
 
 router = APIRouter(prefix="/chat", tags=["AI Chatbot Tư Vấn Dược Sĩ"])
@@ -118,6 +119,7 @@ RED_FLAG_KEYWORDS = [
 def chat_with_pharmacist(
     payload: ChatRequestSchema,
     request: Request,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     raw_msg = clean_text(payload.message).strip()
@@ -144,23 +146,23 @@ def chat_with_pharmacist(
     if re.search(r"^u003c|<[^>]+>|\\u003c", raw_msg, re.IGNORECASE):
         return ChatResponseSchema(
             reply="Dạ mình chưa hiểu rõ câu hỏi của bạn. Bạn có thể diễn đạt lại hoặc cho mình biết bạn đang cần tìm thuốc hay tư vấn triệu chứng gì không ạ?",
-            quick_replies=["🔍 Tra cứu thuốc", "📦 Chính sách đổi trả"],
+            quick_replies=["💊 Tìm hiểu thông tin thuốc", "📦 Chính sách đổi trả & giao hàng"],
             provider_used="fastapi_h4care_expert",
         )
 
     # 3. Chào hỏi (GREETING)
     if re.search(r"^(hi|hello|hey|xin chao|chao ban|chao shop|chao duoc si|chao em|chao|alo)(\s+(ban|shop|duoc si|em|anh|chi|bot|nha|oi|a|nhe))*[\s!.,?~]*$", norm_msg, re.IGNORECASE):
         return ChatResponseSchema(
-            reply="Xin chào! Mình là trợ lý H4CARE. Mình có thể giúp bạn tìm kiếm sản phẩm, tra cứu thông tin thuốc hoặc hướng dẫn mua hàng. Bạn cần hỗ trợ gì ạ?",
-            quick_replies=["🔍 Tra cứu Vitamin C", "💊 Tìm thuốc hạ sốt", "📦 Phí giao hàng bao nhiêu?"],
+            reply="Chào bạn! Mình là trợ lý AI của H4CARE. Mình có thể hỗ trợ bạn tìm hiểu thông tin thuốc, sản phẩm và giải đáp các thắc mắc về sức khỏe.\n\nBạn cần mình hỗ trợ điều gì hôm nay?",
+            quick_replies=[],
             provider_used="fastapi_h4care_expert",
         )
 
     # 4. Định danh (IDENTITY)
     if re.search(r"\b(ban la ai|ban ten gi|ten ban la gi|ai tao ra ban)\b", norm_msg, re.IGNORECASE):
         return ChatResponseSchema(
-            reply="Mình là **Trợ lý Dược sĩ AI H4CARE** – hệ thống tư vấn thông tin thuốc và hỗ trợ khách hàng của Hệ thống Nhà thuốc trực tuyến chuẩn GPP H4CARE. Mình luôn sẵn sàng hỗ trợ bạn 24/7.",
-            quick_replies=["🔍 Tra cứu thông tin thuốc", "🚚 Chính sách giao hàng"],
+            reply="Mình là **Trợ lý AI H4CARE**. Mình có thể hỗ trợ bạn tìm hiểu thông tin thuốc, sản phẩm và giải đáp các thắc mắc về sức khỏe.\n\nBạn cần mình hỗ trợ điều gì hôm nay?",
+            quick_replies=[],
             provider_used="fastapi_h4care_expert",
         )
 
@@ -206,8 +208,8 @@ def chat_with_pharmacist(
     # 8.1. Hỗ trợ gặp Dược sĩ thật (HUMAN_SUPPORT)
     if re.search(r"\b(duoc si that|bac si that|gap duoc si|gap bac si|nguoi that|gap nhan vien|nhan vien tu van|tong dai)\b", norm_msg, re.IGNORECASE):
         return ChatResponseSchema(
-            reply="Dạ hiện tại em là **Trợ lý Dược sĩ AI**, không thể chuyển máy trực tiếp cho nhân sự thật qua cửa sổ này.\n\nĐể được kết nối trực tiếp với **Dược sĩ chuyên môn H4CARE**, quý khách vui lòng liên hệ:\n- 📞 **Tổng đài Dược sĩ:** 1800 6828 (Miễn phí cước, 8:00 - 21:00 hàng ngày)\n- ✉️ **Email chuyên môn:** duocsi@h4care.vn\n- 🏥 **Tư vấn trực tiếp:** Tại các chi nhánh nhà thuốc H4CARE chuẩn GPP trên toàn quốc.\n\n*Nếu bạn có câu hỏi về liều dùng hoặc thông tin thuốc cần tra cứu gấp, bạn có thể gửi ngay tại đây để em hỗ trợ nhé!*",
-            quick_replies=["📞 Hotline 1800 6828", "🔍 Tra cứu thuốc", "📦 Tra cứu đơn hàng"],
+            reply="Dạ hiện tại mình là **Trợ lý AI H4CARE**, không thể chuyển máy trực tiếp cho nhân sự thật qua cửa sổ này.\n\nĐể được kết nối trực tiếp với **Dược sĩ chuyên môn H4CARE**, bạn vui lòng liên hệ:\n- 📞 **Tổng đài Dược sĩ:** 1800 6828 (Miễn phí cước, 8:00 - 21:00 hàng ngày)\n- ✉️ **Email chuyên môn:** duocsi@h4care.vn\n- 🏥 **Tư vấn trực tiếp:** Tại các chi nhánh nhà thuốc H4CARE trên toàn quốc.\n\n*Nếu bạn có câu hỏi về liều dùng hoặc thông tin thuốc cần tra cứu gấp, bạn có thể gửi ngay tại đây để mình hỗ trợ nhé!*",
+            quick_replies=["📞 Hotline 1800 6828", "💊 Tìm hiểu thông tin thuốc", "📦 Tra cứu đơn hàng"],
             provider_used="fastapi_human_support",
         )
 
@@ -269,7 +271,7 @@ def chat_with_pharmacist(
                         dosage_form="Viên nén",
                         stock=50,
                         is_prescription=is_rx,
-                        short_description=clean_text(p.indications)[:120] or "Sản phẩm chính hãng H4CARE chuẩn GPP.",
+                        short_description=clean_text(p.indications)[:120] or "Sản phẩm chăm sóc sức khỏe chính hãng tại H4CARE.",
                     )
                 )
     except Exception:

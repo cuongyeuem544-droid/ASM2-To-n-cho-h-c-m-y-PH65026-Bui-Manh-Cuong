@@ -26,3 +26,5 @@ backups/
 .DS_Store
 .next/
 *.tsbuildinfo
+
+storage/chat-attachments/

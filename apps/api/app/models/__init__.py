@@ -87,6 +87,13 @@ from app.models.security_and_promotions import (
     UserOtp,
     Voucher,
 )
+from app.models.chat_models import (
+    AIChatAttachment,
+    AIChatConversation,
+    AIChatMessage,
+    LiveChatMessage,
+    LiveChatSession,
+)
 
 __all__ = [
     "AdminAlert",
@@ -166,4 +173,9 @@ __all__ = [
     "ReturnEvidenceRequest",
     "ReturnEvidenceRequestStatus",
     "WarehouseNotification",
+    "AIChatAttachment",
+    "AIChatConversation",
+    "AIChatMessage",
+    "LiveChatMessage",
+    "LiveChatSession",
 ]

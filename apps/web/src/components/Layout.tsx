@@ -31,6 +31,7 @@ import {
   ChevronRight,
   CheckCircle2,
   FileSpreadsheet,
+  Headphones,
 } from 'lucide-react'
 import { useState, useEffect, useRef, type ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
@@ -67,6 +68,7 @@ const navGroups: NavGroup[] = [
       { to: '/categories', label: 'Cây danh mục & Bán hàng', icon: FolderTree },
       { to: '/classification/queue', label: 'Duyệt phân loại Y tế', icon: ShieldCheck },
       { to: '/orders', label: 'Quản lý đơn hàng', icon: ShoppingBag },
+      { to: '/live-chat', label: 'Tư vấn trực tiếp (Live Chat)', icon: Headphones },
       { to: '/reviews', label: 'Đánh giá & Nhận xét', icon: MessageSquare },
       { to: '/campaigns', label: 'Chiến dịch mùa bệnh', icon: ThermometerSnowflake },
       { to: '/candidates', label: 'Thuốc mới chờ duyệt', icon: FlaskConical },

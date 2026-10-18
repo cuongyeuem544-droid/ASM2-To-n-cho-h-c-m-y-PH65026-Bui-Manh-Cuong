@@ -15,7 +15,13 @@ import {
   formatDrugComparisonReply,
   DRUG_KNOWLEDGE_BASE,
 } from "./drug-knowledge";
-import { ChatProductItem, ChatResponse, ChatSafetyAlert, StandardIntent } from "./types";
+import {
+  ChatAttachment,
+  ChatProductItem,
+  ChatResponse,
+  ChatSafetyAlert,
+  StandardIntent,
+} from "./types";
 
 interface MessageHistoryItem {
   role: "user" | "assistant";
@@ -54,7 +60,14 @@ function buildSystemPrompt(
   intent: StandardIntent,
   activeDrug?: string
 ): string {
-  return `Bạn là "Trợ lý Dược sĩ AI H4CARE" - hệ thống tư vấn thông tin thuốc và chăm sóc sức khỏe của Hệ thống Nhà thuốc trực tuyến chuẩn GPP H4CARE.
+  return `Bạn là Trợ lý AI của H4CARE, chuyên hỗ trợ người dùng tìm hiểu thông tin thuốc, sản phẩm y tế và giải đáp thắc mắc về sức khỏe một cách khách quan, ân cần, an toàn và chính xác. Tránh các ngôn từ quảng cáo bán hàng, phóng đại hoặc khẩu hiệu thương mại.
+Tuyệt đối KHÔNG sử dụng cụm từ "Tra cứu thuốc chính hãng" hay bất kỳ khẩu hiệu tiếp thị nào.
+Không lặp lại câu chào sau mỗi tin nhắn.
+
+=== LỜI CHÀO MẶC ĐỊNH CHUẨN MỰC (CHỈ DÙNG KHI NGƯỜI DÙNG CHÀO HỎI BAN ĐẦU) ===
+"Chào bạn! Mình là trợ lý AI của H4CARE. Mình có thể hỗ trợ bạn tìm hiểu thông tin thuốc, sản phẩm và giải đáp các thắc mắc về sức khỏe.
+
+Bạn cần mình hỗ trợ điều gì hôm nay?"
 
 === QUY TẮC Y TẾ VÀ AN TOÀN BẮT BUỘC ===
 1. Khi người dùng mô tả triệu chứng sức khỏe:
@@ -332,13 +345,8 @@ function handleIntentDeterministically(
   // 5. CHÀO HỎI (GREETING)
   if (intent === "GREETING") {
     return {
-      reply: `Xin chào! Mình là trợ lý H4CARE. Mình có thể giúp bạn tìm kiếm sản phẩm, tra cứu thông tin thuốc hoặc hướng dẫn mua hàng. Bạn cần hỗ trợ gì ạ?`,
-      quickReplies: [
-        "🔍 Tra cứu Vitamin C",
-        "💊 Tìm thuốc hạ sốt Panadol",
-        "📦 Phí giao hàng bao nhiêu?",
-        "📋 Chính sách đổi trả thuốc",
-      ],
+      reply: `Chào bạn! Mình là trợ lý AI của H4CARE. Mình có thể hỗ trợ bạn tìm hiểu thông tin thuốc, sản phẩm và giải đáp các thắc mắc về sức khỏe.\n\nBạn cần mình hỗ trợ điều gì hôm nay?`,
+      quickReplies: [],
       attachProducts: false,
     };
   }
@@ -419,8 +427,8 @@ function handleIntentDeterministically(
   // 9. CÁC HỘI THOẠI KHÁC (GENERAL_CHAT / IDENTITY / GRATITUDE / CHITCHAT)
   if (norm.includes("ban la ai") || norm.includes("ban ten gi")) {
     return {
-      reply: `Mình là **Trợ lý Dược sĩ AI H4CARE** – hệ thống tư vấn thông tin thuốc và hỗ trợ khách hàng của Hệ thống Nhà thuốc trực tuyến chuẩn GPP H4CARE. Mình luôn sẵn sàng hỗ trợ bạn tra cứu thuốc chính hãng, tìm hiểu triệu chứng và hướng dẫn mua hàng 24/7.`,
-      quickReplies: ["🔍 Tra cứu thông tin thuốc", "🚚 Chính sách giao hàng", "💬 Tư vấn triệu chứng sức khỏe"],
+      reply: `Mình là **Trợ lý AI H4CARE**. Mình có thể hỗ trợ bạn tìm hiểu thông tin thuốc, sản phẩm và giải đáp các thắc mắc về sức khỏe. Bạn cần mình hỗ trợ điều gì hôm nay?`,
+      quickReplies: [],
       attachProducts: false,
     };
   }
@@ -428,19 +436,14 @@ function handleIntentDeterministically(
   if (norm.includes("cam on") || norm.includes("thank you")) {
     return {
       reply: `Dạ không có gì ạ! Rất vui được hỗ trợ bạn. Nếu bạn cần tìm hiểu thêm về bất kỳ loại thuốc hay sản phẩm chăm sóc sức khỏe nào, cứ nhắn cho mình nhé. Chúc bạn và gia đình luôn dồi dào sức khỏe!`,
-      quickReplies: ["🔍 Tra cứu sản phẩm khác", "📦 Hướng dẫn đặt hàng", "💬 Kênh tư vấn Dược sĩ"],
+      quickReplies: [],
       attachProducts: false,
     };
   }
 
   return {
     reply: `Dạ mình chưa hiểu rõ câu hỏi của bạn. Bạn có thể diễn đạt lại hoặc cho mình biết bạn đang cần tìm thuốc hay tư vấn triệu chứng gì không ạ?`,
-    quickReplies: [
-      "🔍 Tra cứu thông tin thuốc",
-      "🤒 Tư vấn triệu chứng bệnh",
-      "📦 Chính sách đổi trả",
-      "🚚 Phí ship bao nhiêu",
-    ],
+    quickReplies: [],
     attachProducts: false,
   };
 }
@@ -455,9 +458,17 @@ function handleIntentDeterministically(
 export async function getAiChatResponse(
   message: string,
   history: MessageHistoryItem[] = [],
-  options?: { currentUser?: any; contextProduct?: any }
+  options?: {
+    currentUser?: any;
+    contextProduct?: any;
+    attachments?: ChatAttachment[];
+    conversationId?: string;
+    sessionId?: string;
+    extractedMemory?: any;
+  }
 ): Promise<ChatResponse> {
   const cleanInput = cleanMedicalText(message).trim();
+  const attachments = options?.attachments || [];
 
   // 1. Phân tích ngữ cảnh đa lượt
   const convContext = buildConversationContext(history, cleanInput);

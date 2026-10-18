@@ -51,7 +51,67 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Parse & Validate body
+    // 2. Xác thực Bearer Token bắt buộc (Server-Side Authentication Gating)
+    const authHeader = req.headers.get("authorization");
+    if (!authHeader || !authHeader.toLowerCase().startsWith("bearer ")) {
+      return NextResponse.json(
+        { error: "Vui lòng đăng nhập để sử dụng trợ lý AI H4CARE." },
+        { status: 401 }
+      );
+    }
+
+    const token = authHeader.slice(7).trim();
+    if (!token) {
+      return NextResponse.json(
+        { error: "Vui lòng đăng nhập để sử dụng trợ lý AI H4CARE." },
+        { status: 401 }
+      );
+    }
+
+    // Xác thực token qua FastAPI backend
+    const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    let verifiedUser: { id: string | number; fullName?: string; phone?: string; email?: string; role?: string } | null = null;
+
+    try {
+      const authRes = await fetch(`${apiBase}/api/v1/auth/me`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        cache: "no-store",
+      });
+
+      if (authRes.status === 401 || authRes.status === 403) {
+        return NextResponse.json(
+          { error: "Phiên đăng nhập đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại." },
+          { status: 401 }
+        );
+      }
+
+      if (!authRes.ok) {
+        return NextResponse.json(
+          { error: "Không thể xác thực danh tính người dùng. Vui lòng thử lại sau." },
+          { status: authRes.status }
+        );
+      }
+
+      const userJson = await authRes.json();
+      verifiedUser = {
+        id: userJson.id,
+        fullName: userJson.full_name || undefined,
+        phone: userJson.phone || undefined,
+        email: userJson.email || undefined,
+        role: userJson.role || undefined,
+      };
+    } catch (fetchErr: any) {
+      console.error("[Chat API Auth Backend Error]:", fetchErr);
+      return NextResponse.json(
+        { error: "Không thể kết nối đến máy chủ xác thực H4CARE. Vui lòng thử lại sau." },
+        { status: 503 }
+      );
+    }
+
+    // 3. Parse & Validate body
     let body: ChatRequest;
     try {
       body = await req.json();
@@ -62,7 +122,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { message, conversationHistory = [], contextProduct, currentUser } = body;
+    const {
+      message,
+      conversationHistory = [],
+      contextProduct,
+      currentUser,
+      attachments = [],
+      conversationId,
+      sessionId,
+      extractedMemory,
+    } = body;
 
     if (!message || typeof message !== "string" || message.trim().length === 0) {
       return NextResponse.json(
@@ -94,7 +163,14 @@ export async function POST(req: NextRequest) {
     const response: ChatResponse = await getAiChatResponse(
       message.trim(),
       cleanHistory,
-      { currentUser, contextProduct }
+      {
+        currentUser: verifiedUser || currentUser,
+        contextProduct,
+        attachments,
+        conversationId,
+        sessionId,
+        extractedMemory,
+      }
     );
 
     return NextResponse.json(response, { status: 200 });

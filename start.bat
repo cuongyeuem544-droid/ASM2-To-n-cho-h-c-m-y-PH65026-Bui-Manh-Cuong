@@ -36,14 +36,14 @@ echo.
 :: 1. Chuyen ve thu muc goc du an
 echo [1/16] Thu muc goc du an: %ROOT%
 
-:: 2. Kiem tra Python 3.11 hoac 3.12 va tao .venv neu chua ton tai
-echo [2/16] Kiem tra phien ban Python - Yeu cau: 3.11 hoac 3.12...
+:: 2. Kiem tra Python 3.11, 3.12 hoac 3.13 va tao .venv neu chua ton tai
+echo [2/16] Kiem tra phien ban Python - Yeu cau: 3.11, 3.12 hoac 3.13...
 if not exist ".venv\Scripts\python.exe" (
     echo   - Chua tim thay moi truong ao .venv. Dang kiem tra Python he thong...
     set "SYSTEM_PY="
     where python >nul 2>nul
     if !errorlevel! equ 0 (
-        python -c "import sys; sys.exit(0 if (sys.version_info.major == 3 and sys.version_info.minor in (11, 12)) else 1)" >nul 2>nul
+        python -c "import sys; sys.exit(0 if (sys.version_info.major == 3 and sys.version_info.minor in (11, 12, 13)) else 1)" >nul 2>nul
         if !errorlevel! equ 0 (
             set "SYSTEM_PY=python"
         )
@@ -51,30 +51,35 @@ if not exist ".venv\Scripts\python.exe" (
     if not defined SYSTEM_PY (
         where py >nul 2>nul
         if !errorlevel! equ 0 (
-            py -3.11 -c "import sys; sys.exit(0)" >nul 2>nul
+            py -3.13 -c "import sys; sys.exit(0)" >nul 2>nul
             if !errorlevel! equ 0 (
-                set "SYSTEM_PY=py -3.11"
+                set "SYSTEM_PY=py -3.13"
             ) else (
                 py -3.12 -c "import sys; sys.exit(0)" >nul 2>nul
                 if !errorlevel! equ 0 (
                     set "SYSTEM_PY=py -3.12"
+                ) else (
+                    py -3.11 -c "import sys; sys.exit(0)" >nul 2>nul
+                    if !errorlevel! equ 0 (
+                        set "SYSTEM_PY=py -3.11"
+                    )
                 )
             )
         )
     )
     if not defined SYSTEM_PY (
-        call :error_exit "2" "Kiem tra Python" "Yeu cau Python 3.11 hoac 3.12 tren may"
+        call :error_exit "2" "Kiem tra Python" "Yeu cau Python 3.11, 3.12 hoac 3.13 tren may"
     )
     echo   - Dang tao moi truong ao .venv...
     !SYSTEM_PY! -m venv .venv
     if !errorlevel! neq 0 (
-        call :error_exit "4" "Khoi tao .venv" "Tao moi truong ao that bai"
+        call :error_exit "2" "Khoi tao .venv" "Tao moi truong ao that bai"
     )
 )
 
-.venv\Scripts\python.exe -c "import sys; v = sys.version_info; sys.exit(0 if (v.major == 3 and v.minor in (11, 12)) else 1)" >nul 2>nul
+.venv\Scripts\python.exe -c "import sys; v = sys.version_info; sys.exit(0 if (v.major == 3 and v.minor in (11, 12, 13)) else 1)" >nul 2>nul
 if !errorlevel! neq 0 (
-    call :error_exit "2" "Kiem tra Python trong .venv" "Moi truong .venv hien tai khong phai Python 3.11 hoac 3.12"
+    call :error_exit "2" "Kiem tra Python trong .venv" "Moi truong .venv hien tai khong phai Python 3.11, 3.12 hoac 3.13"
 )
 for /f "delims=" %%v in ('.venv\Scripts\python.exe -c "import sys; print(f'Python {sys.version.split()[0]}')"') do echo   - Phien ban Python hop le: %%v
 
@@ -142,7 +147,7 @@ if not exist "apps\web\node_modules" (
     echo   - Dependencies apps\web da ton tai.
 )
 
-:: 7 & 8. Tao .env tu .env.example neu chua ton tai (khong ghi de)
+:: 7. Tao .env tu .env.example neu chua ton tai (khong ghi de)
 echo.
 echo [7/16] Kiem tra tep cau hinh moi truong .env...
 if not exist ".env" (
@@ -154,6 +159,14 @@ if not exist ".env" (
     echo   - Da tao .env thanh cong tu .env.example.
 ) else (
     echo   - Tep .env da ton tai - giu nguyen, khong ghi de.
+)
+
+:: 8. Kiem tra trang thai va giai phong cac cong mang (8000, 5173, 3000)
+echo.
+echo [8/16] Kiem tra trang thai va giai phong cac cong mang (8000, 5173, 3000)...
+.venv\Scripts\python.exe apps\api\scripts\check_and_free_ports.py
+if !errorlevel! neq 0 (
+    call :error_exit "8" "Giai phong cong mang" "Khong the giai phong cac cong 8000, 5173, 3000"
 )
 
 :: 9. Chay Alembic migration
@@ -208,16 +221,20 @@ if !errorlevel! neq 0 (
     call :error_exit "14" "Backend Health Check" "Backend khong phan hoi tren cong 8000 sau 35 giay"
 )
 
-:: 15 & 16. Khoi dong Admin Web va Storefront voi cua so log rieng biet
+:: 15. Khoi dong Admin Web Portal tai cong 5173
 echo.
 echo [15/16] Khoi dong Admin Web Portal tai cong 5173...
 start "PharmaTrust Admin Web :5173" cmd /k "cd /d "%ROOT%apps\web" && npm run dev -- --host 0.0.0.0 --port 5173"
 
+:: 16. Khoi dong Storefront Next.js tai cong 3000 va kiem tra website san sang
 echo.
-echo [16/16] Khoi dong Storefront Next.js tai cong 3000...
+echo [16/16] Khoi dong Storefront Next.js tai cong 3000 va kiem tra website san sang...
 start "PharmaTrust Storefront :3000" cmd /k "cd /d "%ROOT%apps\storefront" && set NEXT_PUBLIC_DEMO_MODE=true && npm run dev -- -p 3000"
 
-ping 127.0.0.1 -n 4 >nul
+.venv\Scripts\python.exe apps\api\scripts\wait_for_services.py --timeout 45
+if !errorlevel! neq 0 (
+    call :error_exit "16" "Kiem tra website san sang" "Storefront hoac Admin Web khong phan hoi sau 45 giay"
+)
 
 echo.
 echo ===================================================================================
@@ -237,7 +254,7 @@ echo   * Nhan Vien Kho Ha Noi:             staff.hn@pharmatrust.vn      / Staff@
 echo   * Khach Hang Mua Thuoc:             buyer@pharmatrust.vn         / Buyer@123456
 echo ===================================================================================
 echo Ba cua so Command Prompt doc lap da mo san sang giu log truc tiep.
-echo Dang tu dong mo Google Chrome vao trang Storefront va Admin...
+echo Cac website da phan hoi san sang 100%. Dang tu dong mo Google Chrome...
 ping 127.0.0.1 -n 2 >nul
 
 start chrome http://localhost:3000 2>nul || start http://localhost:3000
