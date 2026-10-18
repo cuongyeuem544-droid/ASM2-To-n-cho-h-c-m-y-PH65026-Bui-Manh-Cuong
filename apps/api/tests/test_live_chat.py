@@ -101,3 +101,58 @@ def test_live_chat_lifecycle_and_security(client: TestClient):
         headers=h_c1,
     )
     assert res_close.status_code == 200
+
+
+def test_websocket_rejects_unauthenticated_and_wrong_customer(client: TestClient):
+    import uuid
+    from starlette.websockets import WebSocketDisconnect
+
+    suffix = uuid.uuid4().hex[:10]
+    with SessionLocal() as db:
+        owner = User(
+            email=f"ws_owner_{suffix}@h4care.test",
+            password_hash=hash_password("LocalTestPassword123!"),
+            full_name="WS Owner",
+            role=UserRole.CUSTOMER,
+            is_active=True,
+        )
+        stranger = User(
+            email=f"ws_other_{suffix}@h4care.test",
+            password_hash=hash_password("LocalTestPassword123!"),
+            full_name="WS Other",
+            role=UserRole.CUSTOMER,
+            is_active=True,
+        )
+        db.add_all([owner, stranger])
+        db.commit()
+        owner_id, stranger_id = owner.id, stranger.id
+
+    owner_token = create_access_token(str(owner_id), UserRole.CUSTOMER.value)
+    stranger_token = create_access_token(str(stranger_id), UserRole.CUSTOMER.value)
+    response = client.post(
+        "/api/v1/live-chat/sessions",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={"subject": "WebSocket permission regression"},
+    )
+    assert response.status_code == 200
+    session_code = response.json()["session_code"]
+
+    with __import__("pytest").raises(WebSocketDisconnect):
+        with client.websocket_connect(f"/api/v1/live-chat/ws/client/{session_code}"):
+            pass
+
+    with __import__("pytest").raises(WebSocketDisconnect):
+        with client.websocket_connect(
+            f"/api/v1/live-chat/ws/client/{session_code}?token={stranger_token}"
+        ):
+            pass
+
+    with client.websocket_connect(
+        f"/api/v1/live-chat/ws/client/{session_code}?token={owner_token}"
+    ) as ws:
+        ws.send_json({"type": "PING"})
+        assert ws.receive_json()["type"] == "PONG"
+
+    with __import__("pytest").raises(WebSocketDisconnect):
+        with client.websocket_connect(f"/api/v1/live-chat/ws/staff?token={owner_token}"):
+            pass
