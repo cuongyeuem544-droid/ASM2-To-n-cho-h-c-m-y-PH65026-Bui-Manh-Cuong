@@ -1,10 +1,11 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { useAuth } from "@/lib/auth/auth-context";
-import { AlertCircle, X, RefreshCw, ExternalLink, CheckCircle2 } from "lucide-react";
+import { AlertCircle, X, RefreshCw, ExternalLink, CheckCircle2, Clock, XCircle } from "lucide-react";
 
 import CheckoutHeader from "@/components/checkout/CheckoutHeader";
 import CartItemsTable, { CartItem } from "@/components/checkout/CartItemsTable";
@@ -29,6 +30,7 @@ import MobileStickyCheckoutBar from "@/components/checkout/MobileStickyCheckoutB
 import VietQrPaymentModal from "@/components/checkout/VietQrPaymentModal";
 
 export default function CartPage() {
+  const router = useRouter();
   const { user, isAuthenticated } = useAuth();
   const summaryRef = useRef<HTMLDivElement>(null);
   const confirmAddressRef = useRef<(() => Promise<StructuredAddress | null>) | null>(null);
@@ -88,7 +90,7 @@ export default function CartPage() {
     shippingAddress: string;
   } | null>(null);
 
-  const [isSimulatingPayment, setIsSimulatingPayment] = useState(false);
+  const [isVerifyingMomo, setIsVerifyingMomo] = useState(false);
   const [momoModal, setMomoModal] = useState<{
     isOpen: boolean;
     orderCode: string;
@@ -96,7 +98,7 @@ export default function CartPage() {
     payUrl?: string;
     qrCodeUrl?: string;
     deeplink?: string;
-    status: "PENDING" | "PAID" | "FAILED";
+    status: "PENDING" | "VERIFYING" | "PAID" | "FAILED" | "CANCELLED" | "EXPIRED";
     message?: string;
   } | null>(null);
 
@@ -733,6 +735,56 @@ export default function CartPage() {
     }
   };
 
+  // Hàm kiểm tra/đối soát MoMo chủ động
+  const handleCheckMomoStatus = async () => {
+    if (!momoModal?.orderCode || isVerifyingMomo) return;
+    setIsVerifyingMomo(true);
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("pharmatrust_token") : null;
+      const savedPhone = typeof window !== "undefined" ? localStorage.getItem("h4care_checkout_phone") || customerPhone : customerPhone;
+      const orderToken = typeof window !== "undefined" ? localStorage.getItem(`h4care_order_token_${momoModal.orderCode}`) || localStorage.getItem("h4care_latest_order_token") || "" : "";
+      const payHeaders: Record<string, string> = {};
+      if (token) payHeaders["Authorization"] = `Bearer ${token}`;
+      if (orderToken) payHeaders["X-Order-Token"] = orderToken;
+      const queryParams = [];
+      if (savedPhone) queryParams.push(`phone_verify=${encodeURIComponent(savedPhone)}`);
+      const queryStr = queryParams.length ? `?${queryParams.join("&")}` : "";
+
+      // Gọi endpoint đối soát trực tiếp từ MoMo
+      await fetch(`/api/v1/payments/momo/check/${momoModal.orderCode}${queryStr}`, {
+        method: "POST",
+        headers: payHeaders,
+      });
+
+      // Lấy trạng thái mới nhất từ server
+      const res = await fetch(`/api/v1/payments/orders/${momoModal.orderCode}/status${queryStr}`, { headers: payHeaders });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.payment_status === "PAID") {
+          setMomoModal((prev) =>
+            prev ? { ...prev, status: "PAID", message: "Giao dịch MoMo đã được xác nhận thành công!" } : null
+          );
+        } else if (data.payment_status === "CANCELLED" || data.order_status === "CANCELLED") {
+          setMomoModal((prev) =>
+            prev ? { ...prev, status: "CANCELLED", message: "Giao dịch MoMo đã bị hủy hoặc hết hạn." } : null
+          );
+        } else if (data.payment_status === "FAILED") {
+          setMomoModal((prev) =>
+            prev ? { ...prev, status: "FAILED", message: "Giao dịch MoMo thất bại." } : null
+          );
+        } else {
+          setMomoModal((prev) =>
+            prev ? { ...prev, status: "PENDING", message: "Hệ thống vẫn đang chờ nhận thanh toán từ MoMo." } : null
+          );
+        }
+      }
+    } catch (e) {
+      console.warn("Lỗi kiểm tra MoMo:", e);
+    } finally {
+      setIsVerifyingMomo(false);
+    }
+  };
+
   // Polling MoMo payment status
   useEffect(() => {
     if (!momoModal?.isOpen || momoModal.status !== "PENDING" || !momoModal.orderCode) {
@@ -764,6 +816,28 @@ export default function CartPage() {
                 : null
             );
             clearInterval(intervalId);
+          } else if (data.payment_status === "CANCELLED" || data.order_status === "CANCELLED") {
+            setMomoModal((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    status: "CANCELLED",
+                    message: "Giao dịch MoMo đã bị hủy hoặc hết hạn.",
+                  }
+                : null
+            );
+            clearInterval(intervalId);
+          } else if (data.payment_status === "FAILED") {
+            setMomoModal((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    status: "FAILED",
+                    message: "Giao dịch MoMo thất bại.",
+                  }
+                : null
+            );
+            clearInterval(intervalId);
           }
         }
       } catch (e) {
@@ -772,7 +846,7 @@ export default function CartPage() {
     }, 2500);
 
     return () => clearInterval(intervalId);
-  }, [momoModal?.isOpen, momoModal?.status, momoModal?.orderCode]);
+  }, [momoModal?.isOpen, momoModal?.status, momoModal?.orderCode, customerPhone]);
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">
@@ -980,7 +1054,7 @@ export default function CartPage() {
         />
       )}
 
-      {/* MoMo Sandbox Payment Modal */}
+      {/* MoMo Payment Modal */}
       {momoModal?.isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
           <div className="bg-white rounded-3xl max-w-md w-full overflow-hidden shadow-2xl border border-slate-200">
@@ -991,23 +1065,17 @@ export default function CartPage() {
                   M
                 </div>
                 <div>
-                  <h3 className="font-bold text-base leading-tight">Cổng thanh toán MoMo Sandbox</h3>
+                  <h3 className="font-bold text-base leading-tight">Cổng thanh toán MoMo</h3>
                   <p className="text-[11px] text-pink-100 font-mono">Đơn hàng: {momoModal.orderCode}</p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => {
+                  const targetCode = momoModal.orderCode;
+                  const isPaid = momoModal.status === "PAID";
                   setMomoModal(null);
-                  setOrderSuccess({
-                    order_code: momoModal.orderCode,
-                    total: momoModal.amount,
-                    customer_name: customerName,
-                    customer_phone: customerPhone,
-                    shipping_address: streetAddress,
-                    payment_method: "MOMO",
-                    fulfillment_type: fulfillmentType,
-                  });
+                  router.push(`/checkout/result?order_code=${encodeURIComponent(targetCode)}${isPaid ? "&status=PAID" : ""}`);
                 }}
                 className="text-white/80 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
                 title="Đóng popup"
@@ -1025,17 +1093,58 @@ export default function CartPage() {
                 </p>
               </div>
 
-              {momoModal.status === "PAID" ? (
+              {/* Status 1: PAID */}
+              {momoModal.status === "PAID" && (
                 <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-200 text-emerald-800 space-y-2">
                   <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
                     <CheckCircle2 className="w-7 h-7" />
                   </div>
                   <p className="font-bold text-sm">Thanh toán MoMo thành công!</p>
                   <p className="text-xs text-emerald-600">
-                    Cổng MoMo Sandbox đã ghi nhận giao dịch. Đơn hàng của bạn đã chuyển sang trạng thái ĐÃ THANH TOÁN (PAID).
+                    Cổng MoMo đã xác nhận giao dịch. Đơn hàng của bạn đã chuyển sang trạng thái ĐÃ THANH TOÁN (PAID) và sẵn sàng xuất kho.
                   </p>
                 </div>
-              ) : (
+              )}
+
+              {/* Status 2: FAILED */}
+              {momoModal.status === "FAILED" && (
+                <div className="p-4 bg-rose-50 rounded-2xl border border-rose-200 text-rose-800 space-y-2">
+                  <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+                    <XCircle className="w-7 h-7" />
+                  </div>
+                  <p className="font-bold text-sm">Thanh toán MoMo thất bại</p>
+                  <p className="text-xs text-rose-600">
+                    Giao dịch chưa được hoàn tất hoặc bị từ chối từ phía cổng thanh toán.
+                  </p>
+                </div>
+              )}
+
+              {/* Status 3: CANCELLED / EXPIRED */}
+              {(momoModal.status === "CANCELLED" || momoModal.status === "EXPIRED") && (
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 text-slate-800 space-y-2">
+                  <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center mx-auto">
+                    <Clock className="w-7 h-7" />
+                  </div>
+                  <p className="font-bold text-sm">Giao dịch đã hủy hoặc hết hạn</p>
+                  <p className="text-xs text-slate-500">
+                    Phiên thanh toán này đã bị hủy hoặc quá thời hạn cho phép. Thuốc vẫn được tạm giữ trong kho.
+                  </p>
+                </div>
+              )}
+
+              {/* Status 4: VERIFYING */}
+              {momoModal.status === "VERIFYING" && (
+                <div className="p-6 bg-blue-50 rounded-2xl border border-blue-200 text-blue-800 space-y-3">
+                  <div className="w-10 h-10 border-3 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto" />
+                  <p className="font-bold text-sm">Đang đối soát giao dịch với MoMo...</p>
+                  <p className="text-xs text-blue-600">
+                    Hệ thống đang kiểm tra trực tiếp từ MoMo Gateway, vui lòng chờ trong giây lát.
+                  </p>
+                </div>
+              )}
+
+              {/* Status 5: PENDING (Waiting for payment) */}
+              {momoModal.status === "PENDING" && (
                 <div className="space-y-3">
                   <div className="w-48 h-48 mx-auto p-2 bg-white rounded-2xl border-2 border-dashed border-pink-300 flex items-center justify-center shadow-xs">
                     {momoModal.qrCodeUrl ? (
@@ -1046,16 +1155,21 @@ export default function CartPage() {
                       />
                     ) : (
                       <div className="text-center p-3 text-slate-400 text-xs">
-                        Đang tạo mã QR MoMo Sandbox...
+                        Đang tạo mã QR MoMo...
                       </div>
                     )}
                   </div>
+                  <div className="flex items-center justify-center gap-1.5 text-xs text-amber-700 font-semibold bg-amber-50 py-1.5 px-3 rounded-full border border-amber-200 w-fit mx-auto">
+                    <Clock className="w-3.5 h-3.5 animate-spin" />
+                    <span>Đang chờ bạn quét mã thanh toán...</span>
+                  </div>
                   <p className="text-xs text-slate-500">
-                    Mở ứng dụng MoMo và quét mã QR để thử nghiệm thanh toán Sandbox
+                    Mở ứng dụng MoMo và quét mã QR trên màn hình để hoàn tất
                   </p>
                 </div>
               )}
 
+              {/* Action Buttons */}
               <div className="pt-2 flex flex-col gap-2">
                 {momoModal.payUrl && momoModal.status === "PENDING" && (
                   <a
@@ -1065,55 +1179,27 @@ export default function CartPage() {
                     className="w-full py-2.5 px-4 rounded-xl bg-[#a50064] hover:bg-[#850050] text-white font-bold text-xs shadow-xs transition-colors flex items-center justify-center gap-1.5"
                   >
                     <ExternalLink className="w-4 h-4" />
-                    <span>Mở cổng thanh toán MoMo Sandbox Web</span>
+                    <span>Mở cổng thanh toán MoMo Web</span>
                   </a>
                 )}
 
-                {/* Sandbox payment simulator button for 1-click test */}
+                {/* Nút kiểm tra / đối soát trạng thái thực tế */}
                 {momoModal.status === "PENDING" && (
                   <button
                     type="button"
-                    disabled={isSimulatingPayment}
-                    onClick={async () => {
-                      if (!momoModal.orderCode) return;
-                      setIsSimulatingPayment(true);
-                      try {
-                        const res = await fetch("/api/v1/payments/momo/simulate", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({
-                            order_code: momoModal.orderCode,
-                            success: true,
-                          }),
-                        });
-                        if (res.ok) {
-                          setMomoModal((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  status: "PAID",
-                                  message: "Đã mô phỏng thanh toán MoMo thành công!",
-                                }
-                              : null
-                          );
-                        }
-                      } catch (simErr) {
-                        console.error("Simulation error:", simErr);
-                      } finally {
-                        setIsSimulatingPayment(false);
-                      }
-                    }}
-                    className="w-full py-2.5 px-4 rounded-xl border-2 border-emerald-500 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                    disabled={isVerifyingMomo}
+                    onClick={handleCheckMomoStatus}
+                    className="w-full py-2.5 px-4 rounded-xl border border-pink-300 bg-pink-50/60 hover:bg-pink-100 text-[#a50064] font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
                   >
-                    {isSimulatingPayment ? (
+                    {isVerifyingMomo ? (
                       <>
-                        <RefreshCw className="w-4 h-4 animate-spin text-emerald-600" />
-                        <span>Đang kích hoạt giả lập MoMo...</span>
+                        <RefreshCw className="w-4 h-4 animate-spin text-[#a50064]" />
+                        <span>Đang đối soát MoMo Gateway...</span>
                       </>
                     ) : (
                       <>
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                        <span>[TEST] Mô phỏng Khách đã quét MoMo thành công</span>
+                        <RefreshCw className="w-4 h-4 text-[#a50064]" />
+                        <span>Tôi đã chuyển tiền, kiểm tra lại ngay</span>
                       </>
                     )}
                   </button>
@@ -1122,20 +1208,16 @@ export default function CartPage() {
                 <button
                   type="button"
                   onClick={() => {
+                    const targetCode = momoModal.orderCode;
+                    const isPaid = momoModal.status === "PAID";
                     setMomoModal(null);
-                    setOrderSuccess({
-                      order_code: momoModal.orderCode,
-                      total: momoModal.amount,
-                      customer_name: customerName,
-                      customer_phone: customerPhone,
-                      shipping_address: streetAddress,
-                      payment_method: "MOMO",
-                      fulfillment_type: fulfillmentType,
-                    });
+                    router.push(`/checkout/result?order_code=${encodeURIComponent(targetCode)}${isPaid ? "&status=PAID" : ""}`);
                   }}
                   className="w-full py-2.5 px-4 rounded-xl border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50 transition-colors cursor-pointer"
                 >
-                  Hoàn tất và xem đơn hàng
+                  {momoModal.status === "PAID"
+                    ? "Xem tiến độ đơn thuốc"
+                    : "Xem chi tiết đơn & Chuyển sang COD"}
                 </button>
               </div>
             </div>

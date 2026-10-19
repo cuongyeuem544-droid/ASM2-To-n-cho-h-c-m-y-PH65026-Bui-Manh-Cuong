@@ -144,6 +144,19 @@ class TestMomoPaymentSuite(unittest.TestCase):
         self.db.commit()
         self.db.refresh(self.order)
 
+        # Khởi tạo giao dịch PaymentTransaction PENDING ban đầu tương tự luồng tạo đơn thực tế
+        self.tx = PaymentTransaction(
+            order_id=self.order.id,
+            transaction_code=f"TXN-MOMO-{self.order_code}",
+            provider="MOMO",
+            amount=self.order.total_amount,
+            currency="VND",
+            status="PENDING",
+        )
+        self.db.add(self.tx)
+        self.db.commit()
+        self.db.refresh(self.tx)
+
     def tearDown(self):
         try:
             if hasattr(self, "order") and self.order:
@@ -288,7 +301,7 @@ class TestMomoPaymentSuite(unittest.TestCase):
         data = resp.json()
         self.assertEqual(data["resultCode"], 0)
 
-        # Kiểm tra đơn hàng trong CSDL được chuyển sang PAID, CONFIRMED và ALLOCATED (kho tiếp nhận)
+        self.db.expire_all()
         self.db.refresh(self.order)
         self.assertEqual(self.order.payment_status, "PAID")
         self.assertEqual(self.order.order_status, "CONFIRMED")
@@ -379,6 +392,303 @@ class TestMomoPaymentSuite(unittest.TestCase):
         self.assertEqual(data["payment_status"], "PENDING")
         self.assertEqual(data["payment_method"], "MOMO")
         self.assertEqual(data["total_amount"], 300000.0)
+
+    def test_07_momo_ipn_wrong_amount_rejected(self):
+        """Từ chối Webhook khi số tiền thanh toán không khớp với đơn hàng (HTTP 400)."""
+        secret = settings.momo_secret_key
+        access = settings.momo_access_key
+        partner = settings.momo_partner_code
+        amount = "100000"  # Sai số tiền (đơn là 300,000)
+        order_id = self.order_code
+        request_id = f"REQ-{order_id}-wrong-amount"
+        trans_id = f"MOMO-TRANS-{random.randint(1000000, 9999999)}"
+        result_code = "0"
+        message = "Giao dịch thành công"
+        order_info = "Thanh toan don thuoc"
+        order_type = "momo_wallet"
+        pay_type = "qr"
+        response_time = str(int(time.time() * 1000))
+        extra_data = ""
+
+        raw_signature = (
+            f"accessKey={access}&"
+            f"amount={amount}&"
+            f"extraData={extra_data}&"
+            f"message={message}&"
+            f"orderId={order_id}&"
+            f"orderInfo={order_info}&"
+            f"orderType={order_type}&"
+            f"partnerCode={partner}&"
+            f"payType={pay_type}&"
+            f"requestId={request_id}&"
+            f"responseTime={response_time}&"
+            f"resultCode={result_code}&"
+            f"transId={trans_id}"
+        )
+        sig = MomoPaymentService.generate_signature(raw_signature, secret)
+
+        ipn_payload = {
+            "partnerCode": partner,
+            "orderId": order_id,
+            "requestId": request_id,
+            "amount": int(amount),
+            "orderInfo": order_info,
+            "orderType": order_type,
+            "transId": trans_id,
+            "resultCode": int(result_code),
+            "message": message,
+            "payType": pay_type,
+            "responseTime": int(response_time),
+            "extraData": extra_data,
+            "signature": sig,
+        }
+
+        resp = self.client.post("/api/v1/payments/momo/webhook", json=ipn_payload)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("không khớp", resp.json()["detail"])
+
+        # Đơn hàng KHÔNG được chuyển sang PAID
+        self.db.expire_all()
+        self.db.refresh(self.order)
+        self.assertNotEqual(self.order.payment_status, "PAID")
+
+    def test_08_momo_ipn_wrong_partner_code_rejected(self):
+        """Từ chối Webhook khi partnerCode không khớp cấu hình hệ thống (HTTP 400)."""
+        secret = settings.momo_secret_key
+        access = settings.momo_access_key
+        partner = "WRONG_PARTNER_CODE"
+        amount = "300000"
+        order_id = self.order_code
+        request_id = f"REQ-{order_id}-wrong-partner"
+        trans_id = f"MOMO-TRANS-{random.randint(1000000, 9999999)}"
+        result_code = "0"
+        message = "Giao dịch thành công"
+        order_info = "Thanh toan don thuoc"
+        order_type = "momo_wallet"
+        pay_type = "qr"
+        response_time = str(int(time.time() * 1000))
+        extra_data = ""
+
+        raw_signature = (
+            f"accessKey={access}&"
+            f"amount={amount}&"
+            f"extraData={extra_data}&"
+            f"message={message}&"
+            f"orderId={order_id}&"
+            f"orderInfo={order_info}&"
+            f"orderType={order_type}&"
+            f"partnerCode={partner}&"
+            f"payType={pay_type}&"
+            f"requestId={request_id}&"
+            f"responseTime={response_time}&"
+            f"resultCode={result_code}&"
+            f"transId={trans_id}"
+        )
+        sig = MomoPaymentService.generate_signature(raw_signature, secret)
+
+        ipn_payload = {
+            "partnerCode": partner,
+            "orderId": order_id,
+            "requestId": request_id,
+            "amount": int(amount),
+            "orderInfo": order_info,
+            "orderType": order_type,
+            "transId": trans_id,
+            "resultCode": int(result_code),
+            "message": message,
+            "payType": pay_type,
+            "responseTime": int(response_time),
+            "extraData": extra_data,
+            "signature": sig,
+        }
+
+        resp = self.client.post("/api/v1/payments/momo/webhook", json=ipn_payload)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("partnerCode", resp.json()["detail"])
+
+    def test_09_momo_ipn_uninitialized_transaction_rejected(self):
+        """Từ chối Webhook khi đơn hàng chưa từng khởi tạo giao dịch thanh toán MoMo (Requirement II.6 & II.7)."""
+        # Xóa PaymentTransaction của đơn này
+        self.db.query(PaymentTransaction).filter_by(order_id=self.order.id).delete()
+        self.db.commit()
+
+        secret = settings.momo_secret_key
+        access = settings.momo_access_key
+        partner = settings.momo_partner_code
+        amount = "300000"
+        order_id = self.order_code
+        request_id = f"REQ-{order_id}-no-txn"
+        trans_id = f"MOMO-TRANS-{random.randint(1000000, 9999999)}"
+        result_code = "0"
+        message = "Giao dịch thành công"
+        order_info = "Thanh toan don thuoc"
+        order_type = "momo_wallet"
+        pay_type = "qr"
+        response_time = str(int(time.time() * 1000))
+        extra_data = ""
+
+        raw_signature = (
+            f"accessKey={access}&"
+            f"amount={amount}&"
+            f"extraData={extra_data}&"
+            f"message={message}&"
+            f"orderId={order_id}&"
+            f"orderInfo={order_info}&"
+            f"orderType={order_type}&"
+            f"partnerCode={partner}&"
+            f"payType={pay_type}&"
+            f"requestId={request_id}&"
+            f"responseTime={response_time}&"
+            f"resultCode={result_code}&"
+            f"transId={trans_id}"
+        )
+        sig = MomoPaymentService.generate_signature(raw_signature, secret)
+
+        ipn_payload = {
+            "partnerCode": partner,
+            "orderId": order_id,
+            "requestId": request_id,
+            "amount": int(amount),
+            "orderInfo": order_info,
+            "orderType": order_type,
+            "transId": trans_id,
+            "resultCode": int(result_code),
+            "message": message,
+            "payType": pay_type,
+            "responseTime": int(response_time),
+            "extraData": extra_data,
+            "signature": sig,
+        }
+
+        resp = self.client.post("/api/v1/payments/momo/webhook", json=ipn_payload)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("Không tìm thấy phiên giao dịch thanh toán MoMo đã khởi tạo", resp.json()["detail"])
+
+    def test_10_momo_ipn_late_webhook_on_cancelled_order_routes_to_reconciliation(self):
+        """Webhook đến muộn khi đơn đã bị hủy trước đó: ghi nhận tiền vào nhưng KHÔNG kích hoạt lại đơn (Requirement II.9)."""
+        # Đánh dấu đơn là CANCELLED
+        self.order.order_status = "CANCELLED"
+        self.order.fulfillment_status = "CANCELLED"
+        self.db.commit()
+
+        # Tạo lại PaymentTransaction PENDING
+        tx = PaymentTransaction(
+            order_id=self.order.id,
+            transaction_code=f"TXN-LATE-{self.order_code}",
+            provider="MOMO",
+            amount=self.order.total_amount,
+            currency="VND",
+            status="PENDING",
+        )
+        self.db.add(tx)
+        self.db.commit()
+
+        secret = settings.momo_secret_key
+        access = settings.momo_access_key
+        partner = settings.momo_partner_code
+        amount = "300000"
+        order_id = self.order_code
+        request_id = f"REQ-{order_id}-late"
+        trans_id = f"MOMO-LATE-{random.randint(1000000, 9999999)}"
+        result_code = "0"
+        message = "Giao dịch thành công"
+        order_info = "Thanh toan don thuoc"
+        order_type = "momo_wallet"
+        pay_type = "qr"
+        response_time = str(int(time.time() * 1000))
+        extra_data = ""
+
+        raw_signature = (
+            f"accessKey={access}&"
+            f"amount={amount}&"
+            f"extraData={extra_data}&"
+            f"message={message}&"
+            f"orderId={order_id}&"
+            f"orderInfo={order_info}&"
+            f"orderType={order_type}&"
+            f"partnerCode={partner}&"
+            f"payType={pay_type}&"
+            f"requestId={request_id}&"
+            f"responseTime={response_time}&"
+            f"resultCode={result_code}&"
+            f"transId={trans_id}"
+        )
+        sig = MomoPaymentService.generate_signature(raw_signature, secret)
+
+        ipn_payload = {
+            "partnerCode": partner,
+            "orderId": order_id,
+            "requestId": request_id,
+            "amount": int(amount),
+            "orderInfo": order_info,
+            "orderType": order_type,
+            "transId": trans_id,
+            "resultCode": int(result_code),
+            "message": message,
+            "payType": pay_type,
+            "responseTime": int(response_time),
+            "extraData": extra_data,
+            "signature": sig,
+        }
+
+        resp = self.client.post("/api/v1/payments/momo/webhook", json=ipn_payload)
+        self.assertEqual(resp.status_code, 200, resp.text)
+        data = resp.json()
+        self.assertTrue(data.get("reconciliation_required"))
+
+        # Đơn hàng vẫn giữ nguyên trạng thái CANCELLED, KHÔNG bị chuyển sang ALLOCATED
+        self.db.expire_all()
+        self.db.refresh(self.order)
+        self.assertEqual(self.order.order_status, "CANCELLED")
+        self.assertEqual(self.order.fulfillment_status, "CANCELLED")
+
+        # Thẻ thanh toán ghi nhận SUCCESS để không làm mất vết dòng tiền
+        tx_refreshed = self.db.query(PaymentTransaction).filter_by(order_id=self.order.id, provider="MOMO").first()
+        self.assertEqual(tx_refreshed.status, "SUCCESS")
+
+    def test_11_momo_query_transaction_status_reconciles(self):
+        """Chủ động đối soát trạng thái giao dịch MoMo qua Query API khi mất IPN (Requirement II.10)."""
+        from unittest.mock import MagicMock, patch
+        from app.core.security import create_guest_order_token
+
+        valid_token = create_guest_order_token(self.order_code, self.order.customer_phone)
+
+        # Mock MoMo query gateway response thành công (resultCode=0)
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "partnerCode": settings.momo_partner_code,
+            "orderId": self.order_code,
+            "requestId": f"QUERY-{self.order_code}",
+            "amount": 300000,
+            "transId": "MOMO-QUERY-99999",
+            "resultCode": 0,
+            "message": "Giao dịch thành công",
+            "payType": "qr",
+            "responseTime": int(time.time() * 1000),
+            "extraData": "",
+            "signature": "mock_valid_signature",
+        }
+
+        with patch("app.services.momo_service.httpx.Client") as mock_client_cls, \
+             patch.object(MomoPaymentService, "verify_ipn_signature", return_value=True):
+            mock_client = MagicMock()
+            mock_client_cls.return_value.__enter__.return_value = mock_client
+            mock_client.post.return_value = mock_resp
+
+            resp = self.client.post(
+                f"/api/v1/payments/momo/check/{self.order_code}?phone_verify={self.order.customer_phone}",
+                headers={"X-Order-Token": valid_token},
+            )
+            self.assertEqual(resp.status_code, 200, resp.text)
+            data = resp.json()
+            self.assertTrue(data.get("is_paid"))
+            self.assertEqual(data.get("payment_status"), "PAID")
+
+            self.db.expire_all()
+            self.db.refresh(self.order)
+            self.assertEqual(self.order.payment_status, "PAID")
+            self.assertEqual(self.order.fulfillment_status, "ALLOCATED")
 
 
 if __name__ == "__main__":

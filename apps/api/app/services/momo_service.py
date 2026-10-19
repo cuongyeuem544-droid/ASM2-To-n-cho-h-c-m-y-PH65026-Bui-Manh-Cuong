@@ -251,10 +251,15 @@ class MomoPaymentService:
         - Cập nhật trạng thái PaymentTransaction và Order
         - Gửi cảnh báo thông báo thanh toán
         """
-        # 1. Xác thực chữ ký
+        # 1. Xác thực chữ ký và partnerCode
         if not cls.verify_ipn_signature(payload):
             logger.error(f"[MOMO IPN] Chữ ký không hợp lệ từ payload: {payload}")
             raise HTTPException(status_code=400, detail="Chữ ký xác thực MoMo không hợp lệ (Invalid HMAC Signature)")
+
+        partner_code = str(payload.get("partnerCode", ""))
+        if partner_code != settings.momo_partner_code:
+            logger.error(f"[MOMO IPN] partnerCode không khớp: {partner_code} vs {settings.momo_partner_code}")
+            raise HTTPException(status_code=400, detail="partnerCode không khớp với cấu hình hệ thống.")
 
         order_code = payload.get("orderId")
         result_code = int(payload.get("resultCode", -1))
@@ -280,7 +285,7 @@ class MomoPaymentService:
             db.commit()
             raise HTTPException(status_code=404, detail=err_msg)
 
-        # 4. Tìm giao dịch thanh toán
+        # 4. Xác minh giao dịch thuộc đúng PaymentTransaction đã khởi tạo (Requirement II.6 & II.7)
         trans = db.scalar(
             select(PaymentTransaction).where(
                 PaymentTransaction.order_id == order.id,
@@ -288,16 +293,10 @@ class MomoPaymentService:
             )
         )
         if not trans:
-            trans = PaymentTransaction(
-                order_id=order.id,
-                transaction_code=f"TXN-{order.order_code}-{int(datetime.now().timestamp()) % 100000}",
-                provider="MOMO",
-                amount=Decimal(str(amount or order.total_amount)),
-                currency="VND",
-                status="PENDING",
-            )
-            db.add(trans)
-            db.flush()
+            err_msg = f"Không tìm thấy phiên giao dịch thanh toán MoMo đã khởi tạo cho đơn hàng {order.order_code}."
+            webhook_log.process_error = err_msg
+            db.commit()
+            raise HTTPException(status_code=400, detail=err_msg)
 
         # 5. Kiểm tra Idempotency (Tránh xử lý 2 lần nếu MoMo retry IPN)
         if trans.status == "SUCCESS":
@@ -313,13 +312,51 @@ class MomoPaymentService:
             paid_amount = int(amount) if amount is not None else None
             if paid_amount is not None and paid_amount != order_total:
                 trans.status = "UNDERPAID" if paid_amount < order_total else "OVERPAID"
+                trans.updated_at = utcnow()
                 err_msg = f"Số tiền thanh toán MoMo ({paid_amount:,} đ) không khớp với số tiền đơn hàng ({order_total:,} đ)"
                 webhook_log.process_error = err_msg
                 db.commit()
                 raise HTTPException(status_code=400, detail=err_msg)
 
+            # Requirement II.9 & III.9: Đơn đã hủy không được kích hoạt lại tùy tiện khi nhận webhook đến muộn
+            if order.order_status == "CANCELLED" or order.fulfillment_status == "CANCELLED":
+                trans.status = "SUCCESS"
+                trans.provider_trans_id = trans_id
+                trans.provider_response_raw = json.dumps(payload, ensure_ascii=False)
+                trans.updated_at = utcnow()
+                webhook_log.processed = True
+                db.commit()
+
+                dispatch_alert(
+                    title="CẢNH BÁO: THANH TOÁN MOMO ĐẾN MUỘN CHO ĐƠN ĐÃ HỦY",
+                    message=(
+                        f"Đơn hàng: <b>{order.order_code}</b> (ĐÃ BỊ HỦY TRƯỚC ĐÓ)\n"
+                        f"Khách hàng: <b>{order.customer_name}</b>\n"
+                        f"Số tiền đã thanh toán: <b>{paid_amount:,} đ</b>\n"
+                        f"Mã giao dịch MoMo: <code>{trans_id}</code>\n"
+                        f"Yêu cầu: <b>CẦN ĐỐI SOÁT HOÀN TIỀN CHO KHÁCH (KHÔNG ĐƯA VÀO LUỒNG SOẠN HÀNG)</b>"
+                    ),
+                    severity="WARNING",
+                    alert_type="LATE_PAYMENT_RECONCILIATION",
+                    details={
+                        "Mã đơn": order.order_code,
+                        "TransId": trans_id,
+                        "Số tiền": f"{paid_amount:,} VND",
+                        "Trạng thái đơn": "CANCELLED",
+                        "Hành động": "Chuyển kế toán đối soát hoàn tiền",
+                    },
+                )
+                return {
+                    "resultCode": 0,
+                    "message": "Giao dịch đã nhận tiền nhưng đơn hàng đã bị hủy trước đó. Đã chuyển sang hàng đợi đối soát hoàn tiền.",
+                    "order_code": order.order_code,
+                    "reconciliation_required": True,
+                }
+
             trans.status = "SUCCESS"
             trans.provider_trans_id = trans_id
+            trans.provider_response_raw = json.dumps(payload, ensure_ascii=False)
+            trans.updated_at = utcnow()
             order.payment_status = "PAID"
             if order.order_status in ["PENDING", "DRAFT"]:
                 order.order_status = "CONFIRMED"
@@ -372,14 +409,16 @@ class MomoPaymentService:
                 alert_type="PAYMENT_RECEIVED",
                 details={
                     "Mã đơn": order.order_code,
-                    "Cổng": "MoMo Sandbox",
+                    "Cổng": "MoMo Sandbox" if not settings.is_momo_production else "MoMo Production",
                     "Số tiền": f"{int(order.total_amount):,} VND",
                     "TransId": trans_id,
                 },
             )
         else:
-            trans.status = "FAILED"
-            order.payment_status = "FAILED"
+            trans.status = "CANCELLED" if result_code in [1005, 1006, 9000] else "FAILED"
+            trans.provider_response_raw = json.dumps(payload, ensure_ascii=False)
+            trans.updated_at = utcnow()
+            order.payment_status = "CANCELLED" if result_code in [1005, 1006, 9000] else "FAILED"
             webhook_log.process_error = f"MoMo resultCode {result_code}: {payload.get('message')}"
 
         db.commit()
@@ -391,13 +430,147 @@ class MomoPaymentService:
         }
 
     @classmethod
+    def query_transaction_status(cls, db: Session, order_code: str) -> dict[str, Any]:
+        """
+        Đối soát trực tiếp trạng thái giao dịch từ Cổng MoMo chính thức (V2 Query API).
+        Dùng khi Webhook IPN bị mất kết nối hoặc khách quay lại trình duyệt mà chưa nhận IPN.
+        """
+        order = db.scalar(select(Order).where(Order.order_code == order_code.strip()))
+        if not order:
+            raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng.")
+
+        trans = db.scalar(
+            select(PaymentTransaction).where(
+                PaymentTransaction.order_id == order.id,
+                PaymentTransaction.provider == "MOMO",
+            )
+        )
+        if not trans:
+            return {
+                "order_code": order.order_code,
+                "payment_status": order.payment_status,
+                "fulfillment_status": order.fulfillment_status,
+                "is_paid": order.payment_status == "PAID",
+                "synced": False,
+            }
+
+        if trans.status == "SUCCESS" and order.payment_status == "PAID":
+            return {
+                "order_code": order.order_code,
+                "payment_status": "PAID",
+                "fulfillment_status": order.fulfillment_status,
+                "is_paid": True,
+                "synced": True,
+            }
+
+        if not settings.is_momo_configured:
+            return {
+                "order_code": order.order_code,
+                "payment_status": order.payment_status,
+                "fulfillment_status": order.fulfillment_status,
+                "is_paid": order.payment_status == "PAID",
+                "synced": False,
+                "note": "MoMo API keys not configured",
+            }
+
+        partner_code = settings.momo_partner_code
+        access_key = settings.momo_access_key
+        secret_key = settings.momo_secret_key
+        query_endpoint = getattr(settings, "momo_query_endpoint", "https://test-payment.momo.vn/v2/gateway/api/query")
+
+        request_id = f"QUERY-{order.order_code}-{int(datetime.now().timestamp() * 1000) % 1000000}"
+        raw_sig = (
+            f"accessKey={access_key}&"
+            f"orderId={order.order_code}&"
+            f"partnerCode={partner_code}&"
+            f"requestId={request_id}"
+        )
+        signature = cls.generate_signature(raw_sig, secret_key)
+
+        query_payload = {
+            "partnerCode": partner_code,
+            "requestId": request_id,
+            "orderId": order.order_code,
+            "signature": signature,
+            "lang": "vi",
+        }
+
+        try:
+            with httpx.Client(timeout=8.0) as client:
+                res = client.post(query_endpoint, json=query_payload)
+                if res.status_code == 200:
+                    res_data = res.json()
+                    result_code = res_data.get("resultCode")
+                    logger.info(f"[MOMO QUERY] {order.order_code} -> resultCode={result_code}, message={res_data.get('message')}")
+
+                    if result_code == 0:
+                        # MoMo xác nhận đã thanh toán thành công -> xử lý IPN callback an toàn
+                        cls.process_ipn_callback(db, res_data)
+                        db.refresh(order)
+                        db.refresh(trans)
+                        return {
+                            "order_code": order.order_code,
+                            "payment_status": "PAID",
+                            "fulfillment_status": order.fulfillment_status,
+                            "is_paid": True,
+                            "synced": True,
+                        }
+                    elif result_code in [1005, 1006, 9000]:
+                        trans.status = "CANCELLED"
+                        trans.updated_at = utcnow()
+                        db.commit()
+                        return {
+                            "order_code": order.order_code,
+                            "payment_status": order.payment_status,
+                            "fulfillment_status": order.fulfillment_status,
+                            "is_paid": False,
+                            "is_cancelled": True,
+                            "momo_status": "CANCELLED",
+                        }
+        except Exception as e:
+            logger.warning(f"[MOMO QUERY] Không thể đối soát MoMo cho đơn {order.order_code}: {e}")
+
+        return {
+            "order_code": order.order_code,
+            "payment_status": order.payment_status,
+            "fulfillment_status": order.fulfillment_status,
+            "is_paid": order.payment_status == "PAID",
+            "synced": False,
+        }
+
+    @classmethod
     def simulate_payment(cls, db: Session, order_code: str, success: bool = True) -> dict[str, Any]:
         """
-        Hàm mô phỏng thanh toán thành công (dành cho demo và chạy test local).
+        Hàm mô phỏng thanh toán (chỉ cho phép trong môi trường test/dev cô lập, tuyệt đối cấm trên production).
         """
+        if getattr(settings, "is_momo_production", False):
+            raise HTTPException(
+                status_code=403,
+                detail="Chức năng giả lập thanh toán bị vô hiệu hóa hoàn toàn trên môi trường Production.",
+            )
+
         order = db.scalar(select(Order).where(Order.order_code == order_code))
         if not order:
             raise HTTPException(status_code=404, detail=f"Không tìm thấy đơn {order_code}")
+
+        # Đảm bảo có PaymentTransaction hợp lệ trước khi giả lập
+        trans = db.scalar(
+            select(PaymentTransaction).where(
+                PaymentTransaction.order_id == order.id,
+                PaymentTransaction.provider == "MOMO",
+            )
+        )
+        if not trans:
+            trans = PaymentTransaction(
+                order_id=order.id,
+                transaction_code=f"TXN-MOMO-{order.order_code}-{int(datetime.now().timestamp()) % 100000}",
+                provider="MOMO",
+                amount=Decimal(str(int(order.total_amount))),
+                currency="VND",
+                status="PENDING",
+            )
+            db.add(trans)
+            db.commit()
 
         access_key = settings.momo_access_key
         secret_key = settings.momo_secret_key
@@ -447,3 +620,4 @@ class MomoPaymentService:
         }
 
         return cls.process_ipn_callback(db, sim_payload)
+
