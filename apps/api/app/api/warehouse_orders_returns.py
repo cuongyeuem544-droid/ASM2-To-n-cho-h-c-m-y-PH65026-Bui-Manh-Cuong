@@ -95,7 +95,7 @@ class AssignReturnStaffPayload(BaseModel):
 class ReceiveReturnPayload(BaseModel):
     carrier_name: Optional[str] = None
     tracking_code: Optional[str] = None
-    package_condition: Optional[str] = None
+    package_condition: str = Field(..., min_length=1, description="Tình trạng bao bì tiếp nhận bắt buộc (không mặc định)")
     note: Optional[str] = None
 
 

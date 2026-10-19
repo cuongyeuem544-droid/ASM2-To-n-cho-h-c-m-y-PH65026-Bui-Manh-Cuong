@@ -69,7 +69,7 @@ class ReturnItemCreate(BaseModel):
     order_item_id: int
     requested_quantity: int = Field(ge=1)
     customer_reason: Optional[str] = None
-    condition_reported: Optional[str] = "SEALED"
+    condition_reported: Optional[str] = None
 
 
 class ReturnRequestCreate(BaseModel):

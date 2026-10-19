@@ -27,10 +27,11 @@ def test_dline22_admin_ui_and_storefront_normalization_removed():
     crawler_page = root_dir / "apps" / "web" / "src" / "pages" / "PharmacyCrawlerPage.tsx"
     assert not crawler_page.exists(), "PharmacyCrawlerPage.tsx must be completely deleted"
 
-    # ProductDetailPage.tsx không còn 'Thông tin chuẩn hóa' và 'Giá trị chuẩn hóa'
+    # ProductDetailPage.tsx không còn 'Thông tin chuẩn hóa', 'Giá trị chuẩn hóa' và 'normalized_value'
     prod_detail_tsx = (root_dir / "apps" / "web" / "src" / "pages" / "ProductDetailPage.tsx").read_text(encoding="utf-8")
     assert "Thông tin chuẩn hóa" not in prod_detail_tsx
     assert "Giá trị chuẩn hóa" not in prod_detail_tsx
+    assert "normalized_value" not in prod_detail_tsx
 
     # ProductsPage.tsx không còn 'Danh mục thuốc chuẩn hóa'
     products_page_tsx = (root_dir / "apps" / "web" / "src" / "pages" / "ProductsPage.tsx").read_text(encoding="utf-8")

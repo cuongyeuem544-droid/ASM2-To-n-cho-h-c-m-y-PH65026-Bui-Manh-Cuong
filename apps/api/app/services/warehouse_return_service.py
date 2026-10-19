@@ -311,13 +311,19 @@ class WarehouseReturnService:
         warehouse_id: int | None,
         carrier_name: str | None = None,
         tracking_code: str | None = None,
-        package_condition: str = "SEALED",
+        package_condition: str | None = None,
         note: str | None = None,
     ) -> WarehouseReturnCase:
         """
         Nhân viên kho tiếp nhận gói hàng từ bưu tá / đơn vị vận chuyển.
         Trạng thái chuyển sang: RECEIVED.
         """
+        if not package_condition or not str(package_condition).strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Vui lòng cung cấp tình trạng bao bì thực tế (package_condition) khi tiếp nhận kiện hàng. Không được để trống hoặc mặc định.",
+            )
+
         case = cls.get_case_by_identifier(db, case_code, warehouse_id)
 
         valid_prev = [
@@ -1009,11 +1015,11 @@ class WarehouseReturnService:
                 detail=f"Ca hoàn này đã có giao dịch hoàn tiền đang được xử lý hoặc đã thành công (Mã hoàn: {existing_active_refund.refund_code}).",
             )
 
-        # Yêu cầu ca hoàn phải có sự phê duyệt rõ ràng từ Quản lý kho
-        if not case.approved_by_user_id and case.status != ReturnStatus.APPROVED.value:
+        # Yêu cầu ca hoàn phải có sự phê duyệt rõ ràng từ Quản lý kho (vô điều kiện)
+        if not case.approved_by_user_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Ca hoàn chưa có quyết định phê duyệt rõ ràng từ Quản lý kho. Không thể thực hiện hoàn tiền.",
+                detail="Ca hoàn chưa có quyết định phê duyệt rõ ràng từ Quản lý kho (thiếu approved_by_user_id). Không thể thực hiện hoàn tiền.",
             )
 
         # 3. Backend TỰ ĐỘNG TÍNH TOÁN số tiền hoàn

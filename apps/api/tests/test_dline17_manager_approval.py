@@ -265,3 +265,68 @@ def test_dline17_manager_approval_rules():
         assert ri1.approved_refund_amount == Decimal("200000.00")
         assert ri2.approved_quantity == 0
         assert ri2.approved_refund_amount == Decimal("0.00")
+
+        # === TEST 9: Chặn bypass POST /admin/refunds khi chưa duyệt hoặc sai lệch số tiền ===
+        from app.services.refund_service import RefundService
+
+        # 9.1: Thử tạo refund với số tiền sai lệch (yêu cầu 300k trong khi duyệt 200k) -> 400
+        with pytest.raises(HTTPException) as exc_info:
+            RefundService.create_refund_request(
+                db=db,
+                order_id=order.id,
+                refund_amount=Decimal("300000"),
+                refund_method="BANK_TRANSFER",
+                return_request_id=ret.id,
+            )
+        assert exc_info.value.status_code == 400
+        assert "không khớp với số tiền đã được Quản lý kho phê duyệt" in exc_info.value.detail
+
+        # 9.2: Tạo ca hoàn mới CHƯA được duyệt (approved_by_user_id = None)
+        ret_unapproved = ReturnRequest(
+            return_code=f"RET-UNAPP-{uid}",
+            order_id=order.id,
+            customer_name="Unapproved",
+            customer_phone="0988776655",
+            reason_code="DAMAGED",
+            reason_text="Chưa duyệt",
+            status=ReturnStatus.WAITING_MANAGER_APPROVAL.value,
+            request_type="REFUND",
+        )
+        db.add(ret_unapproved)
+        db.commit()
+
+        case_unapproved = WarehouseReturnCase(
+            case_code=f"WRC-UNAPP-{uid}",
+            return_request_id=ret_unapproved.id,
+            warehouse_id=wh.id,
+            status=ReturnStatus.WAITING_MANAGER_APPROVAL.value,
+        )
+        db.add(case_unapproved)
+        db.commit()
+
+        # Thử hoàn tiền cho ca chưa duyệt -> 400
+        with pytest.raises(HTTPException) as exc_info:
+            RefundService.create_refund_request(
+                db=db,
+                order_id=order.id,
+                refund_amount=Decimal("200000"),
+                refund_method="BANK_TRANSFER",
+                return_request_id=ret_unapproved.id,
+            )
+        assert exc_info.value.status_code == 400
+        assert "chưa có quyết định phê duyệt rõ ràng từ Quản lý kho" in exc_info.value.detail
+
+        # 9.3: Tạo refund với đúng số tiền đã duyệt (200k) -> Thành công
+        valid_refund = RefundService.create_refund_request(
+            db=db,
+            order_id=order.id,
+            refund_amount=Decimal("200000"),
+            refund_method="BANK_TRANSFER",
+            return_request_id=ret.id,
+            beneficiary_bank="MB Bank",
+            beneficiary_account_number="0123456789",
+            beneficiary_account_name="NGUYEN VAN A",
+        )
+        assert valid_refund is not None
+        assert valid_refund.refund_amount == Decimal("200000")
+

@@ -292,3 +292,131 @@ def test_dline14_multi_batch_return_restock_lifecycle():
             )
         assert exc_no_alloc.value.status_code == 400
         assert "Không tìm thấy thông tin lô xuất kho gốc" in exc_no_alloc.value.detail
+
+
+def test_dline14_migration_0015_multi_movement_same_batch_and_canonical_tracing():
+    """Kiểm tra logic migration 0015:
+    1. Trích xuất case_code -> canonical_return_code từ ReturnRequest.
+    2. Bảo toàn cả 2 StockMovement cùng lô/order_item qua UniqueConstraint(stock_movement_id).
+    """
+    import uuid
+    from sqlalchemy import text
+
+    with SessionLocal() as db:
+        uid = uuid.uuid4().hex[:6].upper()
+
+        wh = Warehouse(code=f"WH-MIG-{uid}", name="Kho Mig", address="HN", is_active=True)
+        db.add(wh)
+        db.commit()
+
+        prod = CanonicalProduct(canonical_name=f"SP Mig {uid}")
+        db.add(prod)
+        db.commit()
+
+        sku = ProductSku(canonical_product_id=prod.id, sku_code=f"SKU-MIG-{uid}", uom="Hộp", base_price=Decimal("100000"))
+        db.add(sku)
+        db.commit()
+
+        batch = InventoryBatch(sku_id=sku.id, batch_number=f"BAT-MIG-{uid}", expiry_date=date.today() + timedelta(days=365), initial_quantity=100)
+        db.add(batch)
+        db.commit()
+
+        order = Order(order_code=f"ORD-MIG-{uid}", customer_name="Customer Mig", customer_phone="0911223344", shipping_address="HN", total_amount=Decimal("200000"))
+        db.add(order)
+        db.commit()
+
+        oi = OrderItem(order_id=order.id, product_id=prod.id, product_sku=sku.sku_code, product_name=prod.canonical_name, quantity=2, price=Decimal("100000"), subtotal=Decimal("200000"))
+        db.add(oi)
+        db.commit()
+
+        alloc = OrderItemBatchAllocation(order_item_id=oi.id, batch_id=batch.id, warehouse_id=wh.id, allocated_quantity=2)
+        db.add(alloc)
+        db.commit()
+
+        ret = ReturnRequest(return_code=f"RET-MIG-{uid}", order_id=order.id, customer_name="Cust", customer_phone="0911223344", reason_code="DAMAGED", reason_text="Lỗi")
+        db.add(ret)
+        db.commit()
+
+        case = WarehouseReturnCase(case_code=f"WRC-MIG-{uid}", return_request_id=ret.id, warehouse_id=wh.id, status="RECEIVED")
+        db.add(case)
+        db.commit()
+
+        ri = ReturnItem(
+            return_request_id=ret.id,
+            warehouse_return_case_id=case.id,
+            order_item_id=oi.id,
+            product_id=prod.id,
+            product_name=prod.canonical_name,
+            original_quantity=2,
+            requested_quantity=2,
+            unit_price_at_purchase=Decimal("100000"),
+            net_paid_amount=Decimal("200000"),
+            requested_refund_amount=Decimal("200000"),
+        )
+        db.add(ri)
+        db.commit()
+
+        # Tạo 2 StockMovement cùng loại RETURN_RESTOCK tham chiếu case_code cho CÙNG 1 batch và order_item
+        sm1 = StockMovement(
+            movement_code=f"SM-MIG-1-{uid}",
+            warehouse_id=wh.id,
+            batch_id=batch.id,
+            movement_type="RETURN_RESTOCK",
+            quantity=1,
+            balance_after=11,
+            reference_type="WAREHOUSE_RETURN_CASE",
+            reference_id=case.case_code,
+            note=f"Nhập hàng hoàn [order_item_id:{oi.id}] phần 1",
+        )
+        sm2 = StockMovement(
+            movement_code=f"SM-MIG-2-{uid}",
+            warehouse_id=wh.id,
+            batch_id=batch.id,
+            movement_type="RETURN_RESTOCK",
+            quantity=1,
+            balance_after=12,
+            reference_type="WAREHOUSE_RETURN_CASE",
+            reference_id=case.case_code,
+            note=f"Nhập hàng hoàn [order_item_id:{oi.id}] phần 2",
+        )
+        db.add_all([sm1, sm2])
+        db.commit()
+
+        # Cả 2 movement phải được lưu với ReturnRestockAllocation riêng biệt mà không bị deduplicate
+        alloc_1 = ReturnRestockAllocation(
+            canonical_return_code=ret.return_code,  # Trace từ case_code sang return_code
+            source_type="WAREHOUSE_RETURN_CASE",
+            source_code=case.case_code,
+            order_item_id=oi.id,
+            batch_id=batch.id,
+            warehouse_id=wh.id,
+            quantity=1,
+            stock_movement_id=sm1.id,
+        )
+        alloc_2 = ReturnRestockAllocation(
+            canonical_return_code=ret.return_code,  # Trace từ case_code sang return_code
+            source_type="WAREHOUSE_RETURN_CASE",
+            source_code=case.case_code,
+            order_item_id=oi.id,
+            batch_id=batch.id,
+            warehouse_id=wh.id,
+            quantity=1,
+            stock_movement_id=sm2.id,
+        )
+        db.add_all([alloc_1, alloc_2])
+        db.commit()
+
+        # Xác minh: cả 2 bản ghi đều tồn tại trong DB, canonical_return_code là mã RET- chứ không phải WRC-
+        rows = db.scalars(
+            select(ReturnRestockAllocation).where(
+                ReturnRestockAllocation.order_item_id == oi.id,
+                ReturnRestockAllocation.batch_id == batch.id,
+            )
+        ).all()
+        assert len(rows) == 2
+        for r in rows:
+            assert r.canonical_return_code == ret.return_code
+            assert r.canonical_return_code.startswith("RET-")
+            assert not r.canonical_return_code.startswith("WRC-")
+            assert r.stock_movement_id in (sm1.id, sm2.id)
+

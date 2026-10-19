@@ -35,7 +35,7 @@ def upgrade() -> None:
             sa.Column("quantity", sa.Integer(), nullable=False),
             sa.Column("stock_movement_id", sa.Integer(), sa.ForeignKey("stock_movements.id", ondelete="SET NULL"), nullable=True),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
-            sa.UniqueConstraint("canonical_return_code", "order_item_id", "batch_id", name="uq_restock_canonical_item_batch"),
+            sa.UniqueConstraint("stock_movement_id", name="uq_restock_alloc_stock_movement_id"),
         )
 
     # Backfill ReturnRestockAllocation từ StockMovement lịch sử khi có thể xác định chắc chắn 100%
@@ -43,7 +43,7 @@ def upgrade() -> None:
     movements = conn.execute(
         sa.text(
             "SELECT id, movement_code, warehouse_id, batch_id, quantity, reference_type, reference_id, note, created_at "
-            "FROM stock_movements WHERE movement_type = 'RETURN_RESTOCK'"
+            "FROM stock_movements WHERE movement_type = 'RETURN_RESTOCK' ORDER BY id ASC"
         )
     ).fetchall()
 
@@ -68,6 +68,7 @@ def upgrade() -> None:
         ref_code = (ref_id or "").strip()
         note_str = note or ""
         resolved_order_item_id = None
+        canonical_code = None
 
         # 1. Trích xuất từ note nếu có pattern rõ ràng
         m_order_item = re.search(r"\[order_item_id:(\d+)\]", note_str) or re.search(r"order_item\s*#(\d+)", note_str)
@@ -75,32 +76,46 @@ def upgrade() -> None:
             resolved_order_item_id = int(m_order_item.group(1))
 
         # 2. Nếu chưa có trong note, tra cứu qua chứng từ hoàn (ReturnRequest hoặc WarehouseReturnCase)
-        if not resolved_order_item_id and ref_code:
-            # Tra cứu qua WarehouseReturnCase
+        if ref_code:
+            # Tra cứu qua WarehouseReturnCase: Phải truy ra ReturnRequest.return_code làm canonical_return_code
             case_row = conn.execute(
-                sa.text("SELECT id, return_request_id FROM warehouse_return_cases WHERE case_code = :code"),
+                sa.text(
+                    "SELECT c.id, c.return_request_id, r.return_code "
+                    "FROM warehouse_return_cases c "
+                    "LEFT JOIN return_requests r ON r.id = c.return_request_id "
+                    "WHERE c.case_code = :code"
+                ),
                 {"code": ref_code},
             ).fetchone()
 
             if case_row:
                 case_id = case_row[0]
-                # Lấy các return_items thuộc case này có batch_id khớp trong OrderItemBatchAllocation
-                candidates = conn.execute(
-                    sa.text(
-                        "SELECT DISTINCT ri.order_item_id "
-                        "FROM return_items ri "
-                        "JOIN order_item_batch_allocations a ON a.order_item_id = ri.order_item_id "
-                        "WHERE ri.warehouse_return_case_id = :case_id AND a.batch_id = :batch_id"
-                    ),
-                    {"case_id": case_id, "batch_id": batch_id},
-                ).fetchall()
+                ret_req_id = case_row[1]
+                canonical_code = case_row[2]
+                if not canonical_code and ret_req_id:
+                    req_code_row = conn.execute(
+                        sa.text("SELECT return_code FROM return_requests WHERE id = :req_id"),
+                        {"req_id": ret_req_id},
+                    ).fetchone()
+                    if req_code_row:
+                        canonical_code = req_code_row[0]
 
-                if len(candidates) == 1:
-                    resolved_order_item_id = candidates[0][0]
-                elif len(candidates) == 0:
-                    # Thử mở rộng sang return_request của case
-                    ret_req_id = case_row[1]
-                    if ret_req_id:
+                if not resolved_order_item_id:
+                    # Lấy các return_items thuộc case này có batch_id khớp trong OrderItemBatchAllocation
+                    candidates = conn.execute(
+                        sa.text(
+                            "SELECT DISTINCT ri.order_item_id "
+                            "FROM return_items ri "
+                            "JOIN order_item_batch_allocations a ON a.order_item_id = ri.order_item_id "
+                            "WHERE ri.warehouse_return_case_id = :case_id AND a.batch_id = :batch_id"
+                        ),
+                        {"case_id": case_id, "batch_id": batch_id},
+                    ).fetchall()
+
+                    if len(candidates) == 1:
+                        resolved_order_item_id = candidates[0][0]
+                    elif len(candidates) == 0 and ret_req_id:
+                        # Thử mở rộng sang return_request của case
                         req_candidates = conn.execute(
                             sa.text(
                                 "SELECT DISTINCT ri.order_item_id "
@@ -115,35 +130,38 @@ def upgrade() -> None:
             else:
                 # Tra cứu qua ReturnRequest trực tiếp
                 req_row = conn.execute(
-                    sa.text("SELECT id FROM return_requests WHERE return_code = :code"),
+                    sa.text("SELECT id, return_code FROM return_requests WHERE return_code = :code"),
                     {"code": ref_code},
                 ).fetchone()
                 if req_row:
                     req_id = req_row[0]
-                    req_candidates = conn.execute(
-                        sa.text(
-                            "SELECT DISTINCT ri.order_item_id "
-                            "FROM return_items ri "
-                            "JOIN order_item_batch_allocations a ON a.order_item_id = ri.order_item_id "
-                            "WHERE ri.return_request_id = :req_id AND a.batch_id = :batch_id"
-                        ),
-                        {"req_id": req_id, "batch_id": batch_id},
-                    ).fetchall()
-                    if len(req_candidates) == 1:
-                        resolved_order_item_id = req_candidates[0][0]
+                    canonical_code = req_row[1]
+                    if not resolved_order_item_id:
+                        req_candidates = conn.execute(
+                            sa.text(
+                                "SELECT DISTINCT ri.order_item_id "
+                                "FROM return_items ri "
+                                "JOIN order_item_batch_allocations a ON a.order_item_id = ri.order_item_id "
+                                "WHERE ri.return_request_id = :req_id AND a.batch_id = :batch_id"
+                            ),
+                            {"req_id": req_id, "batch_id": batch_id},
+                        ).fetchall()
+                        if len(req_candidates) == 1:
+                            resolved_order_item_id = req_candidates[0][0]
 
-        # 3. Kiểm tra tính toàn vẹn: nếu không thể xác định batch_id hoặc order_item_id -> Fail Closed
-        if not resolved_order_item_id or not batch_id or not ref_code:
+        # 3. Kiểm tra tính toàn vẹn: nếu không thể xác định batch_id, order_item_id hoặc canonical_code -> Fail Closed
+        if not resolved_order_item_id or not batch_id or not canonical_code:
             unresolvable.append({
                 "movement_id": mv_id,
                 "movement_code": mv_code,
                 "reference_id": ref_id,
                 "batch_id": batch_id,
+                "canonical_code": canonical_code,
+                "resolved_order_item_id": resolved_order_item_id,
                 "note": note,
             })
             continue
 
-        canonical_code = ref_code
         src_type = ref_type or ("WAREHOUSE_RETURN_CASE" if ref_code.startswith("WRC-") else "RETURN_REQUEST")
 
         to_insert.append({
@@ -161,18 +179,18 @@ def upgrade() -> None:
     if unresolvable:
         raise RuntimeError(
             f"Migration 0015 fail-closed: Phát hiện {len(unresolvable)} bản ghi StockMovement RETURN_RESTOCK lịch sử "
-            f"không thể xác định chính xác order_item_id hoặc batch_id với độ tin cậy 100%. "
+            f"không thể xác định chính xác order_item_id, batch_id hoặc canonical_return_code với độ tin cậy 100%. "
             f"Bắt buộc đối soát dữ liệu: {unresolvable}"
         )
 
     for item in to_insert:
-        # Kiểm tra trùng constraint trước khi chèn
+        # Kiểm tra theo stock_movement_id: bảo toàn 100% tất cả movements (kể cả nhiều movement cùng batch/order_item)
         existing = conn.execute(
             sa.text(
                 "SELECT id FROM return_restock_allocations "
-                "WHERE canonical_return_code = :code AND order_item_id = :oid AND batch_id = :bid"
+                "WHERE stock_movement_id = :sm_id"
             ),
-            {"code": item["canonical_return_code"], "oid": item["order_item_id"], "bid": item["batch_id"]},
+            {"sm_id": item["stock_movement_id"]},
         ).fetchone()
         if not existing:
             conn.execute(

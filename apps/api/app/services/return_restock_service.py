@@ -277,12 +277,12 @@ class ReturnRestockService:
                     batch_id = bp["batch_id"]
                     wh_id = bp["warehouse_id"]
 
-                    # Cập nhật WarehouseBatchStock
+                    # Cập nhật WarehouseBatchStock (có khóa hàng để chống race condition)
                     stock = db.scalar(
                         select(WarehouseBatchStock).where(
                             WarehouseBatchStock.warehouse_id == wh_id,
                             WarehouseBatchStock.batch_id == batch_id,
-                        )
+                        ).with_for_update()
                     )
                     if stock:
                         stock.quantity_on_hand += portion

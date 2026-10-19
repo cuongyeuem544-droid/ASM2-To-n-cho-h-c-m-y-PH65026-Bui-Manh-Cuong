@@ -153,7 +153,7 @@ export class ExtractionService {
 
     try {
       // 5. Chuẩn bị dữ liệu đầu vào cho AI Provider
-      const pagesInput = ocrResult.pages.map((p) => ({
+      const pagesInput = (ocrResult.pages || []).map((p) => ({
         pageNumber: p.pageNumber,
         text: p.text,
       }));

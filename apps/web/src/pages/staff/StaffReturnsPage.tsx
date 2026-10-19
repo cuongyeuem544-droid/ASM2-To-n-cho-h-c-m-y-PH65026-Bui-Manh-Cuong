@@ -42,6 +42,7 @@ interface InspectionRecord {
   id: number
   return_item_id: number
   product_name?: string
+  condition?: string
   received_quantity: number
   accepted_quantity: number
   rejected_quantity: number
@@ -56,9 +57,10 @@ interface InspectionRecord {
 }
 
 interface InspectionDraftItem {
-  received_quantity: number
-  accepted_quantity: number
-  rejected_quantity: number
+  received_quantity: number | string
+  accepted_quantity: number | string
+  rejected_quantity: number | string
+  condition: string
   package_condition: string
   seal_intact: boolean | null
   batch_matched: boolean | null
@@ -157,6 +159,7 @@ export function StaffReturnsPage() {
             received_quantity: existingInsp.received_quantity,
             accepted_quantity: existingInsp.accepted_quantity,
             rejected_quantity: existingInsp.rejected_quantity,
+            condition: existingInsp.condition || '',
             package_condition: existingInsp.package_condition || '',
             seal_intact: existingInsp.seal_intact ?? null,
             batch_matched: existingInsp.batch_matched ?? null,
@@ -168,9 +171,10 @@ export function StaffReturnsPage() {
           }
         } else {
           initialDrafts[item.id] = {
-            received_quantity: item.requested_quantity,
-            accepted_quantity: 0,
-            rejected_quantity: 0,
+            received_quantity: '',
+            accepted_quantity: '',
+            rejected_quantity: '',
+            condition: '',
             package_condition: '',
             seal_intact: null,
             batch_matched: null,
@@ -257,6 +261,34 @@ export function StaffReturnsPage() {
           setActionLoading(false)
           return
         }
+        if (draft.received_quantity === '' || draft.received_quantity === null || draft.received_quantity === undefined) {
+          setActionError(`Vui lòng nhập số lượng thực nhận cho "${item.product_name}".`)
+          setActionLoading(false)
+          return
+        }
+        if (draft.accepted_quantity === '' || draft.accepted_quantity === null || draft.accepted_quantity === undefined) {
+          setActionError(`Vui lòng nhập số lượng chấp nhận cho "${item.product_name}".`)
+          setActionLoading(false)
+          return
+        }
+        if (draft.rejected_quantity === '' || draft.rejected_quantity === null || draft.rejected_quantity === undefined) {
+          setActionError(`Vui lòng nhập số lượng từ chối cho "${item.product_name}".`)
+          setActionLoading(false)
+          return
+        }
+        const recQty = Number(draft.received_quantity)
+        const accQty = Number(draft.accepted_quantity)
+        const rejQty = Number(draft.rejected_quantity)
+        if (accQty + rejQty !== recQty) {
+          setActionError(`Sản phẩm "${item.product_name}": tổng số lượng chấp nhận (${accQty}) và từ chối (${rejQty}) phải bằng đúng số lượng nhận (${recQty}).`)
+          setActionLoading(false)
+          return
+        }
+        if (!draft.condition) {
+          setActionError(`Vui lòng chọn tình trạng thực tế của sản phẩm cho "${item.product_name}".`)
+          setActionLoading(false)
+          return
+        }
         if (!draft.package_condition) {
           setActionError(`Vui lòng chọn tình trạng bao bì cho "${item.product_name}".`)
           setActionLoading(false)
@@ -287,6 +319,14 @@ export function StaffReturnsPage() {
           setActionLoading(false)
           return
         }
+        if (rejQty > 0) {
+          const reason = (draft.rejection_reason || draft.damage_description || draft.inspection_note || '').trim()
+          if (!reason) {
+            setActionError(`Sản phẩm "${item.product_name}" có số lượng từ chối (${rejQty}), bắt buộc phải nhập lý do từ chối.`)
+            setActionLoading(false)
+            return
+          }
+        }
         const isSafetyOk = draft.seal_intact && draft.batch_matched && draft.expiry_matched && draft.storage_condition_ok
         if (!isSafetyOk && draft.suggested_action === 'RESTOCK') {
           setActionError(`Sản phẩm "${item.product_name}" không đạt toàn bộ tiêu chí an toàn dược, không thể đề xuất Nhập lại kho (RESTOCK).`)
@@ -297,19 +337,19 @@ export function StaffReturnsPage() {
 
       const payloadItems = Object.entries(inspectionDrafts).map(([itemIdStr, draft]) => ({
         return_item_id: Number(itemIdStr),
-        condition: draft.package_condition,
+        condition: draft.condition,
         package_condition: draft.package_condition,
         seal_intact: Boolean(draft.seal_intact),
         batch_matched: Boolean(draft.batch_matched),
         expiry_matched: Boolean(draft.expiry_matched),
         storage_condition_ok: Boolean(draft.storage_condition_ok),
-        received_quantity: draft.received_quantity,
-        accepted_quantity: draft.accepted_quantity,
-        rejected_quantity: draft.rejected_quantity,
+        received_quantity: Number(draft.received_quantity),
+        accepted_quantity: Number(draft.accepted_quantity),
+        rejected_quantity: Number(draft.rejected_quantity),
         restock_destination: draft.suggested_action,
         suggested_action: draft.suggested_action,
-        restock_quantity: draft.suggested_action === 'RESTOCK' ? draft.accepted_quantity : 0,
-        rejection_reason: draft.rejection_reason || draft.damage_description || (draft.rejected_quantity > 0 ? (draft.inspection_note || 'Hàng không đủ điều kiện nhập kho') : null),
+        restock_quantity: draft.suggested_action === 'RESTOCK' ? Number(draft.accepted_quantity) : 0,
+        rejection_reason: (draft.rejection_reason || draft.damage_description || draft.inspection_note || '').trim() || null,
         damage_description: draft.damage_description,
         inspection_note: draft.inspection_note,
       }))
@@ -844,40 +884,68 @@ export function StaffReturnsPage() {
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 12 }}>
                           <div>
                             <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#475569', marginBottom: 4 }}>
-                              Số lượng thực nhận:
+                              Số lượng thực nhận <span style={{ color: '#ef4444' }}>*</span>:
                             </label>
                             <input
                               type="number"
                               min={0}
-                              value={draft.received_quantity}
-                              onChange={(e) => updateField('received_quantity', Number(e.target.value))}
-                              style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 13 }}
+                              placeholder="Nhập SL nhận"
+                              value={draft.received_quantity ?? ''}
+                              onChange={(e) => updateField('received_quantity', e.target.value === '' ? '' : Number(e.target.value))}
+                              style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: draft.received_quantity !== '' ? '1px solid #cbd5e1' : '1px solid #f87171', fontSize: 13 }}
                             />
                           </div>
                           <div>
                             <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#166534', marginBottom: 4 }}>
-                              Đề xuất chấp nhận:
+                              Đề xuất chấp nhận <span style={{ color: '#ef4444' }}>*</span>:
                             </label>
                             <input
                               type="number"
                               min={0}
-                              value={draft.accepted_quantity}
-                              onChange={(e) => updateField('accepted_quantity', Number(e.target.value))}
-                              style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 13 }}
+                              placeholder="Nhập SL duyệt"
+                              value={draft.accepted_quantity ?? ''}
+                              onChange={(e) => updateField('accepted_quantity', e.target.value === '' ? '' : Number(e.target.value))}
+                              style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: draft.accepted_quantity !== '' ? '1px solid #cbd5e1' : '1px solid #f87171', fontSize: 13 }}
                             />
                           </div>
                           <div>
                             <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#991b1b', marginBottom: 4 }}>
-                              Đề xuất từ chối:
+                              Đề xuất từ chối <span style={{ color: '#ef4444' }}>*</span>:
                             </label>
                             <input
                               type="number"
                               min={0}
-                              value={draft.rejected_quantity}
-                              onChange={(e) => updateField('rejected_quantity', Number(e.target.value))}
-                              style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 13 }}
+                              placeholder="Nhập SL từ chối"
+                              value={draft.rejected_quantity ?? ''}
+                              onChange={(e) => updateField('rejected_quantity', e.target.value === '' ? '' : Number(e.target.value))}
+                              style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: draft.rejected_quantity !== '' ? '1px solid #cbd5e1' : '1px solid #f87171', fontSize: 13 }}
                             />
                           </div>
+                        </div>
+
+                        {/* Tình trạng thực tế sản phẩm */}
+                        <div style={{ marginBottom: 12 }}>
+                          <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#475569', marginBottom: 4 }}>
+                            Tình trạng thực tế sản phẩm <span style={{ color: '#ef4444' }}>*</span>:
+                          </label>
+                          <select
+                            value={draft.condition || ''}
+                            onChange={(e) => updateField('condition', e.target.value)}
+                            style={{
+                              width: '100%',
+                              padding: '7px 10px',
+                              borderRadius: 6,
+                              border: draft.condition ? '1px solid #cbd5e1' : '1px solid #f87171',
+                              fontSize: 12,
+                              background: draft.condition ? '#fff' : '#fff1f2',
+                            }}
+                          >
+                            <option value="">-- Vui lòng chọn tình trạng sản phẩm --</option>
+                            <option value="SEALED">Nguyên vẹn, chưa khui mở (SEALED)</option>
+                            <option value="OPENED">Đã mở niêm phong / sử dụng dở dang (OPENED)</option>
+                            <option value="DAMAGED">Hư hỏng vật lý / vỡ / ẩm mốc (DAMAGED)</option>
+                            <option value="DEFECTIVE">Lỗi chất lượng / biến chất / đổi màu (DEFECTIVE)</option>
+                          </select>
                         </div>
 
                         {/* Tình trạng bao bì */}

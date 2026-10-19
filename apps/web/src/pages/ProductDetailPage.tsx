@@ -12,7 +12,7 @@ interface ProductDetail extends Product {
   manufacturing_country: string | null
   package_description: string | null
   ingredients: Array<{ name: string; strength_value: number | null; strength_unit: string | null }>
-  source_fields: Array<{ id: number; source_id: number; field_name: string; original_value: string | null; normalized_value: string | null; field_confidence: number; observed_at: string; is_selected_value: boolean }>
+  source_fields: Array<{ id: number; source_id: number; field_name: string; original_value: string | null; field_confidence: number; observed_at: string; is_selected_value: boolean }>
   conflicts: Conflict[]
   latest_score: null | Record<string, number | string>
 }
@@ -234,8 +234,8 @@ export function ProductDetailPage() {
 
       <section className="panel">
         <div className="panel-heading"><div><h2>Bằng chứng và nguồn dữ liệu</h2><p>Mỗi thông tin thuốc đều gắn liền với nguồn gốc và thời điểm đối soát</p></div><FileSearch size={20} /></div>
-        <div className="table-wrap"><table><thead><tr><th>Thông tin</th><th>Giá trị gốc từ nguồn</th><th>Giá trị áp dụng</th><th>Nguồn</th><th>Độ tin cậy</th><th>Sử dụng</th></tr></thead><tbody>
-          {product.source_fields.map(field => <tr key={field.id}><td><strong>{field.field_name}</strong></td><td>{field.original_value || '—'}</td><td>{field.normalized_value || '—'}</td><td>Nguồn #{field.source_id}</td><td>{Math.round(field.field_confidence * 100)}%</td><td>{field.is_selected_value ? <CheckCircle2 className="text-success" size={18} /> : '—'}</td></tr>)}
+        <div className="table-wrap"><table><thead><tr><th>Thông tin</th><th>Giá trị ghi nhận</th><th>Nguồn</th><th>Độ tin cậy</th><th>Sử dụng</th></tr></thead><tbody>
+          {product.source_fields.map(field => <tr key={field.id}><td><strong>{field.field_name}</strong></td><td>{field.original_value || '—'}</td><td>Nguồn #{field.source_id}</td><td>{Math.round(field.field_confidence * 100)}%</td><td>{field.is_selected_value ? <CheckCircle2 className="text-success" size={18} /> : '—'}</td></tr>)}
         </tbody></table></div>
       </section>
       {product.conflicts.length > 0 && <section className="panel conflict-section"><div className="panel-heading"><div><h2>Mâu thuẫn liên quan</h2><p>{product.conflicts.filter(item => item.status === 'OPEN').length} cảnh báo đang mở</p></div></div>{product.conflicts.map(item => <div className="conflict-inline" key={item.id}><StatusBadge value={item.severity} /><div><strong>{item.description}</strong><small>{item.value_a || '—'} ↔ {item.value_b || '—'}</small></div><StatusBadge value={item.status} /></div>)}</section>}

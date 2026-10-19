@@ -259,3 +259,93 @@ def test_dline15_strict_fsm_and_dispatch():
             )
         ).all()
         assert len(repeat_movements) == 2  # Vẫn chỉ là 2 bản ghi, không tăng thêm
+
+
+def test_dline15_conflict_when_dispatch_movement_already_exists_while_packed():
+    """Kiểm tra khi đã có StockMovement DISPATCH nhưng kiện hàng vẫn ở trạng thái PACKED thì trả về 409 Conflict."""
+    with SessionLocal() as db:
+        uid = uuid.uuid4().hex[:6].upper()
+        now = datetime.now(UTC)
+
+        wh = Warehouse(name=f"Kho Test {uid}", code=f"WH-CF-{uid}", address="123 Test", is_active=True)
+        db.add(wh)
+        db.commit()
+
+        staff = User(email=f"staff_{uid}@pharmatrust.vn", full_name="Staff", password_hash="hash", role=UserRole.WAREHOUSE_STAFF, warehouse_id=wh.id, is_active=True)
+        db.add(staff)
+        db.commit()
+
+        prod = CanonicalProduct(canonical_name=f"Thuốc Test {uid}")
+        db.add(prod)
+        db.commit()
+
+        sku = ProductSku(canonical_product_id=prod.id, sku_code=f"SKU-CF-{uid}", uom="Hộp", base_price=Decimal("50000"), is_active=True)
+        db.add(sku)
+        db.commit()
+
+        batch = InventoryBatch(
+            sku_id=sku.id,
+            batch_number=f"BAT-CF-{uid}",
+            status=BatchStatus.ACTIVE,
+            expiry_date=date(2027, 1, 1),
+        )
+        db.add(batch)
+        db.commit()
+
+        stock = WarehouseBatchStock(warehouse_id=wh.id, batch_id=batch.id, quantity_on_hand=50, quantity_reserved=5, quantity_available=45)
+        db.add(stock)
+        db.commit()
+
+        order = Order(
+            order_code=f"ORD-CF-{uid}",
+            customer_name="Cust CF",
+            customer_phone="0911222333",
+            shipping_address="Hà Nội",
+            total_amount=Decimal("250000"),
+            payment_status="PAID",
+            order_status="PROCESSING",
+            fulfillment_status="PENDING",
+        )
+        db.add(order)
+        db.commit()
+
+        oi = OrderItem(order_id=order.id, product_id=prod.id, product_name=prod.canonical_name, quantity=5, price=Decimal("50000"), subtotal=Decimal("250000"))
+        db.add(oi)
+        db.commit()
+
+        ff = OrderFulfillment(order_id=order.id, warehouse_id=wh.id, fulfillment_code=f"FF-CF-{uid}", status="PACKED")
+        db.add(ff)
+        db.commit()
+
+        fi = FulfillmentItem(fulfillment_id=ff.id, order_item_id=oi.id, quantity=5)
+        alloc = OrderItemBatchAllocation(fulfillment_item_id=fi.id, order_item_id=oi.id, batch_id=batch.id, warehouse_id=wh.id, allocated_quantity=5)
+        resv = StockReservation(order_id=order.id, batch_id=batch.id, warehouse_id=wh.id, quantity=5, status="RESERVED", expires_at=now + timedelta(hours=24))
+        db.add_all([fi, alloc, resv])
+        db.commit()
+
+        # Tạo sẵn StockMovement DISPATCH với reference_id = ff.fulfillment_code (mô phỏng crash/retry giữa chừng)
+        existing_mv = StockMovement(
+            movement_code=f"MV-DISP-{uid}",
+            warehouse_id=wh.id,
+            batch_id=batch.id,
+            movement_type="DISPATCH",
+            quantity=-5,
+            balance_after=45,
+            reference_type="ORDER_FULFILLMENT",
+            reference_id=ff.fulfillment_code,
+            idempotency_key=f"DISPATCH:{ff.id}:{batch.id}",
+        )
+        db.add(existing_mv)
+        db.commit()
+
+        # Thử gọi transition sang SHIPPED -> Phải fail-closed với HTTP 409 Conflict
+        prev_hand = stock.quantity_on_hand
+        with pytest.raises(HTTPException) as exc_info:
+            FulfillmentRoutingService.transition_fulfillment_status(db, ff.id, "SHIPPED", user_id=staff.id)
+        assert exc_info.value.status_code == 409
+        assert "đã tồn tại chứng từ xuất kho" in exc_info.value.detail
+
+        # Đảm bảo không bị trừ tồn kho lần 2
+        db.refresh(stock)
+        assert stock.quantity_on_hand == prev_hand
+

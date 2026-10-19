@@ -181,8 +181,8 @@ class ReturnService:
                 net_paid_amount=net_paid,
                 requested_refund_amount=requested_refund,
                 customer_reason=item_in.get("customer_reason") or reason_text,
-                condition_reported=item_in.get("condition_reported", ItemCondition.SEALED.value),
-                condition=item_in.get("condition_reported", ItemCondition.SEALED.value),
+                condition_reported=item_in.get("condition_reported"),
+                condition=None,
             )
             validated_return_items.append(ret_item)
 

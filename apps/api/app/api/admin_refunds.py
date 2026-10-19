@@ -204,8 +204,9 @@ def create_manual_refund(
     return_request_id = None
     if payload.return_code:
         ret = db.scalar(select(ReturnRequest).where(ReturnRequest.return_code == payload.return_code))
-        if ret:
-            return_request_id = ret.id
+        if not ret:
+            raise HTTPException(status_code=404, detail=f"Không tìm thấy yêu cầu đổi/trả '{payload.return_code}'.")
+        return_request_id = ret.id
 
     refund = RefundService.create_refund_request(
         db=db,

@@ -70,6 +70,7 @@ export function ReturnWizardModal({
   // Form states
   const [requestType, setRequestType] = useState<"RETURN" | "EXCHANGE">("RETURN");
   const [selectedItems, setSelectedItems] = useState<{ [itemId: number]: number }>({});
+  const [itemConditions, setItemConditions] = useState<{ [itemId: number]: string }>({});
   const [reasonCode, setReasonCode] = useState<string>("WRONG_ITEM");
   const [customerNote, setCustomerNote] = useState<string>("");
   const [phoneVerify, setPhoneVerify] = useState<string>(customerPhone || "");
@@ -151,13 +152,23 @@ export function ReturnWizardModal({
       return;
     }
 
+    for (const [itemIdStr, qty] of Object.entries(selectedItems)) {
+      if (qty > 0) {
+        const cond = itemConditions[parseInt(itemIdStr, 10)];
+        if (!cond) {
+          alert("Vui lòng chọn tình trạng thực tế của từng sản phẩm cần đổi/trả.");
+          return;
+        }
+      }
+    }
+
     const itemsPayload = Object.entries(selectedItems)
       .filter(([_, qty]) => qty > 0)
       .map(([itemIdStr, qty]) => ({
         order_item_id: parseInt(itemIdStr, 10),
         requested_quantity: qty,
         customer_reason: customerNote,
-        condition_reported: "SEALED",
+        condition_reported: itemConditions[parseInt(itemIdStr, 10)] || "SEALED",
       }));
 
     const selectedReasonObj = REASONS.find((r) => r.code === reasonCode);
@@ -392,25 +403,48 @@ export function ReturnWizardModal({
                       </div>
 
                       {it.is_eligible && (
-                        <div className="flex items-center gap-2">
-                          <label className="text-xs text-slate-500 font-semibold">Số lượng:</label>
-                          <select
-                            value={qty}
-                            onChange={(e) =>
-                              setSelectedItems((prev) => ({
-                                ...prev,
-                                [it.order_item_id]: parseInt(e.target.value, 10),
-                              }))
-                            }
-                            className="px-2.5 py-1 rounded-xl border border-slate-300 text-xs font-bold text-slate-800 bg-white focus:outline-brand-blue-600"
-                          >
-                            <option value={0}>0</option>
-                            {Array.from({ length: it.returnable_quantity }, (_, i) => i + 1).map((n) => (
-                              <option key={n} value={n}>
-                                {n}
-                              </option>
-                            ))}
-                          </select>
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                          <div className="flex items-center gap-1.5">
+                            <label className="text-xs text-slate-500 font-semibold">Số lượng:</label>
+                            <select
+                              value={qty}
+                              onChange={(e) =>
+                                setSelectedItems((prev) => ({
+                                  ...prev,
+                                  [it.order_item_id]: parseInt(e.target.value, 10),
+                                }))
+                              }
+                              className="px-2.5 py-1 rounded-xl border border-slate-300 text-xs font-bold text-slate-800 bg-white focus:outline-brand-blue-600"
+                            >
+                              <option value={0}>0</option>
+                              {Array.from({ length: it.returnable_quantity }, (_, i) => i + 1).map((n) => (
+                                <option key={n} value={n}>
+                                  {n}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          {qty > 0 && (
+                            <div className="flex items-center gap-1.5">
+                              <label className="text-xs text-slate-500 font-semibold">Tình trạng:</label>
+                              <select
+                                value={itemConditions[it.order_item_id] || ""}
+                                onChange={(e) =>
+                                  setItemConditions((prev) => ({
+                                    ...prev,
+                                    [it.order_item_id]: e.target.value,
+                                  }))
+                                }
+                                className="px-2.5 py-1 rounded-xl border border-slate-300 text-xs font-medium text-slate-800 bg-white focus:outline-brand-blue-600"
+                              >
+                                <option value="">-- Chọn tình trạng --</option>
+                                <option value="SEALED">Nguyên bao bì (SEALED)</option>
+                                <option value="OPENED">Đã mở bao bì (OPENED)</option>
+                                <option value="DAMAGED">Hư hỏng / móp vỡ (DAMAGED)</option>
+                                <option value="DEFECTIVE">Lỗi thuốc / biến chất (DEFECTIVE)</option>
+                              </select>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

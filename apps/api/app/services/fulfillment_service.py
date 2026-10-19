@@ -4,7 +4,7 @@ import logging
 from typing import Any, Optional
 import uuid
 
-from fastapi import HTTPException
+from fastapi import HTTPException, status
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -498,6 +498,7 @@ class FulfillmentRoutingService:
                 selectinload(OrderFulfillment.items).selectinload(FulfillmentItem.order_item),
             )
             .where(OrderFulfillment.id == fulfillment_id)
+            .with_for_update()
         )
         if not ff:
             raise HTTPException(status_code=404, detail="Không tìm thấy kiện hàng")
@@ -631,7 +632,7 @@ class FulfillmentRoutingService:
                     select(WarehouseBatchStock).where(
                         WarehouseBatchStock.warehouse_id == ff.warehouse_id,
                         WarehouseBatchStock.batch_id == batch_id,
-                    )
+                    ).with_for_update()
                 )
                 if not stock:
                     raise HTTPException(
@@ -657,7 +658,7 @@ class FulfillmentRoutingService:
                         StockReservation.batch_id == batch_id,
                         StockReservation.warehouse_id == ff.warehouse_id,
                         StockReservation.status == "RESERVED",
-                    )
+                    ).with_for_update()
                 ).all()
 
                 total_res_qty = sum(r.quantity for r in reservations)
@@ -667,12 +668,38 @@ class FulfillmentRoutingService:
                         detail=f"Không tìm thấy đủ phiếu giữ chỗ tồn kho hợp lệ (RESERVED) cho lô #{batch_id} thuộc đơn hàng #{ff.order_id} (yêu cầu {req_qty}, có {total_res_qty}).",
                     )
 
+                # Kiểm tra DISPATCH / Idempotency TRƯỚC KHI trừ tồn kho hoặc đổi trạng thái reservation
+                idempotency_key = f"DISPATCH:{ff.id}:{batch_id}"
+                existing_disp = db.scalar(
+                    select(StockMovement).where(
+                        or_(
+                            StockMovement.idempotency_key == idempotency_key,
+                            and_(
+                                StockMovement.movement_type == "DISPATCH",
+                                StockMovement.reference_type == "ORDER_FULFILLMENT",
+                                StockMovement.reference_id == ff.fulfillment_code,
+                                StockMovement.batch_id == batch_id,
+                            ),
+                        )
+                    )
+                )
+                if existing_disp:
+                    # Nếu movement đã tồn tại nhưng kiện hàng vẫn ở trạng thái PACKED -> Fail-Closed, tuyệt đối không trừ tồn lần 2
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=(
+                            f"Kiện hàng {ff.fulfillment_code} đã tồn tại chứng từ xuất kho (DISPATCH: {existing_disp.movement_code}) "
+                            f"cho lô #{batch_id}. Bắt buộc đối soát trạng thái xuất kho, tuyệt đối không trừ tồn lần 2."
+                        ),
+                    )
+
                 batch_plans.append({
                     "batch_id": batch_id,
                     "batch": batch,
                     "stock": stock,
                     "req_qty": req_qty,
                     "reservations": reservations,
+                    "idempotency_key": idempotency_key,
                 })
 
             # 4. Khi 100% tiền kiểm định đạt yêu cầu: Thực thi nguyên tử trong transaction
@@ -684,6 +711,7 @@ class FulfillmentRoutingService:
                 req_qty = plan["req_qty"]
                 reservations = plan["reservations"]
                 b_id = plan["batch_id"]
+                idempotency_key = plan["idempotency_key"]
 
                 stock.quantity_reserved -= req_qty
                 stock.quantity_on_hand -= req_qty
@@ -711,36 +739,21 @@ class FulfillmentRoutingService:
                         rem_to_fulfill = 0
 
                 # Sinh duy nhất 1 bản ghi Thẻ kho (StockMovement - DISPATCH) cho mỗi lô với idempotency_key
-                idempotency_key = f"DISPATCH:{ff.id}:{b_id}"
-                existing_disp = db.scalar(
-                    select(StockMovement).where(
-                        or_(
-                            StockMovement.idempotency_key == idempotency_key,
-                            and_(
-                                StockMovement.movement_type == "DISPATCH",
-                                StockMovement.reference_type == "ORDER_FULFILLMENT",
-                                StockMovement.reference_id == ff.fulfillment_code,
-                                StockMovement.batch_id == b_id,
-                            ),
-                        )
+                db.add(
+                    StockMovement(
+                        movement_code=f"MOV-DISP-{ff.id}-{b_id}-{uuid.uuid4().hex[:6].upper()}",
+                        movement_type="DISPATCH",
+                        warehouse_id=ff.warehouse_id,
+                        batch_id=b_id,
+                        quantity=-req_qty,
+                        balance_after=stock.quantity_on_hand,
+                        reference_type="ORDER_FULFILLMENT",
+                        reference_id=ff.fulfillment_code,
+                        idempotency_key=idempotency_key,
+                        created_by=user_id,
+                        note=f"Xuất kho kiện {ff.fulfillment_code} giao cho khách",
                     )
                 )
-                if not existing_disp:
-                    db.add(
-                        StockMovement(
-                            movement_code=f"MOV-DISP-{ff.id}-{b_id}-{uuid.uuid4().hex[:6].upper()}",
-                            movement_type="DISPATCH",
-                            warehouse_id=ff.warehouse_id,
-                            batch_id=b_id,
-                            quantity=-req_qty,
-                            balance_after=stock.quantity_on_hand,
-                            reference_type="ORDER_FULFILLMENT",
-                            reference_id=ff.fulfillment_code,
-                            idempotency_key=idempotency_key,
-                            created_by=user_id,
-                            note=f"Xuất kho kiện {ff.fulfillment_code} giao cho khách",
-                        )
-                    )
 
         elif target_status == "PICKED":
             ff.status = "PICKED"

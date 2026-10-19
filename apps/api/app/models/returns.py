@@ -734,7 +734,7 @@ class ReturnRestockAllocation(Base):
     """
     __tablename__ = "return_restock_allocations"
     __table_args__ = (
-        UniqueConstraint("canonical_return_code", "order_item_id", "batch_id", name="uq_restock_canonical_item_batch"),
+        UniqueConstraint("stock_movement_id", name="uq_restock_alloc_stock_movement_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
