@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     momo_access_key: str = ""
     momo_secret_key: str = ""
     momo_endpoint: str = "https://test-payment.momo.vn/v2/gateway/api/create"
+    momo_query_endpoint: str = "https://test-payment.momo.vn/v2/gateway/api/query"
     momo_return_url: str = "http://localhost:3000/checkout/result"
     momo_ipn_url: str = "http://localhost:8000/api/v1/payments/momo/webhook"
 
@@ -170,6 +171,11 @@ class Settings(BaseSettings):
             and self.momo_secret_key
             and self.momo_secret_key.strip()
         )
+
+    @property
+    def is_momo_production(self) -> bool:
+        """Xác định cổng MoMo đang trỏ tới Production (Tiền thật) hay Sandbox (Thử nghiệm)."""
+        return "test-payment.momo.vn" not in self.momo_endpoint.lower() and self.momo_partner_code != "MOMO"
 
     @property
     def is_payos_configured(self) -> bool:

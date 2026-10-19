@@ -225,6 +225,39 @@ async def momo_ipn_webhook(
     return result
 
 
+@payments_router.post("/momo/check/{order_code}")
+def check_momo_payment_status(
+    order_code: str,
+    phone_verify: Optional[str] = Query(None),
+    x_order_token: Optional[str] = Header(None, alias="X-Order-Token"),
+    authorization: Optional[str] = Header(None),
+    current_user: Optional[User] = Depends(get_optional_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Chủ động đối soát trạng thái giao dịch MoMo từ MoMo Gateway API.
+    Bảo vệ chống IDOR: Chỉ khách sở hữu đơn hoặc nhân viên mới được kích hoạt.
+    """
+    clean_code = order_code.strip()
+    order = db.scalar(select(Order).where(Order.order_code == clean_code))
+    if not order:
+        raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng.")
+
+    effective_token = x_order_token
+    if not effective_token and authorization and authorization.startswith("Bearer "):
+        effective_token = authorization.split(" ")[1].strip()
+
+    _verify_order_payment_access(
+        order,
+        current_user,
+        phone_verify=phone_verify,
+        order_token=effective_token,
+        action_name="đối soát giao dịch MoMo",
+    )
+
+    return MomoPaymentService.query_transaction_status(db, clean_code)
+
+
 @payments_router.post("/momo/simulate")
 def simulate_momo_payment(
     payload: SimulatePaymentRequest,
@@ -235,6 +268,11 @@ def simulate_momo_payment(
     Vô hiệu hóa tuyệt đối trên môi trường production/public (Fail-Closed).
     """
     _assert_simulation_allowed()
+    if getattr(settings, "is_momo_production", False):
+        raise HTTPException(
+            status_code=403,
+            detail="Chức năng giả lập thanh toán bị vô hiệu hóa hoàn toàn trên môi trường Production.",
+        )
     return MomoPaymentService.simulate_payment(
         db=db,
         order_code=payload.order_code.strip(),
@@ -600,6 +638,13 @@ def get_order_payment_status(
     if order.payment_method == "PAYOS" and order.payment_status == "PENDING" and settings.is_payos_configured:
         try:
             PayOSPaymentService.check_payment_status(db, clean_code)
+            db.refresh(order)
+        except Exception:
+            pass
+
+    if order.payment_method == "MOMO" and order.payment_status == "PENDING" and settings.is_momo_configured:
+        try:
+            MomoPaymentService.query_transaction_status(db, clean_code)
             db.refresh(order)
         except Exception:
             pass

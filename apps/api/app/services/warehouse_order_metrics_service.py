@@ -113,7 +113,9 @@ class WarehouseOrderMetricsService:
             st = (o.order_status or "").upper()
             fst = (o.fulfillment_status or "").upper()
 
-            if st in ["PROCESSING", "CONFIRMED", "PENDING"] or fst in ["ALLOCATED", "PICKING", "PACKED", "WAITING_INTERNAL_TRANSFER"]:
+            if fst == "WAITING_PAYMENT" or (o.payment_method != "COD" and o.payment_status != "PAID"):
+                pass  # Đơn chờ thanh toán trực tuyến, chưa đưa vào hàng đợi xử lý của kho/Admin
+            elif st in ["PROCESSING", "CONFIRMED"] or (st == "PENDING" and o.payment_method == "COD") or fst in ["ALLOCATED", "PICKING", "PACKED", "WAITING_INTERNAL_TRANSFER"]:
                 orders_processing += 1
             if st == "SHIPPING" or fst == "SHIPPED":
                 orders_shipping += 1

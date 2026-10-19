@@ -93,10 +93,17 @@ function CheckoutResultContent() {
         if (phone) queryParts.push(`phone_verify=${encodeURIComponent(phone)}`);
         const queryParam = queryParts.length ? `?${queryParts.join("&")}` : "";
 
-        // Nếu là payOS và chưa có xác nhận PAID, thử tra cứu đối soát nhanh
+        // Nếu là payOS hoặc MoMo và chưa có xác nhận PAID, thử tra cứu đối soát nhanh
         if (cleanOrderCode && !isCancelled) {
           try {
             await fetch(`/api/v1/payments/payos/check/${cleanOrderCode}${queryParam}`, {
+              method: "POST",
+              headers,
+            });
+          } catch (_) {}
+
+          try {
+            await fetch(`/api/v1/payments/momo/check/${cleanOrderCode}${queryParam}`, {
               method: "POST",
               headers,
             });
@@ -107,6 +114,29 @@ function CheckoutResultContent() {
         if (res.ok) {
           const data = await res.json();
           setOrderData(data);
+
+          // Nếu khách hàng đã bấm hủy trên cổng thanh toán (cancel=true hoặc resultCode=1006 hoặc status=CANCELLED):
+          // Tự động gọi backend để hủy đơn và giải phóng lượng hàng giữ chỗ trong kho
+          if ((cancelParam === "true" || resultCode === "1006" || statusParam === "CANCELLED") && data.order_status !== "CANCELLED") {
+            try {
+              const cancelHeaders: Record<string, string> = { "Content-Type": "application/json" };
+              if (token) cancelHeaders["Authorization"] = `Bearer ${token}`;
+              if (orderToken) cancelHeaders["X-Order-Token"] = orderToken;
+
+              await fetch(`/api/v1/payments/orders/${cleanOrderCode}/cancel`, {
+                method: "POST",
+                headers: cancelHeaders,
+                body: JSON.stringify({
+                  reason: "Khách hàng hủy trên cổng thanh toán trực tuyến",
+                  phone_verify: phone || undefined,
+                  order_token: orderToken || undefined,
+                }),
+              });
+              setOrderData((prev) => prev ? { ...prev, order_status: "CANCELLED", payment_status: "CANCELLED" } : prev);
+            } catch (cErr) {
+              console.warn("Lỗi khi tự động hủy đơn sau khi hủy cổng thanh toán:", cErr);
+            }
+          }
         } else {
           setError("Không thể tra cứu thông tin thanh toán từ hệ thống.");
         }
