@@ -404,10 +404,22 @@ export function WarehouseOrdersPage() {
                           style={{
                             fontSize: '10.5px',
                             fontWeight: 700,
-                            color: isCancelled ? '#e11d48' : o.payment_status === 'PAID' ? '#047857' : '#d97706',
+                            color: isCancelled
+                              ? '#e11d48'
+                              : o.payment_status === 'PAID'
+                              ? '#047857'
+                              : o.payment_method === 'COD'
+                              ? '#d97706'
+                              : '#ea580c',
                           }}
                         >
-                          {isCancelled ? 'Đã hủy đơn' : o.payment_status === 'PAID' ? 'Đã thanh toán' : 'Chờ thu tiền (COD)'}
+                          {isCancelled
+                            ? 'Đã hủy đơn'
+                            : o.payment_status === 'PAID'
+                            ? 'Đã thanh toán'
+                            : o.payment_method === 'COD'
+                            ? 'Chờ thu tiền (COD)'
+                            : 'Chờ thanh toán online'}
                         </span>
                       </td>
 

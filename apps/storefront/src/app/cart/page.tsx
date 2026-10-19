@@ -693,9 +693,21 @@ export default function CartPage() {
               status: "PENDING",
             });
             return;
+          } else {
+            // Không nhận được liên kết thanh toán từ cổng MoMo
+            // Dọn giỏ hàng để tránh đặt đơn trùng, và chuyển khách sang màn hình Chờ thanh toán
+            setItems([]);
+            localStorage.removeItem("pharmatrust_cart");
+            const failReason = momoData?.detail || "Không thể kết nối cổng thanh toán MoMo";
+            router.push(`/checkout/result?order_code=${encodeURIComponent(data.order_code)}&message=${encodeURIComponent(failReason)}`);
+            return;
           }
-        } catch (mErr) {
-          console.warn("Lỗi khi kết nối cổng MoMo, chuyển về trang đơn hàng:", mErr);
+        } catch (mErr: any) {
+          console.warn("Lỗi khi kết nối cổng MoMo:", mErr);
+          setItems([]);
+          localStorage.removeItem("pharmatrust_cart");
+          router.push(`/checkout/result?order_code=${encodeURIComponent(data.order_code)}&message=${encodeURIComponent(mErr?.message || "Lỗi khi kết nối cổng MoMo")}`);
+          return;
         }
       }
 
@@ -713,21 +725,30 @@ export default function CartPage() {
         return;
       }
 
-      // COD or standard order placed successfully
-      setOrderSuccess({
-        order_code: data.order_code,
-        total: data.total_amount || grandTotal,
-        customer_name: customerName.trim(),
-        customer_phone: customerPhone.trim(),
-        shipping_address: fullShippingAddress,
-        payment_method: paymentMethod,
-        fulfillment_type: fulfillmentType,
-        store_name: selectedStoreObj?.name,
-      });
+      // COD: Chỉ duy nhất phương thức COD (Thanh toán khi nhận hàng) mới được phép hiển thị màn hình đặt hàng thành công trực tiếp
+      if (paymentMethod === "COD") {
+        setOrderSuccess({
+          order_code: data.order_code,
+          total: data.total_amount || grandTotal,
+          customer_name: customerName.trim(),
+          customer_phone: customerPhone.trim(),
+          shipping_address: fullShippingAddress,
+          payment_method: "COD",
+          fulfillment_type: fulfillmentType,
+          store_name: selectedStoreObj?.name,
+        });
 
-      // Clear local cart
+        // Clear local cart
+        setItems([]);
+        localStorage.removeItem("pharmatrust_cart");
+        return;
+      }
+
+      // Mọi phương thức trực tuyến khác ngoài COD: Tuyệt đối không tự ý hiển thị thành công, chuyển hướng sang trang kết quả thanh toán
       setItems([]);
       localStorage.removeItem("pharmatrust_cart");
+      router.push(`/checkout/result?order_code=${encodeURIComponent(data.order_code)}`);
+      return;
     } catch (err: any) {
       setErrorMessage(err.message || "Lỗi khi xử lý đơn hàng");
     } finally {
