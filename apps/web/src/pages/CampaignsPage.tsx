@@ -14,7 +14,11 @@ import {
   ThermometerSnowflake,
   Trash2,
   X,
+  Clock,
 } from 'lucide-react'
+import { AdminPageHeader } from '../components/AdminPageHeader'
+import { StatCard, StatGrid } from '../components/StatCard'
+import { FilterBar } from '../components/FilterBar'
 import { EmptyState } from '../components/EmptyState'
 import { PaginationBar } from '../components/PaginationBar'
 import { api } from '../services/api'
@@ -257,31 +261,40 @@ export function CampaignsPage() {
   const pausedCount = campaigns.filter((c) => c.status === 'PAUSED').length
 
   return (
-    <div className="page-container">
+    <div className="page-container" style={{ padding: '24px 32px' }}>
       {/* Header */}
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">Hồ sơ & Bán hàng / Chiến dịch mùa bệnh</div>
-          <h1 className="page-title">Chuyên Đề & Cẩm Nang Bệnh Theo Mùa</h1>
-          <p className="page-subtitle">
-            Quản trị cẩm nang dịch tễ, lời khuyên Dược sĩ GPP và thiết lập toa thuốc điều trị theo mùa trên Storefront.
-          </p>
-        </div>
-        <div className="header-actions">
-          <button
-            className="button button-secondary"
-            onClick={loadCampaigns}
-            disabled={loading}
-          >
-            <RefreshCw size={16} className={loading ? 'spin' : ''} />
-            Làm mới
-          </button>
-          <button className="button button-primary" onClick={handleOpenCreate}>
-            <Plus size={16} />
-            Tạo chiến dịch mới
-          </button>
-        </div>
-      </div>
+      <AdminPageHeader
+        title="Chuyên Đề & Cẩm Nang Bệnh Theo Mùa"
+        eyebrow="HỒ SƠ & BÁN HÀNG • Quản trị dịch tễ & phác đồ GPP"
+        subtitle="Quản trị cẩm nang dịch tễ, lời khuyên Dược sĩ GPP và thiết lập toa thuốc điều trị theo mùa trên Storefront."
+        badge={
+          <span className="stat-card-badge" style={{ background: '#e0f2fe', color: '#0369a1' }}>
+            <ThermometerSnowflake size={12} /> {totalCount} chuyên đề
+          </span>
+        }
+        actions={
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              type="button"
+              className="admin-button button-secondary"
+              onClick={loadCampaigns}
+              disabled={loading}
+              title="Làm mới danh sách"
+            >
+              <RefreshCw size={14} className={loading ? 'spin' : ''} />
+              Làm mới
+            </button>
+            <button
+              type="button"
+              className="admin-button button-primary"
+              onClick={handleOpenCreate}
+            >
+              <Plus size={14} />
+              Tạo chiến dịch mới
+            </button>
+          </div>
+        }
+      />
 
       {/* Notifications */}
       {notification && (
@@ -289,7 +302,8 @@ export function CampaignsPage() {
           {notification.type === 'success' ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
           <span>{notification.message}</span>
           <button
-            className="icon-button"
+            type="button"
+            className="admin-icon-button"
             onClick={() => setNotification(null)}
             style={{ marginLeft: 'auto' }}
           >
@@ -299,169 +313,201 @@ export function CampaignsPage() {
       )}
 
       {/* Metrics */}
-      <div className="stats-grid" style={{ marginBottom: '1.5rem' }}>
-        <div className="stat-card">
-          <div className="stat-label">Tổng số chiến dịch</div>
-          <div className="stat-value">{totalCount}</div>
-          <div className="stat-help">Tất cả các mùa dịch bệnh</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Đang phát sóng (ACTIVE)</div>
-          <div className="stat-value text-emerald-600">{activeCount}</div>
-          <div className="stat-help">Hiển thị trực tiếp trang chủ</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Tạm dừng (PAUSED)</div>
-          <div className="stat-value text-amber-600">{pausedCount}</div>
-          <div className="stat-help">Chờ đến chu kỳ thời tiết</div>
-        </div>
-      </div>
+      <StatGrid columns={3}>
+        <StatCard
+          label="Tổng số chiến dịch"
+          value={totalCount}
+          icon={ThermometerSnowflake}
+          tone="blue"
+          subtext="Tất cả các mùa dịch bệnh"
+          loading={loading}
+        />
+        <StatCard
+          label="Đang phát sóng (ACTIVE)"
+          value={activeCount}
+          icon={CheckCircle2}
+          tone="emerald"
+          subtext="Hiển thị trực tiếp trang chủ"
+          loading={loading}
+        />
+        <StatCard
+          label="Tạm dừng (PAUSED)"
+          value={pausedCount}
+          icon={Clock}
+          tone={pausedCount > 0 ? 'amber' : 'slate'}
+          subtext="Chờ đến chu kỳ thời tiết"
+          loading={loading}
+        />
+      </StatGrid>
 
       {/* Filters Toolbar */}
-      <div className="toolbar" style={{ marginBottom: '1.25rem', display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div className="filter-group">
-          <span className="filter-label">Trạng thái:</span>
-          <div className="segmented-control">
-            <button
-              className={`segment-btn ${statusFilter === 'ALL' ? 'active' : ''}`}
-              onClick={() => setStatusFilter('ALL')}
-            >
-              Tất cả ({totalCount})
-            </button>
-            <button
-              className={`segment-btn ${statusFilter === 'ACTIVE' ? 'active' : ''}`}
-              onClick={() => setStatusFilter('ACTIVE')}
-            >
-              Đang chạy ({activeCount})
-            </button>
-            <button
-              className={`segment-btn ${statusFilter === 'PAUSED' ? 'active' : ''}`}
-              onClick={() => setStatusFilter('PAUSED')}
-            >
-              Tạm dừng ({pausedCount})
-            </button>
-          </div>
+      <FilterBar
+        searchValue={searchQuery}
+        onSearchChange={setSearchQuery}
+        searchPlaceholder="Tìm theo tiêu đề, tên bệnh, slug..."
+        totalCount={totalCount}
+        filteredCount={filteredCampaigns.length}
+        unitLabel="chiến dịch"
+        onRefresh={loadCampaigns}
+        isRefreshing={loading}
+      >
+        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+          <button
+            type="button"
+            className={`admin-button ${statusFilter === 'ALL' ? 'button-primary' : 'button-secondary'}`}
+            onClick={() => setStatusFilter('ALL')}
+            style={{ fontSize: 12, padding: '5px 10px' }}
+          >
+            Tất cả ({totalCount})
+          </button>
+          <button
+            type="button"
+            className={`admin-button ${statusFilter === 'ACTIVE' ? 'button-primary' : 'button-secondary'}`}
+            onClick={() => setStatusFilter('ACTIVE')}
+            style={{ fontSize: 12, padding: '5px 10px' }}
+          >
+            Đang chạy ({activeCount})
+          </button>
+          <button
+            type="button"
+            className={`admin-button ${statusFilter === 'PAUSED' ? 'button-primary' : 'button-secondary'}`}
+            onClick={() => setStatusFilter('PAUSED')}
+            style={{ fontSize: 12, padding: '5px 10px' }}
+          >
+            Tạm dừng ({pausedCount})
+          </button>
         </div>
-
-        <div className="search-box" style={{ maxWidth: '320px', width: '100%' }}>
-          <Search size={16} />
-          <input
-            type="text"
-            placeholder="Tìm theo tiêu đề, tên bệnh, slug..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
-      </div>
+      </FilterBar>
 
       {/* Campaigns Table */}
-      <div className="card">
-        {loading ? (
-          <div className="card-loading">Đang tải danh sách chiến dịch…</div>
-        ) : filteredCampaigns.length === 0 ? (
-          <EmptyState
-            title="Chưa có chiến dịch bệnh theo mùa nào"
-            description="Bấm 'Tạo chiến dịch mới' để thiết lập cẩm nang sức khỏe cho khách hàng."
-          />
-        ) : (
-          <div className="table-responsive">
-            <table className="table">
-              <thead>
+      <div className="admin-data-table-container">
+        <div className="admin-table-wrap">
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th style={{ width: '70px' }}>ID</th>
+                <th style={{ minWidth: '240px' }}>Chiến dịch & Tên bệnh</th>
+                <th style={{ width: '160px' }}>Mùa áp dụng</th>
+                <th style={{ minWidth: '300px' }}>Triệu chứng & Lời khuyên Dược sĩ</th>
+                <th style={{ width: '150px' }}>Thuốc chỉ định</th>
+                <th style={{ width: '130px' }}>Trạng thái</th>
+                <th style={{ width: '140px', textAlign: 'right' }}>Thao tác</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
                 <tr>
-                  <th style={{ width: '60px' }}>ID</th>
-                  <th style={{ width: '260px' }}>Chiến dịch & Tên bệnh</th>
-                  <th style={{ width: '150px' }}>Mùa áp dụng</th>
-                  <th>Triệu chứng & Lời khuyên Dược sĩ</th>
-                  <th style={{ width: '140px' }}>Thuốc chỉ định</th>
-                  <th style={{ width: '120px' }}>Trạng thái</th>
-                  <th style={{ width: '130px', textAlign: 'right' }}>Thao tác</th>
+                  <td colSpan={7} style={{ padding: '40px 16px', textAlign: 'center', color: '#64748b' }}>
+                    <RefreshCw size={20} className="spin" style={{ margin: '0 auto 8px', display: 'block' }} />
+                    Đang tải danh sách chiến dịch…
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {displayedCampaigns.map((c) => (
+              ) : filteredCampaigns.length === 0 ? (
+                <tr>
+                  <td colSpan={7} style={{ padding: '40px 16px', textAlign: 'center' }}>
+                    <EmptyState
+                      title="Chưa có chiến dịch bệnh theo mùa nào"
+                      description="Bấm 'Tạo chiến dịch mới' để thiết lập cẩm nang sức khỏe cho khách hàng."
+                    />
+                  </td>
+                </tr>
+              ) : (
+                displayedCampaigns.map((c) => (
                   <tr key={c.id}>
                     <td>
-                      <span className="font-mono text-muted">#{c.id}</span>
+                      <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#64748b' }}>#{c.id}</span>
                     </td>
                     <td>
-                      <strong className="d-block line-clamp-2" style={{ maxWidth: '240px', color: '#0f172a' }} title={c.title}>
+                      <strong className="d-block line-clamp-2" style={{ maxWidth: '240px', color: '#0f172a', fontSize: '13px' }} title={c.title}>
                         {c.title}
                       </strong>
-                      <div className="text-xs text-muted mt-0.5 line-clamp-1" title={c.disease_name}>
-                        Bệnh: <span className="font-bold text-slate-800">{c.disease_name}</span>
+                      <div style={{ fontSize: '12px', color: '#475569', marginTop: '2px' }} className="line-clamp-1" title={c.disease_name}>
+                        Bệnh: <span style={{ fontWeight: 700, color: '#0f172a' }}>{c.disease_name}</span>
                       </div>
-                      <div className="text-xs font-mono text-muted text-truncate" style={{ maxWidth: '240px' }} title={`/${c.slug}`}>/{c.slug}</div>
+                      <div style={{ fontSize: '11px', fontFamily: 'monospace', color: '#0284c7', marginTop: '1px' }} className="text-truncate" title={`/${c.slug}`}>/{c.slug}</div>
                     </td>
                     <td>
-                      <span className="tag tag-info" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '4px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 600, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe' }}>
                         <ThermometerSnowflake size={12} />
-                        {c.season}
+                        {SEASONS.find(s => s.value === c.season)?.label.split(' (')[0] || c.season}
                       </span>
                     </td>
                     <td style={{ maxWidth: '340px' }}>
-                      <div style={{ fontSize: '0.82rem', lineHeight: '1.4' }}>
-                        <strong className="text-amber-800">Triệu chứng: </strong>
-                        <span className="text-muted line-clamp-2" title={c.symptoms}>{c.symptoms}</span>
+                      <div style={{ fontSize: '12px', lineHeight: '1.45' }}>
+                        <strong style={{ color: '#b45309' }}>Triệu chứng: </strong>
+                        <span style={{ color: '#334155' }} className="line-clamp-2" title={c.symptoms}>{c.symptoms}</span>
                       </div>
-                      <div style={{ fontSize: '0.82rem', lineHeight: '1.4', marginTop: '4px' }}>
-                        <strong className="text-emerald-800">Phòng bệnh: </strong>
-                        <span className="text-muted line-clamp-2" title={c.prevention}>{c.prevention}</span>
+                      <div style={{ fontSize: '12px', lineHeight: '1.45', marginTop: '4px' }}>
+                        <strong style={{ color: '#15803d' }}>Phòng bệnh: </strong>
+                        <span style={{ color: '#334155' }} className="line-clamp-2" title={c.prevention}>{c.prevention}</span>
                       </div>
                     </td>
                     <td>
-                      <div className="font-bold">{c.recommended_products.length} sản phẩm</div>
+                      <div style={{ fontWeight: 700, fontSize: '12.5px', color: '#0f172a' }}>{c.recommended_products.length} sản phẩm</div>
                       {c.recommended_products.length > 0 && (
-                        <div className="text-xs text-muted line-clamp-1">
+                        <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }} className="line-clamp-1" title={c.recommended_products.map((p) => p.name).join(', ')}>
                           {c.recommended_products.map((p) => p.name).join(', ')}
                         </div>
                       )}
                     </td>
                     <td>
                       {c.status === 'ACTIVE' ? (
-                        <span className="badge badge-success">Đang kích hoạt</span>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, background: '#dcfce7', color: '#15803d' }}>
+                          <CheckCircle2 size={12} /> Đang chạy
+                        </span>
                       ) : c.status === 'PAUSED' ? (
-                        <span className="badge badge-warning">Tạm dừng</span>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, background: '#fef3c7', color: '#b45309' }}>
+                          <PauseCircle size={12} /> Tạm dừng
+                        </span>
                       ) : (
-                        <span className="badge badge-secondary">{c.status}</span>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, background: '#f1f5f9', color: '#64748b' }}>
+                          {c.status}
+                        </span>
                       )}
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
                         <button
-                          className="button button-xs button-secondary"
-                          title={c.status === 'ACTIVE' ? 'Tạm dừng' : 'Kích hoạt'}
+                          type="button"
+                          className="admin-button button-secondary"
+                          style={{ padding: '4px 8px', fontSize: '11.5px' }}
+                          title={c.status === 'ACTIVE' ? 'Tạm dừng chiến dịch' : 'Kích hoạt chiến dịch'}
                           onClick={() => handleToggleStatus(c)}
                         >
-                          {c.status === 'ACTIVE' ? <PauseCircle size={14} /> : <PlayCircle size={14} />}
+                          {c.status === 'ACTIVE' ? <PauseCircle size={13} /> : <PlayCircle size={13} />}
                         </button>
                         <button
-                          className="button button-xs button-secondary"
-                          title="Chỉnh sửa"
+                          type="button"
+                          className="admin-button button-secondary"
+                          style={{ padding: '4px 8px', fontSize: '11.5px' }}
+                          title="Chỉnh sửa chiến dịch"
                           onClick={() => handleOpenEdit(c)}
                         >
-                          <Edit size={14} />
+                          <Edit size={13} />
                         </button>
                         <button
-                          className="button button-xs button-danger"
+                          type="button"
+                          className="admin-button button-danger"
+                          style={{ padding: '4px 8px', fontSize: '11.5px' }}
                           title="Xóa chiến dịch"
                           onClick={() => handleDelete(c)}
                         >
-                          <Trash2 size={14} />
+                          <Trash2 size={13} />
                         </button>
                       </div>
                     </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
         {!loading && filteredCampaigns.length > 0 && (
           <PaginationBar
             currentPage={currentPage}
             totalPages={totalPages}
             pageSize={pageSize}
-            totalItems={campaigns.length}
+            totalItems={filteredCampaigns.length}
             filteredCount={filteredCampaigns.length}
             itemName="chiến dịch"
             onPageChange={setCurrentPage}
@@ -607,10 +653,10 @@ export function CampaignsPage() {
                 </div>
               </div>
 
-              <div className="modal-footer">
+              <div className="modal-footer" style={{ padding: '14px 24px', background: '#f8fafc', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
                 <button
                   type="button"
-                  className="button button-secondary"
+                  className="admin-button button-secondary"
                   onClick={() => setIsModalOpen(false)}
                   disabled={saving}
                 >
@@ -618,7 +664,7 @@ export function CampaignsPage() {
                 </button>
                 <button
                   type="submit"
-                  className="button button-primary"
+                  className="admin-button button-primary"
                   disabled={saving}
                 >
                   {saving ? 'Đang lưu…' : editingCampaign ? 'Cập nhật' : 'Tạo mới'}

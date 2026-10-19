@@ -4,12 +4,13 @@ import base64
 import json
 import os
 import re
+import secrets
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, desc, or_, select
@@ -20,6 +21,7 @@ from app.core.config import settings
 from app.db.session import get_db
 from app.models import User
 from app.models.chat_models import AIChatAttachment, AIChatConversation, AIChatMessage
+from app.models.enums import UserRole
 
 router = APIRouter(prefix="/chat", tags=["AI Chatbot History & Attachments"])
 
@@ -216,6 +218,8 @@ async def upload_chat_image(
 @router.get("/attachments/{attachment_code}")
 def get_chat_attachment(
     attachment_code: str,
+    session_id: Optional[str] = Query(None),
+    x_session_id: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_current_user),
 ):
@@ -227,13 +231,22 @@ def get_chat_attachment(
     if not att or not os.path.exists(att.file_path):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy tệp đính kèm")
 
+    caller_session_id = session_id or x_session_id
     # Anti-IDOR: Nếu tệp thuộc về user có tài khoản, chỉ cho phép chính user đó xem
     if att.user_id is not None:
-        if not current_user or current_user.id != att.user_id:
+        if not current_user or (current_user.id != att.user_id and current_user.role != UserRole.ADMIN):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Bạn không có quyền truy cập vào tệp đính kèm này",
             )
+    else:
+        # Tệp của khách vãng lai: bắt buộc có session_id khớp
+        if not caller_session_id or not secrets.compare_digest(caller_session_id.strip(), (att.session_id or "").strip()):
+            if not current_user or current_user.role != UserRole.ADMIN:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Bạn không có quyền truy cập vào tệp đính kèm này (yêu cầu session_id hợp lệ)",
+                )
 
     return FileResponse(
         path=att.file_path,
@@ -293,6 +306,7 @@ def list_conversations(
 @router.post("/conversations", response_model=ConversationDetailSchema)
 def save_or_update_conversation(
     payload: SaveConversationSchema,
+    x_session_id: Optional[str] = Header(None),
     current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
@@ -306,13 +320,23 @@ def save_or_update_conversation(
             select(AIChatConversation).where(AIChatConversation.conversation_code == conv_code)
         ).first()
 
+    caller_session_id = payload.session_id or x_session_id
     if conv:
         # Anti-IDOR check
-        if conv.user_id is not None and (not current_user or current_user.id != conv.user_id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Bạn không có quyền chỉnh sửa cuộc trò chuyện này",
-            )
+        if conv.user_id is not None:
+            if not current_user or (current_user.id != conv.user_id and current_user.role != UserRole.ADMIN):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Bạn không có quyền chỉnh sửa cuộc trò chuyện này",
+                )
+        else:
+            # Cuộc trò chuyện khách vãng lai: bắt buộc session_id phải khớp
+            if not caller_session_id or not secrets.compare_digest(caller_session_id.strip(), (conv.session_id or "").strip()):
+                if not current_user or current_user.role != UserRole.ADMIN:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Bạn không có quyền chỉnh sửa cuộc trò chuyện này (sai session_id)",
+                    )
         if conv.user_id is None and current_user is not None:
             conv.user_id = current_user.id
     else:
@@ -387,6 +411,8 @@ def save_or_update_conversation(
 @router.get("/conversations/{conversation_code}", response_model=ConversationDetailSchema)
 def get_conversation_detail(
     conversation_code: str,
+    session_id: Optional[str] = Query(None),
+    x_session_id: Optional[str] = Header(None),
     current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
@@ -401,12 +427,21 @@ def get_conversation_detail(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy cuộc trò chuyện")
 
     # Anti-IDOR check
+    caller_session_id = session_id or x_session_id
     if conv.user_id is not None:
-        if not current_user or current_user.id != conv.user_id:
+        if not current_user or (current_user.id != conv.user_id and current_user.role != UserRole.ADMIN):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Bạn không có quyền xem cuộc trò chuyện này",
             )
+    else:
+        # Cuộc trò chuyện khách vãng lai: bắt buộc session_id phải khớp
+        if not caller_session_id or not secrets.compare_digest(caller_session_id.strip(), (conv.session_id or "").strip()):
+            if not current_user or current_user.role != UserRole.ADMIN:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Bạn không có quyền xem cuộc trò chuyện này (yêu cầu session_id hợp lệ)",
+                )
 
     formatted_messages = []
     for m in conv.messages:
@@ -440,6 +475,8 @@ def get_conversation_detail(
 def rename_conversation(
     conversation_code: str,
     payload: RenameConversationSchema,
+    session_id: Optional[str] = Query(None),
+    x_session_id: Optional[str] = Header(None),
     current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
@@ -453,12 +490,20 @@ def rename_conversation(
     if not conv or conv.is_archived:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy cuộc trò chuyện")
 
+    caller_session_id = session_id or x_session_id
     if conv.user_id is not None:
-        if not current_user or current_user.id != conv.user_id:
+        if not current_user or (current_user.id != conv.user_id and current_user.role != UserRole.ADMIN):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Bạn không có quyền chỉnh sửa cuộc trò chuyện này",
             )
+    else:
+        if not caller_session_id or not secrets.compare_digest(caller_session_id.strip(), (conv.session_id or "").strip()):
+            if not current_user or current_user.role != UserRole.ADMIN:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Bạn không có quyền chỉnh sửa cuộc trò chuyện này (sai session_id)",
+                )
 
     conv.title = payload.title.strip()
     conv.updated_at = datetime.now(UTC)
@@ -469,6 +514,8 @@ def rename_conversation(
 @router.delete("/conversations/{conversation_code}")
 def delete_conversation(
     conversation_code: str,
+    session_id: Optional[str] = Query(None),
+    x_session_id: Optional[str] = Header(None),
     current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
@@ -482,12 +529,20 @@ def delete_conversation(
     if not conv:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy cuộc trò chuyện")
 
+    caller_session_id = session_id or x_session_id
     if conv.user_id is not None:
-        if not current_user or current_user.id != conv.user_id:
+        if not current_user or (current_user.id != conv.user_id and current_user.role != UserRole.ADMIN):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Bạn không có quyền xóa cuộc trò chuyện này",
             )
+    else:
+        if not caller_session_id or not secrets.compare_digest(caller_session_id.strip(), (conv.session_id or "").strip()):
+            if not current_user or current_user.role != UserRole.ADMIN:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Bạn không có quyền xóa cuộc trò chuyện này (sai session_id)",
+                )
 
     # Dọn dẹp tệp vật lý của các attachments liên quan
     for att in conv.attachments:

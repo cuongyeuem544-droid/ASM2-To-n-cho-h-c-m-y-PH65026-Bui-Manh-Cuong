@@ -39,6 +39,13 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 
   const currentPrice = product.salePrice || product.price;
 
+  const isOutOfStockOrExpired =
+    product.stock === 0 ||
+    product.stock === undefined ||
+    product.canAddToCart === false ||
+    product.catalogTier === "OUT_OF_STOCK" ||
+    product.isSaleEligible === false;
+
   const handleWishlistToggle = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -50,7 +57,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     e.stopPropagation();
     if (product.isPrescription) {
       if (onOpenRxConsult) onOpenRxConsult(product);
-    } else if (product.catalogTier === "REFERENCE_ONLY" || !product.isSaleEligible || product.stock === 0) {
+    } else if (product.catalogTier === "REFERENCE_ONLY" || isOutOfStockOrExpired) {
       if (onQuickView) onQuickView(product);
       else window.location.href = `/product/${product.slug}`;
     } else {
@@ -225,7 +232,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                   Giá tham khảo y tế
                 </span>
               </>
-            ) : product.stock === 0 ? (
+            ) : isOutOfStockOrExpired ? (
               <>
                 <span className="text-sm sm:text-base font-bold text-slate-600 leading-tight">
                   {formatVND(currentPrice)}
@@ -271,11 +278,11 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               <Eye className="w-3.5 h-3.5 text-slate-500 shrink-0" />
               <span className="whitespace-nowrap">Tra cứu y tế</span>
             </button>
-          ) : product.stock === 0 ? (
+          ) : isOutOfStockOrExpired ? (
             <button
               disabled
               className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl text-[11px] sm:text-xs font-bold text-slate-400 bg-slate-100 border border-slate-200 cursor-not-allowed flex items-center gap-1 shrink-0 shadow-xs"
-              title="Sản phẩm hiện đang tạm hết hàng"
+              title="Sản phẩm hiện đang tạm hết hàng hoặc quá hạn"
             >
               <span className="whitespace-nowrap">Tạm hết hàng</span>
             </button>

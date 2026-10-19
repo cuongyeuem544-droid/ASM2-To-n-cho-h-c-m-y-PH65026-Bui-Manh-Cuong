@@ -95,3 +95,68 @@ def test_chat_red_flag_emergency_alert(client: TestClient, chat_auth_fixture):
     assert data["safety_alert"]["level"] == "emergency"
     assert "115" in data["safety_alert"]["emergency_number"]
     assert "CẢNH BÁO" in data["reply"]
+
+
+def test_guest_conversation_ownership_protection(client: TestClient):
+    """Kiểm tra Item 7: Lịch sử hội thoại khách vãng lai bắt buộc bằng chứng sở hữu session_id."""
+    guest_session_id = "sess-guest-secret-987654"
+    wrong_session_id = "sess-attacker-random"
+
+    # 1. Khách vãng lai tạo cuộc trò chuyện
+    create_res = client.post(
+        "/api/v1/chat/conversations",
+        json={
+            "session_id": guest_session_id,
+            "title": "Hỏi về đau đầu",
+            "messages": [
+                {"role": "user", "content": "Tôi bị đau đầu 2 ngày nay"},
+                {"role": "assistant", "content": "Bạn có kèm theo sốt không?"},
+            ],
+        },
+    )
+    assert create_res.status_code == 200
+    conv_code = create_res.json()["conversation_code"]
+    assert conv_code is not None
+
+    # 2. Kẻ tấn công biết conv_code nhưng không có session_id -> Bị chặn 403 khi đọc
+    res_no_sess = client.get(f"/api/v1/chat/conversations/{conv_code}")
+    assert res_no_sess.status_code == 403
+
+    # 3. Kẻ tấn công dùng sai session_id -> Bị chặn 403 khi đọc
+    res_wrong_sess = client.get(f"/api/v1/chat/conversations/{conv_code}?session_id={wrong_session_id}")
+    assert res_wrong_sess.status_code == 403
+
+    # 4. Kẻ tấn công cố đổi tên cuộc trò chuyện -> Bị chặn 403
+    res_rename_wrong = client.patch(
+        f"/api/v1/chat/conversations/{conv_code}?session_id={wrong_session_id}",
+        json={"title": "Hack title"},
+    )
+    assert res_rename_wrong.status_code == 403
+
+    # 5. Kẻ tấn công cố xóa cuộc trò chuyện -> Bị chặn 403
+    res_del_wrong = client.delete(f"/api/v1/chat/conversations/{conv_code}?session_id={wrong_session_id}")
+    assert res_del_wrong.status_code == 403
+
+    # 6. Khách vãng lai hợp lệ có session_id khớp -> Đọc được 200
+    res_ok = client.get(
+        f"/api/v1/chat/conversations/{conv_code}",
+        headers={"X-Session-ID": guest_session_id},
+    )
+    assert res_ok.status_code == 200
+    assert res_ok.json()["title"] == "Hỏi về đau đầu"
+    assert len(res_ok.json()["messages"]) == 2
+
+    # 7. Khách vãng lai hợp lệ đổi tên -> 200
+    res_rename_ok = client.patch(
+        f"/api/v1/chat/conversations/{conv_code}?session_id={guest_session_id}",
+        json={"title": "Hỏi về đau đầu và sốt"},
+    )
+    assert res_rename_ok.status_code == 200
+
+    # 8. Khách vãng lai hợp lệ xóa cuộc trò chuyện -> 200
+    res_del_ok = client.delete(
+        f"/api/v1/chat/conversations/{conv_code}",
+        headers={"X-Session-ID": guest_session_id},
+    )
+    assert res_del_ok.status_code == 200
+

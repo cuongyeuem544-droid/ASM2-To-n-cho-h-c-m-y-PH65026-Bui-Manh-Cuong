@@ -13,6 +13,7 @@ from fastapi import (
     APIRouter,
     Depends,
     File,
+    Form,
     Header,
     HTTPException,
     Query,
@@ -789,11 +790,18 @@ MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
 @router.post("/upload")
 async def upload_chat_attachment(
     file: UploadFile = File(...),
+    session_code: Optional[str] = Form(None),
+    guest_token: Optional[str] = Form(None),
+    x_chat_guest_token: Optional[str] = Header(None),
     current_user: Optional[User] = Depends(get_optional_current_user),
+    db: Session = Depends(get_db),
 ):
     """
     Upload hình ảnh đính kèm trong tin nhắn chat.
-    Kiểm tra chặt chẽ mime type, kích thước tối đa 5MB, chống upload mã độc thực thi.
+    Bảo vệ theo phiên (chống upload ẩn danh không thuộc phiên chat nào):
+    - Kiểm tra chặt chẽ mime type, kích thước tối đa 5MB.
+    - Yêu cầu session_code của phiên chat đang mở (hoặc quyền nhân viên hỗ trợ).
+    - Xác minh quyền sở hữu: nhân viên hỗ trợ, khách hàng sở hữu phiên, hoặc khách vãng lai có guest_session_token.
     """
     content_type = (file.content_type or "").lower().strip()
     if content_type not in ALLOWED_MIME_TYPES:
@@ -807,6 +815,30 @@ async def upload_chat_attachment(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Dung lượng tệp quá lớn. Giới hạn tối đa là 5MB.",
+        )
+
+    # Kiểm tra quyền truy cập theo phiên chat
+    is_staff = (
+        current_user is not None
+        and current_user.role in [UserRole.ADMIN, UserRole.PHARMACIST, UserRole.WAREHOUSE_MANAGER, UserRole.WAREHOUSE_STAFF]
+    )
+
+    if session_code:
+        session = db.scalar(
+            select(LiveChatSession).where(LiveChatSession.session_code == session_code)
+        )
+        if not session:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy phiên chat tương ứng")
+
+        if session.status == "CLOSED":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Phiên chat đã kết thúc, không thể tải tệp lên")
+
+        eff_guest_token = guest_token or x_chat_guest_token
+        verify_session_access(session, current_user, eff_guest_token)
+    elif not is_staff:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Vui lòng cung cấp session_code của phiên chat để tải tệp đính kèm",
         )
 
     ext = ALLOWED_MIME_TYPES[content_type]
@@ -826,15 +858,58 @@ async def upload_chat_attachment(
 
 
 @router.get("/attachments/{filename}")
-def serve_chat_attachment(filename: str):
-    """Phục vụ file ảnh đính kèm."""
+def serve_chat_attachment(
+    filename: str,
+    token: Optional[str] = Query(None),
+    x_chat_guest_token: Optional[str] = Header(None),
+    current_user: Optional[User] = Depends(get_optional_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Phục vụ file ảnh đính kèm an toàn.
+    Chống path traversal và xác thực quyền truy cập theo phiên chat.
+    """
     # Chống path traversal
     safe_name = os.path.basename(filename)
     file_path = CHAT_UPLOAD_DIR / safe_name
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy tệp ảnh")
 
-    return FileResponse(str(file_path))
+    # Tìm tin nhắn và phiên chat sở hữu tệp này
+    msg = db.scalar(
+        select(LiveChatMessage).where(LiveChatMessage.attachment_url.like(f"%{safe_name}"))
+    )
+
+    if msg and msg.session:
+        session = msg.session
+        effective_guest_token = token or x_chat_guest_token
+
+        auth_user = current_user
+        if not auth_user and token:
+            try:
+                payload = decode_token(token, "access")
+                uid = int(payload.get("sub", 0))
+                if uid:
+                    auth_user = db.get(User, uid)
+            except Exception:
+                pass
+
+        verify_session_access(session, auth_user, effective_guest_token)
+    else:
+        # Nếu tệp mới tải lên chưa gắn vào tin nhắn: chỉ cho phép nếu có token nhân viên hoặc token phiên hợp lệ
+        if not current_user and not token and not x_chat_guest_token:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Bạn không có quyền truy cập vào tệp đính kèm này",
+            )
+
+    return FileResponse(
+        str(file_path),
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, max-age=3600",
+        },
+    )
 
 
 # ===================== WEBSOCKET ENDPOINTS =====================
@@ -931,6 +1006,19 @@ async def staff_websocket(
     except Exception:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
+
+    # Xác minh tài khoản nhân viên/admin thực tế và đang hoạt động
+    db = SessionLocal()
+    try:
+        user = db.get(User, user_id)
+        if not user or not user.is_active:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+        if user.role not in [UserRole.ADMIN, UserRole.PHARMACIST, UserRole.WAREHOUSE_MANAGER, UserRole.WAREHOUSE_STAFF]:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+    finally:
+        db.close()
 
     await chat_manager.connect_staff(user_id, websocket)
     try:

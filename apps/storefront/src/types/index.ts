@@ -86,7 +86,7 @@ export interface Product {
   rating: number;           // Điểm đánh giá (1-5)
   reviewCount: number;      // Số lượt đánh giá
   isPrescription: boolean;  // QUAN TRỌNG: True = Thuốc kê đơn Rx
-  catalogTier?: "REFERENCE_ONLY" | "VERIFIED_PRODUCT_DATA" | "SALE_ELIGIBLE" | "INTERNAL_TEST";
+  catalogTier?: "REFERENCE_ONLY" | "VERIFIED_PRODUCT_DATA" | "SALE_ELIGIBLE" | "INTERNAL_TEST" | "OUT_OF_STOCK";
   isSaleEligible?: boolean; // True chỉ khi hàng đã nhập kho thực tế và được phép bán thương mại
   canAddToCart?: boolean;
   ctaType?: string;

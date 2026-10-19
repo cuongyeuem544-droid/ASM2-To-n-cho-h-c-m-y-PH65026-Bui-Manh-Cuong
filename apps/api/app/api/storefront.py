@@ -174,13 +174,20 @@ def serialize_product(
     else:
         # Default intelligent evaluation for product listing when eligibility is not explicitly passed
         if product.publish_status == PublishStatus.PUBLISHED and not product.is_demo and product.publish_mode != "INTERNAL_TEST":
-            if is_rx:
+            if stock <= 0:
+                is_sale_eligible = False
+                can_add_to_cart = False
+                cta_type = "OUT_OF_STOCK"
+                cta_label = "Tạm Hết Hàng"
+                eligibility_tier = "OUT_OF_STOCK"
+                primary_reason = "Tạm hết hàng hoặc các lô thuốc đã hết hạn sử dụng."
+            elif is_rx:
                 cta_type = "RESERVE_RX"
                 cta_label = "Đặt Giữ Chỗ / Tư Vấn Toa"
                 eligibility_tier = "PRESCRIPTION_RESERVATION"
                 is_sale_eligible = True
-                can_add_to_cart = True
-                primary_reason = "Thuốc kê đơn: Cho phép tạo đơn giữ chỗ. Dược sĩ PharmaTrust sẽ liên hệ kiểm tra đơn thuốc trước khi giao hàng."
+                can_add_to_cart = False
+                primary_reason = "Thuốc kê đơn: Cần có đơn thuốc bác sĩ để Dược sĩ tư vấn cấp phát."
             elif product.publish_mode == "REFERENCE_ONLY":
                 cta_type = "CONSULT_PHARMACIST"
                 cta_label = "Tra Cứu Y Tế"
@@ -188,8 +195,8 @@ def serialize_product(
                 is_sale_eligible = False
                 can_add_to_cart = False
             else:
-                # Active Published OTC Medicine
-                if stock > 0 or final_price > 0:
+                # Active Published OTC Medicine with stock > 0
+                if stock > 0 and final_price > 0:
                     is_sale_eligible = True
                     can_add_to_cart = True
                     cta_type = "BUY_NOW"

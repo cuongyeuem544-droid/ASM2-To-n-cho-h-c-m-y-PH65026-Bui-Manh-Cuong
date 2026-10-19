@@ -202,10 +202,10 @@ export default function ProductDetailPage() {
       return;
     }
 
-    // C. Kiểm tra tồn kho
+    // C. Kiểm tra tồn kho & quá hạn
     const effectiveStock = selectedSku ? selectedSku.available_stock : product.stock;
-    if (effectiveStock <= 0) {
-      setWarningToast("Sản phẩm hiện đang tạm hết hàng tại hệ thống kho phân phối.");
+    if (effectiveStock <= 0 || product.canAddToCart === false || product.catalogTier === "OUT_OF_STOCK" || product.isSaleEligible === false) {
+      setWarningToast("Sản phẩm hiện đang tạm hết hàng hoặc lô thuốc đã hết hạn sử dụng. Không thể đặt hàng.");
       setTimeout(() => setWarningToast(null), 5000);
       return;
     }
@@ -684,8 +684,45 @@ export default function ProductDetailPage() {
                       <span>Hỏi Trợ Lý AI Về Sản Phẩm Này</span>
                     </button>
                   </div>
+                ) : (availableStock <= 0 || product.canAddToCart === false || product.catalogTier === "OUT_OF_STOCK" || product.isSaleEligible === false) ? (
+                  /* 3. SẢN PHẨM HẾT HÀNG HOẶC QUÁ HẠN SỬ DỤNG */
+                  <div className="space-y-4 pt-1">
+                    <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-3">
+                      <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                      <div className="leading-relaxed">
+                        <p className="font-bold text-amber-800 uppercase tracking-wide mb-1">
+                          Sản phẩm tạm hết hàng hoặc các lô thuốc đã quá hạn
+                        </p>
+                        <p>
+                          Hiện tại sản phẩm này đã tạm hết hàng hoặc các lô hàng trong kho đã hết hạn sử dụng theo nguyên tắc FEFO. PharmaTrust tạm ngừng tiếp nhận đặt hàng trực tuyến cho sản phẩm này để bảo đảm an toàn dược phẩm cho người sử dụng.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center">
+                      <Button
+                        variant="secondary"
+                        size="lg"
+                        disabled
+                        className="w-full bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed shadow-none"
+                        leftIcon={<AlertCircle className="w-5 h-5 text-slate-400" />}
+                      >
+                        Tạm Hết Hàng / Quá Hạn Sử Dụng
+                      </Button>
+                    </div>
+
+                    {/* Nút Hỏi Trợ Lý AI Về Sản Phẩm Này */}
+                    <button
+                      type="button"
+                      onClick={handleAskAssistant}
+                      className="w-full py-2.5 px-4 rounded-xl border border-brand-blue-200 bg-brand-blue-50 hover:bg-brand-blue-100 text-brand-blue-700 font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-2xs"
+                    >
+                      <Bot className="w-4 h-4 text-brand-blue-600" />
+                      <span>Hỏi Trợ Lý AI Về Sản Phẩm Thay Thế</span>
+                    </button>
+                  </div>
                 ) : (
-                  /* 3. SẢN PHẨM ĐỦ ĐIỀU KIỆN MỞ BÁN THƯƠNG MẠI (SALE_ELIGIBLE) */
+                  /* 4. SẢN PHẨM ĐỦ ĐIỀU KIỆN MỞ BÁN THƯƠNG MẠI (SALE_ELIGIBLE) */
                   <div className="space-y-5 pt-1">
                     {/* Quantity Selector */}
                     <div className="flex items-center gap-4">

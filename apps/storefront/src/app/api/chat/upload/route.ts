@@ -86,7 +86,7 @@ function resolveMimeType(ext: string): string {
 
 export async function POST(req: NextRequest) {
   try {
-    // 1. Kiểm tra xác thực Token Bearer
+    // 1. Kiểm tra và xác thực Token Bearer với Backend API
     const authHeader = req.headers.get("authorization");
     if (!authHeader || !authHeader.toLowerCase().startsWith("bearer ")) {
       return NextResponse.json(
@@ -100,6 +100,46 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: "Vui lòng đăng nhập để tải lên tệp đính kèm." },
         { status: 401 }
+      );
+    }
+
+    // Xác thực token qua FastAPI backend
+    const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    let verifiedUser: { id: string | number; role?: string } | null = null;
+
+    try {
+      const authRes = await fetch(`${apiBase}/api/v1/auth/me`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        cache: "no-store",
+      });
+
+      if (authRes.status === 401 || authRes.status === 403) {
+        return NextResponse.json(
+          { error: "Phiên đăng nhập đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại." },
+          { status: 401 }
+        );
+      }
+
+      if (!authRes.ok) {
+        return NextResponse.json(
+          { error: "Không thể xác thực danh tính người dùng. Vui lòng thử lại sau." },
+          { status: authRes.status }
+        );
+      }
+
+      const userJson = await authRes.json();
+      verifiedUser = {
+        id: userJson.id,
+        role: userJson.role,
+      };
+    } catch (authErr) {
+      console.warn("[Upload Auth Error]: Lỗi kết nối FastAPI backend:", authErr);
+      return NextResponse.json(
+        { error: "Máy chủ xác thực không phản hồi. Vui lòng thử lại sau." },
+        { status: 503 }
       );
     }
 
@@ -178,6 +218,19 @@ export async function POST(req: NextRequest) {
     await fs.writeFile(targetPath, buffer);
 
     const attachmentId = `att-${fileId.substring(0, 12)}`;
+    const metaPath = path.join(baseStorageDir, `${fileId}.meta.json`);
+    try {
+      await fs.writeFile(
+        metaPath,
+        JSON.stringify({
+          userId: verifiedUser?.id,
+          attachmentId,
+          fileName: cleanName,
+          fileSize: file.size,
+          uploadedAt: now.toISOString(),
+        })
+      );
+    } catch {}
     const mimeType = resolveMimeType(ext);
     const isImage = [".jpg", ".jpeg", ".png", ".webp"].includes(ext);
     const base64Data = isImage ? buffer.toString("base64") : undefined;

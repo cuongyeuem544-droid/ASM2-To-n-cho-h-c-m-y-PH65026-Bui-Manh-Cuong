@@ -27,7 +27,7 @@ function resolveMimeType(ext: string): string {
 }
 
 /**
- * Trả về tệp đính kèm an toàn với security headers
+ * Trả về tệp đính kèm an toàn với xác thực và security headers
  */
 export async function GET(
   req: NextRequest,
@@ -39,35 +39,91 @@ export async function GET(
       return NextResponse.json({ error: "Mã tệp không hợp lệ" }, { status: 400 });
     }
 
+    // 1. Kiểm tra xác thực Bearer token hoặc query token
+    const authHeader = req.headers.get("authorization");
+    let token = "";
+    if (authHeader && authHeader.toLowerCase().startsWith("bearer ")) {
+      token = authHeader.slice(7).trim();
+    }
+    if (!token) {
+      token = req.nextUrl.searchParams.get("token") || "";
+    }
+
+    if (!token) {
+      return NextResponse.json(
+        { error: "Vui lòng đăng nhập để xem tệp đính kèm." },
+        { status: 401 }
+      );
+    }
+
+    // Xác thực token với FastAPI Backend
+    const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    let verifiedUser: { id: string | number; role?: string } | null = null;
+    try {
+      const authRes = await fetch(`${apiBase}/api/v1/auth/me`, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+      if (!authRes.ok) {
+        return NextResponse.json(
+          { error: "Phiên đăng nhập không hợp lệ hoặc đã hết hạn." },
+          { status: 401 }
+        );
+      }
+      const userJson = await authRes.json();
+      verifiedUser = { id: userJson.id, role: userJson.role };
+    } catch {
+      return NextResponse.json(
+        { error: "Không thể xác thực danh tính người dùng." },
+        { status: 503 }
+      );
+    }
+
     const filePrefix = attachmentId.replace("att-", "");
     const baseDir = path.join(process.cwd(), "storage", "chat-attachments");
 
     // Tìm file trong storage/chat-attachments
-    let foundPath: string | null = null;
-    let foundExt = ".jpg";
-
-    const searchDir = async (dir: string): Promise<void> => {
+    const findFile = async (dir: string): Promise<{ path: string; ext: string } | null> => {
       try {
         const entries = await fs.readdir(dir, { withFileTypes: true });
         for (const entry of entries) {
           const full = path.join(dir, entry.name);
           if (entry.isDirectory()) {
-            await searchDir(full);
-            if (foundPath) return;
-          } else if (entry.isFile() && entry.name.startsWith(filePrefix)) {
-            foundPath = full;
-            foundExt = path.extname(entry.name).toLowerCase();
-            return;
+            const nested = await findFile(full);
+            if (nested) return nested;
+          } else if (entry.isFile() && entry.name.startsWith(filePrefix) && !entry.name.endsWith(".meta.json")) {
+            return { path: full, ext: path.extname(entry.name).toLowerCase() };
           }
         }
       } catch {}
+      return null;
     };
 
-    await searchDir(baseDir);
-
-    if (!foundPath) {
+    const found = await findFile(baseDir);
+    if (!found) {
       return NextResponse.json({ error: "Không tìm thấy tệp đính kèm" }, { status: 404 });
     }
+
+    const { path: foundPath, ext: foundExt } = found;
+    // Kiểm tra quyền sở hữu nếu có file metadata
+    const metaPath = foundPath.replace(path.extname(foundPath), ".meta.json");
+    try {
+      const metaContent = await fs.readFile(metaPath, "utf-8");
+      const meta = JSON.parse(metaContent);
+      if (
+        meta &&
+        meta.userId &&
+        verifiedUser &&
+        verifiedUser.id !== meta.userId &&
+        verifiedUser.role !== "ADMIN"
+      ) {
+        return NextResponse.json(
+          { error: "Bạn không có quyền truy cập vào tệp đính kèm này." },
+          { status: 403 }
+        );
+      }
+    } catch {}
 
     const fileBuffer = await fs.readFile(foundPath);
     const mimeType = resolveMimeType(foundExt);

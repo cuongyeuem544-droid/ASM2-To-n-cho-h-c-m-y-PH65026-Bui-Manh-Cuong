@@ -259,6 +259,18 @@ export const ProductQuickViewModal: React.FC<ProductQuickViewModalProps> = ({
                         </Button>
                       </Link>
                     </div>
+                  ) : (product.stock === 0 || product.stock === undefined || product.canAddToCart === false || product.catalogTier === "OUT_OF_STOCK" || product.isSaleEligible === false) ? (
+                    <div className="flex items-center gap-3">
+                      <Button
+                        variant="secondary"
+                        size="md"
+                        disabled
+                        className="flex-1 bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+                        leftIcon={<AlertCircle className="w-4 h-4 text-slate-400" />}
+                      >
+                        Tạm Hết Hàng / Hết Hạn Dùng
+                      </Button>
+                    </div>
                   ) : (
                     <div className="flex items-center gap-3">
                       <Button

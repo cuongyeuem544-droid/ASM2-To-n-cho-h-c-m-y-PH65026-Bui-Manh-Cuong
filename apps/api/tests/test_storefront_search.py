@@ -139,5 +139,35 @@ class TestStorefrontSearch(unittest.TestCase):
         self.assertEqual(len(data["items"]), 0)
 
 
+    def test_out_of_stock_or_expired_product_cannot_add_to_cart(self):
+        """Item 1: Thuốc hết hàng hoặc quá hạn không được phép có nút thêm vào giỏ hàng (canAddToCart=False)."""
+        from app.api.storefront import serialize_product
+        from app.models import CanonicalProduct
+        from app.models.enums import PublishStatus, RxOtcStatus
+
+        mock_product = CanonicalProduct(
+            id=99999,
+            canonical_name="Thuốc Mẫu Hết Hàng",
+            publish_status=PublishStatus.PUBLISHED,
+            publish_mode="SALE_ELIGIBLE",
+            rx_otc_status=RxOtcStatus.OTC,
+            is_demo=False,
+        )
+
+        # 1. Hàng hết tồn kho (stock=0)
+        data_zero_stock = serialize_product(mock_product, price=50000, stock=0)
+        self.assertFalse(data_zero_stock["canAddToCart"], "Hàng hết kho không được phép canAddToCart")
+        self.assertFalse(data_zero_stock["isSaleEligible"], "Hàng hết kho không được phép isSaleEligible")
+        self.assertEqual(data_zero_stock["catalogTier"], "OUT_OF_STOCK")
+        self.assertEqual(data_zero_stock["ctaType"], "OUT_OF_STOCK")
+
+        # 2. Hàng còn tồn kho (stock=10)
+        data_in_stock = serialize_product(mock_product, price=50000, stock=10)
+        self.assertTrue(data_in_stock["canAddToCart"])
+        self.assertTrue(data_in_stock["isSaleEligible"])
+        self.assertEqual(data_in_stock["catalogTier"], "SALE_ELIGIBLE")
+        self.assertEqual(data_in_stock["ctaType"], "BUY_NOW")
+
+
 if __name__ == "__main__":
     unittest.main()
