@@ -551,6 +551,8 @@ def get_order_picking_details(
         "shipping_address": order.shipping_address,
         "order_status": order.order_status,
         "fulfillment_status": order.fulfillment_status,
+        "payment_method": order.payment_method,
+        "payment_status": order.payment_status,
         "warehouse_code": wh.code if wh else None,
         "lines": order_lines,
     }
@@ -582,6 +584,14 @@ def update_order_fulfillment_status(
     valid_statuses = {"ALLOCATED", "PICKING", "PICKED", "PACKED", "SHIPPED", "DELIVERED", "CANCELLED", "CONSOLIDATED"}
     if new_status not in valid_statuses:
         raise HTTPException(status_code=400, detail=f"Trạng thái '{new_status}' không hợp lệ")
+
+    # Chặn xuất kho / soạn hàng cho đơn thanh toán online chưa thanh toán tiền thật
+    if new_status in ["PICKING", "PICKED", "PACKED", "SHIPPED", "DELIVERED"]:
+        if order.payment_method != "COD" and order.payment_status != "PAID":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Đơn hàng thanh toán trực tuyến ({order.payment_method}) chưa thanh toán thành công (Trạng thái: {order.payment_status}). Không thể xử lý soạn hàng hoặc xuất kho khi chưa nhận được tiền.",
+            )
 
     # Lấy danh sách kiện hàng của đơn hàng này
     fulfillments = db.scalars(

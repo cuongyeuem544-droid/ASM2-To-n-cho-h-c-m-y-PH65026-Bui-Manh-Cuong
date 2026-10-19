@@ -68,6 +68,13 @@ class Settings(BaseSettings):
     momo_return_url: str = "http://localhost:3000/checkout/result"
     momo_ipn_url: str = "http://localhost:8000/api/v1/payments/momo/webhook"
 
+    # Cấu hình Cổng thanh toán payOS (Nạp tự động từ biến môi trường/file .env, không in giá trị khóa)
+    payos_client_id: str = ""
+    payos_api_key: str = ""
+    payos_checksum_key: str = ""
+    payos_return_url: str = "http://localhost:3000/checkout/result"
+    payos_cancel_url: str = "http://localhost:3000/checkout/result"
+
     # Cấu hình Thanh toán Chuyển khoản VietQR (Napas 247)
     vietqr_bank_id: str = "MB"
     vietqr_account_number: str = ""
@@ -162,6 +169,18 @@ class Settings(BaseSettings):
             and self.momo_access_key.strip()
             and self.momo_secret_key
             and self.momo_secret_key.strip()
+        )
+
+    @property
+    def is_payos_configured(self) -> bool:
+        """Kiểm tra xem payOS đã được cấu hình đầy đủ API keys chưa."""
+        return bool(
+            self.payos_client_id
+            and self.payos_client_id.strip()
+            and self.payos_api_key
+            and self.payos_api_key.strip()
+            and self.payos_checksum_key
+            and self.payos_checksum_key.strip()
         )
 
     @property

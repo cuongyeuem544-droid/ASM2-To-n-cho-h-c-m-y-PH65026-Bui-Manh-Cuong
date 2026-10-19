@@ -621,7 +621,20 @@ def checkout_order(
         )
 
         # Ghi nhận giao dịch thanh toán khởi tạo trong PaymentTransaction
-        init_provider = "COD" if order.payment_method == "COD" else ("VIETQR" if order.payment_method in ["BANK_TRANSFER", "VIETQR"] else "MOMO")
+        if order.payment_method == "COD":
+            init_provider = "COD"
+        elif order.payment_method in ["BANK_TRANSFER", "VIETQR"]:
+            init_provider = "VIETQR"
+        elif order.payment_method == "PAYOS":
+            init_provider = "PAYOS"
+        else:
+            init_provider = "MOMO"
+
+        # Với đơn thanh toán trực tuyến (PAYOS, MOMO, VIETQR): Đặt fulfillment_status = WAITING_PAYMENT
+        # để kho và admin không đưa vào danh sách soạn hàng khi khách chưa thanh toán tiền thật.
+        if order.payment_method != "COD":
+            order.fulfillment_status = "WAITING_PAYMENT"
+
         initial_tx = PaymentTransaction(
             order_id=order.id,
             transaction_code=f"TXN-{init_provider}-{order.order_code}-{int(datetime.datetime.now().timestamp()) % 100000}",

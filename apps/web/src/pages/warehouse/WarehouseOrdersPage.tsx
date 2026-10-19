@@ -71,6 +71,7 @@ interface PickDetailResponse {
 const STATUS_TABS = [
   { value: 'ALL', label: 'Tất cả' },
   { value: 'ALLOCATED', label: 'Chờ soạn' },
+  { value: 'WAITING_PAYMENT', label: 'Chờ thanh toán' },
   { value: 'PICKING', label: 'Đang soạn' },
   { value: 'PACKED', label: 'Đã đóng gói' },
   { value: 'SHIPPED', label: 'Đang giao' },
@@ -79,6 +80,7 @@ const STATUS_TABS = [
 ]
 
 const FULFILLMENT_BADGES: Record<string, { label: string; bg: string; color: string }> = {
+  WAITING_PAYMENT: { label: 'Chờ thanh toán', bg: '#fef3c7', color: '#92400e' },
   ALLOCATED: { label: 'Chờ soạn hàng', bg: '#f1f5f9', color: '#475569' },
   PICKING: { label: 'Đang soạn hàng', bg: '#fffbeb', color: '#b45309' },
   PACKED: { label: 'Đã đóng gói', bg: '#f0fdfa', color: '#0f766e' },
@@ -452,6 +454,22 @@ export function WarehouseOrdersPage() {
                             </span>
                           ) : (
                             <>
+                              {o.fulfillment_status === 'WAITING_PAYMENT' && (
+                                <span
+                                  style={{
+                                    padding: '5px 10px',
+                                    borderRadius: '8px',
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                    background: '#fffbeb',
+                                    color: '#b45309',
+                                    border: '1px solid #fde68a',
+                                  }}
+                                >
+                                  Chờ khách thanh toán
+                                </span>
+                              )}
+
                               {o.fulfillment_status === 'ALLOCATED' && (
                                 <button
                                   type="button"

@@ -16,6 +16,7 @@ from app.models import (
 )
 from app.models.returns import ExchangeStatus
 from app.services.momo_service import MomoPaymentService
+from app.services.payos_service import PayOSPaymentService
 from app.services.vietqr_service import VietQrService
 
 logger = logging.getLogger("pharmatrust.payment_intent")
@@ -61,12 +62,14 @@ class PaymentIntentService:
             provider = "VIETQR"
         elif method == "MOMO":
             provider = "MOMO"
+        elif method == "PAYOS":
+            provider = "PAYOS"
         elif method == "COD":
             provider = "COD"
         else:
             raise HTTPException(
                 status_code=400,
-                detail=f"Phương thức thanh toán '{payment_method}' không được hỗ trợ. Chọn COD, VIETQR hoặc MOMO.",
+                detail=f"Phương thức thanh toán '{payment_method}' không được hỗ trợ. Chọn COD, VIETQR, MOMO hoặc PAYOS.",
             )
 
         amount = int(order.total_amount)
@@ -100,9 +103,16 @@ class PaymentIntentService:
                 db.add(trans)
             else:
                 trans.amount = Decimal(str(amount))
-                trans.status = "PENDING"
-
             order.payment_method = "COD"
+            if order.fulfillment_status == "WAITING_PAYMENT":
+                order.fulfillment_status = "ALLOCATED"
+                if order.assigned_warehouse_id:
+                    try:
+                        from app.services.warehouse_notification_service import WarehouseNotificationService
+                        WarehouseNotificationService.notify_order_new(db, order, order.assigned_warehouse_id)
+                    except Exception as n_err:
+                        logger.warning(f"Failed to notify warehouse when switching to COD: {n_err}")
+
             instructions = "Thanh toán bằng tiền mặt trực tiếp cho nhân viên giao hàng khi nhận và kiểm tra gói thuốc."
             db.commit()
             db.refresh(trans)
@@ -135,6 +145,25 @@ class PaymentIntentService:
                 select(PaymentTransaction).where(
                     PaymentTransaction.order_id == order.id,
                     PaymentTransaction.provider == "MOMO",
+                )
+            )
+
+        elif provider == "PAYOS":
+            pos_res = PayOSPaymentService.create_payment_request(db=db, order=order, return_url=return_url)
+            pay_url = pos_res.get("checkout_url")
+            qr_code_url = pos_res.get("qr_code")
+            instructions = f"Quét mã VietQR trên bất kỳ ứng dụng ngân hàng nào hoặc mở cổng payOS để thanh toán {amount:,} đ."
+            bank_details = {
+                "bank_name": "payOS Gateway",
+                "account_number": pos_res.get("account_number"),
+                "account_name": pos_res.get("account_name"),
+                "bin": pos_res.get("bin"),
+                "payos_order_code": pos_res.get("payos_order_code"),
+            }
+            trans = db.scalar(
+                select(PaymentTransaction).where(
+                    PaymentTransaction.order_id == order.id,
+                    PaymentTransaction.provider == "PAYOS",
                 )
             )
 

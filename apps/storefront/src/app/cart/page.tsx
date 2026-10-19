@@ -615,6 +615,45 @@ export default function CartPage() {
         localStorage.setItem("h4care_latest_order_token", guestOrderToken);
       }
 
+      // Handle payOS Gateway payment
+      if (paymentMethod === "PAYOS") {
+        const returnUrl = typeof window !== "undefined"
+          ? `${window.location.origin}/checkout/result?order_code=${encodeURIComponent(data.order_code)}`
+          : "";
+        if (typeof window !== "undefined" && finalCustomerPhone) {
+          localStorage.setItem("h4care_checkout_phone", finalCustomerPhone);
+        }
+        try {
+          const payHeaders: Record<string, string> = { "Content-Type": "application/json" };
+          if (token) payHeaders["Authorization"] = `Bearer ${token}`;
+          if (guestOrderToken) payHeaders["X-Order-Token"] = guestOrderToken;
+
+          const payosRes = await fetch("/api/v1/payments/payos/create", {
+            method: "POST",
+            headers: payHeaders,
+            body: JSON.stringify({
+              order_code: data.order_code,
+              return_url: returnUrl,
+              phone_verify: finalCustomerPhone,
+              order_token: guestOrderToken,
+            }),
+          });
+          const payosData = await payosRes.json();
+          if (payosRes.ok && payosData?.checkout_url) {
+            setItems([]);
+            localStorage.removeItem("pharmatrust_cart");
+            window.location.href = payosData.checkout_url;
+            return;
+          } else {
+            throw new Error(payosData?.detail || "Không thể tạo liên kết thanh toán payOS");
+          }
+        } catch (pErr: any) {
+          console.warn("Lỗi khi kết nối cổng payOS:", pErr);
+          setErrorMessage(pErr?.message || "Lỗi khi kết nối cổng thanh toán payOS");
+          return;
+        }
+      }
+
       // Handle MoMo Sandbox payment
       if (paymentMethod === "MOMO") {
         const returnUrl = typeof window !== "undefined"

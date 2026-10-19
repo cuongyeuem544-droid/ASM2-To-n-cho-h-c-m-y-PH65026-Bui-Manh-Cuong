@@ -3,7 +3,7 @@
 import React from "react";
 import { Banknote, QrCode, Check } from "lucide-react";
 
-export type PaymentMethod = "COD" | "BANK_TRANSFER" | "MOMO";
+export type PaymentMethod = "COD" | "BANK_TRANSFER" | "MOMO" | "PAYOS";
 
 interface PaymentMethodSelectorProps {
   paymentMethod: PaymentMethod;
@@ -24,12 +24,24 @@ export default function PaymentMethodSelector({
       tagColor: "bg-emerald-50 text-emerald-700 border-emerald-200",
     },
     {
-      id: "BANK_TRANSFER" as PaymentMethod,
-      title: "Chuyển khoản ngân hàng (VietQR Napas 247)",
-      desc: "Quét mã QR tự động điền số tiền và mã đơn trên mọi App ngân hàng",
-      icon: <QrCode className="w-5 h-5 text-brand-blue-600" />,
-      tag: "Khuyên dùng",
+      id: "PAYOS" as PaymentMethod,
+      title: "Cổng thanh toán payOS (QR Ngân hàng / Napas 247)",
+      desc: "Thanh toán quét mã VietQR tự động khớp tiền tức thì 24/7 qua cổng payOS",
+      icon: (
+        <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-black shrink-0">
+          P
+        </span>
+      ),
+      tag: "Tự động 24/7",
       tagColor: "bg-blue-50 text-brand-blue-700 border-blue-200",
+    },
+    {
+      id: "BANK_TRANSFER" as PaymentMethod,
+      title: "Chuyển khoản thủ công (VietQR Napas 247)",
+      desc: "Quét mã QR chuyển khoản tới tài khoản nhà thuốc H4CARE",
+      icon: <QrCode className="w-5 h-5 text-brand-blue-600" />,
+      tag: "Thủ công",
+      tagColor: "bg-slate-50 text-slate-700 border-slate-200",
     },
     {
       id: "MOMO" as PaymentMethod,

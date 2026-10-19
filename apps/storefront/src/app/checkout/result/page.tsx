@@ -42,10 +42,11 @@ interface PaymentStatusResponse {
 function CheckoutResultContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const orderId = searchParams.get("orderId") || searchParams.get("order_code") || "";
-  const resultCode = searchParams.get("resultCode");
+  const orderId = searchParams.get("orderId") || searchParams.get("order_code") || searchParams.get("orderCode") || "";
+  const resultCode = searchParams.get("resultCode") || searchParams.get("code");
+  const statusParam = (searchParams.get("status") || "").toUpperCase();
   const message = searchParams.get("message") || "";
-  const transId = searchParams.get("transId") || "";
+  const transId = searchParams.get("transId") || searchParams.get("id") || "";
   const amountStr = searchParams.get("amount") || "";
 
   // Extract clean order_code if orderId has format "ORDERCODE_momo_..."
@@ -59,7 +60,11 @@ function CheckoutResultContent() {
   const [isRetrying, setIsRetrying] = useState(false);
   const [retryMessage, setRetryMessage] = useState<string | null>(null);
 
-  const isSuccess = resultCode === "0" || orderData?.payment_status === "PAID";
+  const isSuccess =
+    resultCode === "0" ||
+    resultCode === "00" ||
+    statusParam === "PAID" ||
+    orderData?.payment_status === "PAID";
 
   useEffect(() => {
     if (!cleanOrderCode) {
@@ -182,7 +187,9 @@ function CheckoutResultContent() {
             <div className="flex items-center justify-between text-sm">
               <span className="text-slate-500">Phương thức thanh toán:</span>
               <span className="inline-flex items-center gap-1.5 font-bold text-slate-800 bg-white px-2.5 py-0.5 rounded-full border border-slate-200 text-xs">
-                {orderData?.payment_method === "MOMO"
+                {orderData?.payment_method === "PAYOS"
+                  ? "Cổng thanh toán payOS"
+                  : orderData?.payment_method === "MOMO"
                   ? "Ví điện tử MoMo"
                   : orderData?.payment_method === "BANK_TRANSFER" || orderData?.payment_method === "VIETQR"
                   ? "Chuyển khoản VietQR Napas 247"
@@ -267,7 +274,9 @@ function CheckoutResultContent() {
             <div className="flex justify-between">
               <span className="text-slate-500">Phương thức đã chọn:</span>
               <span className="font-semibold text-slate-800">
-                {orderData?.payment_method || "Trực tuyến"}
+                {orderData?.payment_method === "PAYOS"
+                  ? "Cổng thanh toán payOS"
+                  : orderData?.payment_method || "Trực tuyến"}
               </span>
             </div>
             {orderData?.total_amount && (

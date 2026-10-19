@@ -14,6 +14,7 @@ from app.models.enums import UserRole
 from app.services.audit import write_audit
 from app.services.fulfillment_service import FulfillmentRoutingService
 from app.services.momo_service import MomoPaymentService
+from app.services.payos_service import PayOSPaymentService
 from app.services.payment_intent_service import PaymentIntentService
 from app.services.reconciliation_service import PaymentReconciliationService
 from app.services.vietqr_service import VietQrService
@@ -30,6 +31,17 @@ class CreateMomoPaymentRequest(BaseModel):
     return_url: Optional[str] = None
     phone_verify: Optional[str] = None
     order_token: Optional[str] = None
+
+
+class CreatePayOSPaymentRequest(BaseModel):
+    order_code: str = Field(..., min_length=5, max_length=50)
+    return_url: Optional[str] = None
+    phone_verify: Optional[str] = None
+    order_token: Optional[str] = None
+
+
+class ConfirmPayOSWebhookRequest(BaseModel):
+    webhook_url: str = Field(..., min_length=10, max_length=255)
 
 
 class SimulatePaymentRequest(BaseModel):
@@ -306,6 +318,109 @@ def simulate_vietqr_payment(
         success=payload.success,
         amount=payload.amount,
     )
+
+
+# ==============================================================================
+# 2.5 PAYOS PAYMENT GATEWAY ENDPOINTS (Chính thức)
+# ==============================================================================
+
+@payments_router.post("/payos/create")
+def create_payos_payment(
+    payload: CreatePayOSPaymentRequest,
+    current_user: Optional[User] = Depends(get_optional_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Khởi tạo yêu cầu thanh toán qua Cổng payOS (QR Chuyển khoản / Thẻ / Ngân hàng).
+    Trả về checkout_url và mã QR động để khách hàng quét và thanh toán tiền thật.
+    """
+    order = db.scalar(select(Order).where(Order.order_code == payload.order_code.strip()))
+    if not order:
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy đơn hàng '{payload.order_code}'")
+
+    _verify_order_payment_access(
+        order,
+        current_user,
+        phone_verify=payload.phone_verify,
+        order_token=payload.order_token,
+        action_name="tạo thanh toán payOS",
+    )
+
+    if order.payment_status == "PAID":
+        raise HTTPException(status_code=400, detail="Đơn hàng này đã được thanh toán thành công trước đó.")
+
+    return PayOSPaymentService.create_payment_request(
+        db=db,
+        order=order,
+        return_url=payload.return_url,
+    )
+
+
+@payments_router.post("/payos/webhook")
+async def payos_payment_webhook(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """
+    Endpoint tiếp nhận Webhook biến động thanh toán chính thức từ máy chủ payOS.
+    Xác thực chữ ký số HMAC-SHA256 / Checksum chống giả mạo.
+    Khi thanh toán thành công (code '00'), tự động:
+    - Cập nhật Order.payment_status = PAID.
+    - Cập nhật Order.fulfillment_status = ALLOCATED (Đơn chính thức xuất hiện trên danh sách xử lý của Kho & Admin).
+    - Gửi thông báo cho nhân viên kho phụ trách đơn.
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Dữ liệu Webhook payOS không đúng định dạng JSON.")
+
+    return PayOSPaymentService.process_webhook(db=db, payload=payload)
+
+
+@payments_router.post("/payos/check/{order_code}")
+def check_payos_order_status(
+    order_code: str,
+    phone_verify: Optional[str] = Query(None),
+    x_order_token: Optional[str] = Header(None, alias="X-Order-Token"),
+    authorization: Optional[str] = Header(None),
+    current_user: Optional[User] = Depends(get_optional_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Kiểm tra và đồng bộ trạng thái thanh toán trực tiếp từ cổng payOS cho đơn hàng (On-demand sync).
+    Chống IDOR: Khách hàng chỉ kiểm tra được đơn của chính mình; Admin toàn quyền.
+    """
+    clean_code = order_code.strip()
+    order = db.scalar(select(Order).where(Order.order_code == clean_code))
+    if not order:
+        raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng.")
+
+    effective_token = x_order_token
+    if not effective_token and authorization and authorization.startswith("Bearer "):
+        bearer_val = authorization[7:].strip()
+        if verify_guest_order_token(bearer_val, clean_code):
+            effective_token = bearer_val
+
+    _verify_order_payment_access(
+        order,
+        current_user,
+        phone_verify=phone_verify,
+        order_token=effective_token,
+        action_name="tra cứu trạng thái payOS",
+    )
+
+    return PayOSPaymentService.check_payment_status(db=db, order_code=clean_code)
+
+
+@payments_router.post("/payos/confirm-webhook")
+def confirm_payos_webhook_url(
+    payload: ConfirmPayOSWebhookRequest,
+    admin: User = Depends(require_roles(UserRole.ADMIN)),
+):
+    """
+    Đăng ký và xác nhận Webhook URL với máy chủ payOS (Chỉ dành cho ADMIN khi cấu hình Tunnel).
+    """
+    return PayOSPaymentService.confirm_webhook_url(payload.webhook_url)
 
 
 # ==============================================================================

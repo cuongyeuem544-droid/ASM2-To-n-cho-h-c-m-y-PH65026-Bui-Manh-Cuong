@@ -220,6 +220,10 @@ class FulfillmentRoutingService:
             logger.info(f"[ROUTING] Đơn {order.order_code}: Đáp ứng 100% tại kho {single_fulfill_wh.code}")
             order.assigned_warehouse_id = single_fulfill_wh.id
             order.assignment_method = "NEAREST_SINGLE"
+            if order.payment_method != "COD" and order.payment_status != "PAID":
+                order.fulfillment_status = "WAITING_PAYMENT"
+            else:
+                order.fulfillment_status = "ALLOCATED"
             o_lat = getattr(order, "lat", None)
             o_lng = getattr(order, "lng", None)
             if o_lat is not None and o_lng is not None and single_fulfill_wh.lat is not None and single_fulfill_wh.lng is not None:
@@ -330,12 +334,15 @@ class FulfillmentRoutingService:
             if ff.warehouse_id:
                 warehouses_to_notify.add(ff.warehouse_id)
 
-        for wid in warehouses_to_notify:
-            try:
-                from app.services.warehouse_notification_service import WarehouseNotificationService
-                WarehouseNotificationService.notify_order_new(db, order, wid)
-            except Exception as e:
-                logger.warning(f"Failed to create ORDER_NEW notification for warehouse {wid}: {e}")
+        # Chỉ phát thông báo cho kho khi đơn là COD hoặc đã thanh toán thành công (PAID).
+        # Đơn online chưa thanh toán (WAITING_PAYMENT) sẽ được thông báo ngay khi Webhook xác nhận thanh toán.
+        if order.payment_method == "COD" or order.payment_status == "PAID":
+            for wid in warehouses_to_notify:
+                try:
+                    from app.services.warehouse_notification_service import WarehouseNotificationService
+                    WarehouseNotificationService.notify_order_new(db, order, wid)
+                except Exception as e:
+                    logger.warning(f"Failed to create ORDER_NEW notification for warehouse {wid}: {e}")
 
         db.flush()
         return fulfillments_to_return
