@@ -237,6 +237,7 @@ class StockMovement(Base):
     reference_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(150), unique=True, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     warehouse: Mapped[Warehouse] = relationship()

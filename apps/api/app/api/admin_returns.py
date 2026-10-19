@@ -97,19 +97,6 @@ class ItemInspectionPayload(BaseModel):
     rejection_reason: Optional[str] = Field(default=None, description="Lý do từ chối nếu có rejected_quantity > 0")
     notes: Optional[str] = None
 
-    @model_validator(mode="before")
-    def populate_inspection_aliases(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            if not data.get("package_condition") and data.get("condition"):
-                data["package_condition"] = data["condition"]
-            if not data.get("condition") and data.get("package_condition"):
-                data["condition"] = data["package_condition"]
-            if not data.get("rejection_reason") and data.get("notes"):
-                data["rejection_reason"] = data["notes"]
-            if not data.get("notes") and data.get("rejection_reason"):
-                data["notes"] = data["rejection_reason"]
-        return data
-
     @model_validator(mode="after")
     def validate_inspection(self):
         # 1. Tổng số lượng kiểm định phải > 0

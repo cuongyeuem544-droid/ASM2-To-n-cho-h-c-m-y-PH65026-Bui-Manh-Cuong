@@ -78,7 +78,7 @@ export default function AdminPortalPage() {
     {
       id: "/products",
       title: "Hồ Sơ Thuốc & Duyệt Bán",
-      description: "Quản lý danh mục 500+ hồ sơ thuốc, chuẩn hóa thành phần và duyệt xuất bản bán hàng trên Storefront.",
+      description: "Quản lý danh mục 500+ hồ sơ thuốc, kiểm duyệt thành phần và duyệt xuất bản bán hàng trên Storefront.",
       icon: Boxes,
       color: "bg-emerald-50 text-emerald-600 border-emerald-100",
       tag: "Kiểm duyệt",

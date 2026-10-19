@@ -406,7 +406,7 @@ export const ProductFilterSidebar: React.FC<ProductFilterSidebarProps> = ({
       {/* Footer Notice */}
       <div className="p-3 rounded-xl bg-brand-blue-50/80 border border-brand-blue-100 flex items-center gap-2.5 text-[11px] text-brand-blue-950 font-medium shadow-xs">
         <ShieldCheck className="w-4 h-4 text-brand-blue-600 shrink-0" />
-        <span>100% Sản phẩm chuẩn hóa thông tin theo danh mục Bộ Y Tế.</span>
+        <span>100% Sản phẩm chính hãng có nguồn gốc xuất xứ rõ ràng.</span>
       </div>
     </div>
   );

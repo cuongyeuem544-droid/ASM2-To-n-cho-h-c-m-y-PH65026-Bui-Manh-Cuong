@@ -78,7 +78,7 @@ export const ProductImageStage: React.FC<ProductImageStageProps> = ({
             {product.brand}
           </span>
           <span className="text-[9px] text-slate-400 font-medium mt-0.5">
-            Viên Nang Chuẩn Hóa
+            Viên Nang
           </span>
         </div>
       );

@@ -82,7 +82,7 @@ export default function AboutProjectPage() {
                 <span className="text-xs font-bold">Dữ Liệu Dược Khoa</span>
               </div>
               <p className="text-xs font-semibold text-slate-800">
-                25 Sản Phẩm Chuẩn Hóa
+                25 Sản Phẩm Dược Phẩm
               </p>
               <p className="text-[11px] text-slate-400 mt-0.5">Phân loại OTC & Rx</p>
             </div>

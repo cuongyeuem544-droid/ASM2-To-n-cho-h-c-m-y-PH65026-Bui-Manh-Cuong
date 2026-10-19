@@ -5,7 +5,7 @@ from typing import Any, Optional
 import uuid
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import (
@@ -569,12 +569,20 @@ class FulfillmentRoutingService:
                 ).all()
 
                 if not item_allocs and item.order_item_id:
-                    item_allocs = db.scalars(
+                    # Hỗ trợ dữ liệu cũ: Chỉ lấy allocation có fulfillment_item_id IS NULL và migrate gắn ownership
+                    legacy_allocs = db.scalars(
                         select(OrderItemBatchAllocation).where(
                             OrderItemBatchAllocation.order_item_id == item.order_item_id,
                             OrderItemBatchAllocation.warehouse_id == ff.warehouse_id,
+                            OrderItemBatchAllocation.fulfillment_item_id.is_(None),
                         )
                     ).all()
+                    if legacy_allocs:
+                        for la in legacy_allocs:
+                            la.fulfillment_item_id = item.id
+                            db.add(la)
+                        db.flush()
+                        item_allocs = legacy_allocs
 
                 total_allocated = sum(a.allocated_quantity for a in item_allocs) if item_allocs else 0
                 if not item_allocs or total_allocated != item.quantity:
@@ -589,6 +597,11 @@ class FulfillmentRoutingService:
                     )
 
                 for alloc in item_allocs:
+                    if item.order_item_id and alloc.order_item_id != item.order_item_id:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Phân bổ lô #{alloc.id} thuộc order_item #{alloc.order_item_id}, không khớp với fulfillment_item #{item.id} (order_item #{item.order_item_id}).",
+                        )
                     if alloc.warehouse_id != ff.warehouse_id:
                         raise HTTPException(
                             status_code=400,
@@ -697,21 +710,37 @@ class FulfillmentRoutingService:
                         )
                         rem_to_fulfill = 0
 
-                # Sinh duy nhất 1 bản ghi Thẻ kho (StockMovement - DISPATCH) cho mỗi lô
-                db.add(
-                    StockMovement(
-                        movement_code=f"MOV-DISP-{ff.id}-{b_id}-{uuid.uuid4().hex[:6].upper()}",
-                        movement_type="DISPATCH",
-                        warehouse_id=ff.warehouse_id,
-                        batch_id=b_id,
-                        quantity=-req_qty,
-                        balance_after=stock.quantity_on_hand,
-                        reference_type="ORDER_FULFILLMENT",
-                        reference_id=ff.fulfillment_code,
-                        created_by=user_id,
-                        note=f"Xuất kho kiện {ff.fulfillment_code} giao cho khách",
+                # Sinh duy nhất 1 bản ghi Thẻ kho (StockMovement - DISPATCH) cho mỗi lô với idempotency_key
+                idempotency_key = f"DISPATCH:{ff.id}:{b_id}"
+                existing_disp = db.scalar(
+                    select(StockMovement).where(
+                        or_(
+                            StockMovement.idempotency_key == idempotency_key,
+                            and_(
+                                StockMovement.movement_type == "DISPATCH",
+                                StockMovement.reference_type == "ORDER_FULFILLMENT",
+                                StockMovement.reference_id == ff.fulfillment_code,
+                                StockMovement.batch_id == b_id,
+                            ),
+                        )
                     )
                 )
+                if not existing_disp:
+                    db.add(
+                        StockMovement(
+                            movement_code=f"MOV-DISP-{ff.id}-{b_id}-{uuid.uuid4().hex[:6].upper()}",
+                            movement_type="DISPATCH",
+                            warehouse_id=ff.warehouse_id,
+                            batch_id=b_id,
+                            quantity=-req_qty,
+                            balance_after=stock.quantity_on_hand,
+                            reference_type="ORDER_FULFILLMENT",
+                            reference_id=ff.fulfillment_code,
+                            idempotency_key=idempotency_key,
+                            created_by=user_id,
+                            note=f"Xuất kho kiện {ff.fulfillment_code} giao cho khách",
+                        )
+                    )
 
         elif target_status == "PICKED":
             ff.status = "PICKED"

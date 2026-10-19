@@ -115,7 +115,7 @@ export function StaffReturnsPage() {
   // Step 1: Receive Form
   const [carrierName, setCarrierName] = useState('Viettel Post')
   const [trackingCode, setTrackingCode] = useState('')
-  const [receivePackageCond, setReceivePackageCond] = useState('SEALED')
+  const [receivePackageCond, setReceivePackageCond] = useState('')
   const [receiveNote, setReceiveNote] = useState('')
 
   // Step 2: Evidence Upload Mock
@@ -193,6 +193,10 @@ export function StaffReturnsPage() {
   // 1. Xác nhận nhận hàng từ bưu tá
   const handleReceiveGoods = async () => {
     if (!selectedCase) return
+    if (!receivePackageCond) {
+      setActionError('Vui lòng chọn tình trạng gói bưu phẩm.')
+      return
+    }
     setActionLoading(true)
     setActionError('')
     try {
@@ -640,6 +644,7 @@ export function StaffReturnsPage() {
                         onChange={(e) => setReceivePackageCond(e.target.value)}
                         style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 13 }}
                       >
+                        <option value="">-- Vui lòng chọn tình trạng bưu phẩm --</option>
                         <option value="SEALED">Nguyên vẹn hộp niêm phong</option>
                         <option value="DAMAGED">Bẹp méo / Rách bao bì bên ngoài</option>
                         <option value="OPENED">Có dấu hiệu đã bị xé / bóc mở</option>

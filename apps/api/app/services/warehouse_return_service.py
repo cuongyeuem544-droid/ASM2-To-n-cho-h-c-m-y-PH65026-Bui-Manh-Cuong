@@ -48,6 +48,7 @@ from app.models.returns import (
     ReturnInspection,
     ReturnItem,
     ReturnRequest,
+    ReturnRestockAllocation,
     ReturnStatus,
     ReturnStatusHistory,
     WarehouseReturnCase,
@@ -437,9 +438,30 @@ class WarehouseReturnService:
                 continue
 
             ret_item = item_map[item_id]
-            rec_qty = int(insp_in.get("received_quantity", ret_item.requested_quantity))
-            acc_qty = int(insp_in.get("accepted_quantity", rec_qty))
-            rej_qty = int(insp_in.get("rejected_quantity", max(0, rec_qty - acc_qty)))
+
+            # Xác thực bắt buộc các trường số lượng độc lập, rõ ràng (không suy diễn mặc định)
+            for q_field in ["received_quantity", "accepted_quantity", "rejected_quantity"]:
+                if q_field not in insp_in or insp_in.get(q_field) is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=f"Thiếu trường kiểm định bắt buộc: {q_field}",
+                    )
+
+            rec_qty = int(insp_in["received_quantity"])
+            acc_qty = int(insp_in["accepted_quantity"])
+            rej_qty = int(insp_in["rejected_quantity"])
+
+            if rec_qty < 0 or acc_qty < 0 or rej_qty < 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Số lượng nhận ({rec_qty}), chấp nhận ({acc_qty}) và từ chối ({rej_qty}) không được âm.",
+                )
+
+            if acc_qty + rej_qty != rec_qty:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Tổng số lượng chấp nhận ({acc_qty}) và từ chối ({rej_qty}) phải bằng đúng số lượng thực nhận ({rec_qty}).",
+                )
 
             # Cập nhật hoặc tạo mới ReturnInspection
             existing_insp = db.scalar(
@@ -459,6 +481,7 @@ class WarehouseReturnService:
 
             # Xác thực bắt buộc các trường kiểm định theo quy chuẩn an toàn dược phẩm
             required_fields = [
+                "condition",
                 "package_condition",
                 "seal_intact",
                 "batch_matched",
@@ -789,12 +812,11 @@ class WarehouseReturnService:
                 )
 
             rec_q = ret_item.received_quantity
-            if rec_q is None or rec_q == 0:
-                insp_match = next((ins for ins in case.inspections if ins.return_item_id == ret_item.id), None)
-                if insp_match and insp_match.received_quantity is not None:
-                    rec_q = insp_match.received_quantity
-                elif rec_q is None:
-                    rec_q = 0
+            insp_match = next((ins for ins in case.inspections if ins.return_item_id == ret_item.id), None)
+            if insp_match and insp_match.received_quantity is not None:
+                rec_q = insp_match.received_quantity
+            if rec_q is None:
+                rec_q = 0
 
             # Ràng buộc: Nếu received_quantity == 0 thì approved_quantity bắt buộc = 0
             if rec_q == 0 and acc_q > 0:
@@ -987,6 +1009,13 @@ class WarehouseReturnService:
                 detail=f"Ca hoàn này đã có giao dịch hoàn tiền đang được xử lý hoặc đã thành công (Mã hoàn: {existing_active_refund.refund_code}).",
             )
 
+        # Yêu cầu ca hoàn phải có sự phê duyệt rõ ràng từ Quản lý kho
+        if not case.approved_by_user_id and case.status != ReturnStatus.APPROVED.value:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Ca hoàn chưa có quyết định phê duyệt rõ ràng từ Quản lý kho. Không thể thực hiện hoàn tiền.",
+            )
+
         # 3. Backend TỰ ĐỘNG TÍNH TOÁN số tiền hoàn
         order = case.return_request.order
         accepted_items = [it for it in case.items if (it.approved_quantity or 0) > 0]
@@ -996,7 +1025,7 @@ class WarehouseReturnService:
                 detail="Không có sản phẩm nào trong ca hoàn này được duyệt để hoàn tiền.",
             )
 
-        # Kiểm tra từng mặt hàng được duyệt: không âm, không vượt requested, không vượt received
+        # Kiểm tra từng mặt hàng được duyệt: không âm, không vượt requested, không vượt received (kể cả received = 0)
         for it in accepted_items:
             app_q = it.approved_quantity or 0
             if app_q < 0:
@@ -1009,10 +1038,20 @@ class WarehouseReturnService:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Số lượng duyệt ({app_q}) vượt quá số lượng yêu cầu ({it.requested_quantity}) của sản phẩm '{it.product_name}'.",
                 )
-            if it.received_quantity is not None and it.received_quantity > 0 and app_q > it.received_quantity:
+            rec_q = it.received_quantity
+            if rec_q is None:
+                insp = next((i for i in case.inspections if i.return_item_id == it.id), None)
+                if insp and insp.received_quantity is not None:
+                    rec_q = insp.received_quantity
+            if rec_q is not None and app_q > rec_q:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Số lượng duyệt ({app_q}) vượt quá số lượng thực nhận ({it.received_quantity}) của sản phẩm '{it.product_name}'.",
+                    detail=f"Số lượng duyệt ({app_q}) vượt quá số lượng thực nhận ({rec_q}) của sản phẩm '{it.product_name}'.",
+                )
+            if rec_q == 0 and app_q > 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Sản phẩm '{it.product_name}' có số lượng thực nhận là 0, không thể hoàn tiền cho sản phẩm này.",
                 )
 
         items_refund_total = Decimal("0.0")
@@ -1205,9 +1244,37 @@ class WarehouseReturnService:
             case_items = list(case.return_request.items)
 
         if disposition == "RESTOCK":
+            linked_codes = [case.case_code]
+            if case.return_request:
+                linked_codes.append(case.return_request.return_code)
+
+            item_order_ids = [it.order_item_id for it in case_items if it.order_item_id]
+            existing_alloc = db.scalar(
+                select(ReturnRestockAllocation).where(
+                    or_(
+                        ReturnRestockAllocation.source_code == case.case_code,
+                        and_(
+                            ReturnRestockAllocation.canonical_return_code.in_(linked_codes),
+                            ReturnRestockAllocation.order_item_id.in_(item_order_ids),
+                        ),
+                    )
+                )
+            )
+            existing_mv = db.scalar(
+                select(StockMovement).where(
+                    StockMovement.movement_type == "RETURN_RESTOCK",
+                    StockMovement.reference_id == case.case_code,
+                )
+            )
+            if existing_alloc or existing_mv:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Ca hoàn này ({case.case_code}) hoặc yêu cầu hoàn liên kết ({case.return_request.return_code if case.return_request else ''}) đã được nhập lại kho bán trước đó.",
+                )
+
             items_to_restock = []
             for ret_item in case_items:
-                qty_restock = ret_item.approved_quantity or 0
+                qty_restock = ret_item.approved_quantity or ret_item.restock_quantity or ret_item.accepted_quantity or 0
                 if qty_restock > 0:
                     items_to_restock.append({
                         "order_item_id": ret_item.order_item_id,
@@ -1223,7 +1290,6 @@ class WarehouseReturnService:
                     detail="Không có sản phẩm nào có số lượng được duyệt > 0 để nhập lại kho bán.",
                 )
 
-            linked_codes = [case.return_request.return_code] if case.return_request else []
             ReturnRestockService.execute_return_restock(
                 db=db,
                 source_type="WAREHOUSE_RETURN_CASE",

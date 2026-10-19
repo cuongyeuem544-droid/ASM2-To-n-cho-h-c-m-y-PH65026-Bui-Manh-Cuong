@@ -672,14 +672,14 @@ export const PrescriptionUploader: React.FC<PrescriptionUploaderProps> = ({
                 <div className="p-3 rounded-xl bg-slate-100 border border-slate-200 text-[11px] text-slate-500 leading-relaxed flex items-center gap-2">
                   <Info className="w-4 h-4 text-slate-400 shrink-0" />
                   <span>
-                    Dữ liệu trên là kết quả OCR thô nguyên bản, không qua chỉnh sửa hay suy đoán. Các bước chuẩn hóa và trích xuất cấu trúc AI sẽ được thực hiện ở các giai đoạn sau.
+                    Dữ liệu trên là kết quả OCR thô nguyên bản, không qua chỉnh sửa hay suy đoán. Các bước trích xuất cấu trúc AI sẽ được thực hiện ở các giai đoạn sau.
                   </span>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Phase 4: AI Extraction & Drug Normalization Section */}
+          {/* Phase 4: AI Extraction Section */}
           {ocrStatus === "completed" && (
               <div className="mt-8 pt-6 border-t border-slate-200 space-y-4">
                 {extractionStatus === "idle" && (
@@ -693,10 +693,10 @@ export const PrescriptionUploader: React.FC<PrescriptionUploaderProps> = ({
                           Phase 4: AI Extraction
                         </span>
                         <h4 className="text-sm font-bold text-slate-900 mt-1">
-                          Phân tích cấu trúc & Chuẩn hóa danh mục thuốc
+                          Phân tích cấu trúc đơn thuốc
                         </h4>
                         <p className="text-xs text-slate-600 mt-0.5 leading-relaxed">
-                          Sử dụng mô hình AI nhận diện danh sách thuốc, hàm lượng, liều dùng, tần suất và tự động đối soát với danh mục Dược phẩm chuẩn.
+                          Sử dụng mô hình AI nhận diện danh sách thuốc, hàm lượng, liều dùng, tần suất và hỗ trợ dược sĩ đối soát đơn thuốc.
                         </p>
                       </div>
                     </div>
@@ -826,7 +826,7 @@ export const PrescriptionUploader: React.FC<PrescriptionUploaderProps> = ({
                         </div>
                       )}
 
-                      {/* Danh sách các dòng thuốc đã bóc tách & Chuẩn hóa */}
+                      {/* Danh sách các dòng thuốc đã bóc tách */}
                       <div className="space-y-3">
                         <div className="flex items-center justify-between">
                           <label className="text-xs font-bold text-slate-700">

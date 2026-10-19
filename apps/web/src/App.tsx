@@ -14,7 +14,6 @@ const ImportsPage = lazy(() => import('./pages/ImportsPage').then(module => ({ d
 const LoginPage = lazy(() => import('./pages/LoginPage').then(module => ({ default: module.LoginPage })))
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage').then(module => ({ default: module.NotFoundPage })))
 const OrdersPage = lazy(() => import('./pages/OrdersPage').then(module => ({ default: module.OrdersPage })))
-const PharmacyCrawlerPage = lazy(() => import('./pages/PharmacyCrawlerPage').then(module => ({ default: module.PharmacyCrawlerPage })))
 const ProductDetailPage = lazy(() => import('./pages/ProductDetailPage').then(module => ({ default: module.ProductDetailPage })))
 const ProductsPage = lazy(() => import('./pages/ProductsPage').then(module => ({ default: module.ProductsPage })))
 const ReceiptsPage = lazy(() => import('./pages/ReceiptsPage').then(module => ({ default: module.ReceiptsPage })))
@@ -176,7 +175,6 @@ export default function App() {
             <Route path="inventory/batches" element={<BatchesPage />} />
             <Route path="inventory/receipts" element={<ReceiptsPage />} />
             <Route path="inventory/transfers" element={<TransfersPage />} />
-            <Route path="pharmacy-crawler" element={<PharmacyCrawlerPage />} />
             <Route path="candidates" element={<CandidatesPage />} />
             <Route path="conflicts" element={<ConflictsPage />} />
             <Route path="sources" element={<SourcesPage />} />

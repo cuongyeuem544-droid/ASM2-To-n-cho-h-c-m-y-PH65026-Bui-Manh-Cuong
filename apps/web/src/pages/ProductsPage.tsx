@@ -110,7 +110,7 @@ export function ProductsPage() {
       {/* 1. Page Heading */}
       <AdminPageHeader
         title="Hồ sơ thuốc & Duyệt bán"
-        eyebrow="HỒ SƠ & BÁN HÀNG • Danh mục thuốc chuẩn hóa"
+        eyebrow="HỒ SƠ & BÁN HÀNG • Danh mục sản phẩm"
         subtitle="Bảng kê danh mục sản phẩm y tế, quản lý phân loại kê đơn (Rx/OTC), giá bán niêm yết và tồn kho thực tế đa chi nhánh."
         badge={data?.total !== undefined ? <span className="stat-card-badge">{data.total.toLocaleString('vi-VN')} thuốc</span> : undefined}
         actions={

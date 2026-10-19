@@ -112,7 +112,7 @@ class EvidencePayload(BaseModel):
 
 class ItemInspectionItem(BaseModel):
     return_item_id: int = Field(..., description="ID sản phẩm đổi/trả bắt buộc")
-    condition: Optional[str] = Field(default=None, description="Tình trạng thực tế bắt buộc")
+    condition: str = Field(..., min_length=1, description="Tình trạng thực tế bắt buộc")
     package_condition: str = Field(..., min_length=1, description="Trạng thái bao bì bắt buộc")
     seal_intact: bool = Field(..., description="Tem niêm phong nguyên vẹn bắt buộc (True/False)")
     batch_matched: bool = Field(..., description="Khớp số lô đã xuất bắt buộc (True/False)")
@@ -121,27 +121,12 @@ class ItemInspectionItem(BaseModel):
     received_quantity: int = Field(..., ge=0, description="Số lượng nhận bắt buộc")
     accepted_quantity: int = Field(..., ge=0, description="Số lượng chấp nhận bắt buộc")
     rejected_quantity: int = Field(..., ge=0, description="Số lượng từ chối bắt buộc (không mặc định)")
-    restock_destination: Optional[str] = Field(default=None, description="Phân luồng kho bắt buộc")
-    suggested_action: Optional[str] = Field(default=None, description="Đề xuất xử lý bắt buộc (RESTOCK/QUARANTINE/DISPOSE)")
+    restock_destination: Optional[str] = Field(default=None, description="Phân luồng kho")
+    suggested_action: str = Field(..., min_length=1, description="Đề xuất xử lý bắt buộc (RESTOCK/QUARANTINE/DISPOSE)")
     restock_quantity: Optional[int] = Field(default=None, ge=0, description="Số lượng nhập lại kho bán nếu có")
     rejection_reason: Optional[str] = Field(default=None, description="Lý do từ chối nếu có rejected_quantity > 0")
     damage_description: Optional[str] = None
     inspection_note: Optional[str] = None
-
-    @model_validator(mode="before")
-    def populate_aliases(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            if not data.get("condition") and data.get("package_condition"):
-                data["condition"] = data["package_condition"]
-            if not data.get("package_condition") and data.get("condition"):
-                data["package_condition"] = data["condition"]
-            if not data.get("suggested_action") and data.get("restock_destination"):
-                data["suggested_action"] = data["restock_destination"]
-            if not data.get("restock_destination") and data.get("suggested_action"):
-                data["restock_destination"] = data["suggested_action"]
-            if not data.get("rejection_reason") and data.get("damage_description"):
-                data["rejection_reason"] = data["damage_description"]
-        return data
 
     @model_validator(mode="after")
     def validate_inspection_safety(self):

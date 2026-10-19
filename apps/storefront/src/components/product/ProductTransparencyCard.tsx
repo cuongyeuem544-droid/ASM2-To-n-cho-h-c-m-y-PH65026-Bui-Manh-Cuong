@@ -67,7 +67,7 @@ export const ProductTransparencyCard: React.FC<ProductTransparencyCardProps> = (
         <div className="flex items-center gap-2.5 bg-white px-3.5 py-2 rounded-xl border border-cyan-200 shadow-2xs shrink-0 self-start sm:self-center">
           <div className="text-right">
             <span className="text-[10px] text-slate-400 block font-semibold leading-tight">Độ đầy đủ hồ sơ</span>
-            <span className="text-sm font-black text-cyan-700">{score}% chuẩn hóa</span>
+            <span className="text-sm font-black text-cyan-700">{score}%</span>
           </div>
           <div className="w-8 h-8 rounded-full border-2 border-cyan-500 flex items-center justify-center text-[11px] font-black text-cyan-700 bg-cyan-50">
             {score}

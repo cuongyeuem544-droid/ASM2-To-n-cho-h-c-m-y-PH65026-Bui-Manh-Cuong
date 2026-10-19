@@ -161,7 +161,7 @@ export const HeroVisual: React.FC = () => {
                   Formula No. 04
                 </p>
                 <p className="text-[8.5px] text-slate-500 font-medium mt-0.5 leading-snug">
-                  Phức hợp vi chất chuẩn hóa
+                  Phức hợp vi chất tự nhiên
                 </p>
 
                 {/* Packaging Count & Specs */}

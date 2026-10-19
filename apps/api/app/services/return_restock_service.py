@@ -80,11 +80,15 @@ class ReturnRestockService:
                     check_codes.append(c.case_code)
 
         # 2. Chống nhập trùng hai chiều (Two-way Idempotency check)
+        item_order_ids = [it.get("order_item_id") for it in items_to_restock if it.get("order_item_id")]
         existing_alloc = db.scalar(
             select(ReturnRestockAllocation).where(
                 or_(
-                    ReturnRestockAllocation.canonical_return_code == canonical_return_code,
-                    ReturnRestockAllocation.source_code.in_(check_codes),
+                    ReturnRestockAllocation.source_code == source_code,
+                    and_(
+                        ReturnRestockAllocation.canonical_return_code == canonical_return_code,
+                        ReturnRestockAllocation.order_item_id.in_(item_order_ids),
+                    ),
                 )
             )
         )
@@ -96,7 +100,7 @@ class ReturnRestockService:
                         StockMovement.reference_type == source_type,
                         StockMovement.reference_id == source_code,
                     ),
-                    StockMovement.reference_id.in_(check_codes),
+                    StockMovement.reference_id == source_code,
                 ),
             )
         )
@@ -109,7 +113,10 @@ class ReturnRestockService:
         # 3. Tiền kiểm định toàn bộ items TRƯỚC KHI cập nhật bất kỳ bản ghi nào
         plans: list[dict[str, Any]] = []
 
-        for it in items_to_restock:
+        # Khóa theo thứ tự ổn định order_item_id tăng dần để chống deadlock khi có request đồng thời
+        sorted_items = sorted(items_to_restock, key=lambda x: x.get("order_item_id") or 0)
+
+        for it in sorted_items:
             qty_restock = it.get("qty_to_restock", 0)
             if qty_restock <= 0:
                 continue
@@ -124,11 +131,12 @@ class ReturnRestockService:
                     detail=f"Thiếu thông tin order_item_id cho sản phẩm '{product_name}'.",
                 )
 
-            # Lấy tất cả OrderItemBatchAllocation của order_item này
+            # Lấy tất cả OrderItemBatchAllocation của order_item này (có khóa hàng để chống race condition)
             allocations = db.scalars(
                 select(OrderItemBatchAllocation)
                 .where(OrderItemBatchAllocation.order_item_id == order_item_id)
                 .order_by(OrderItemBatchAllocation.id.asc())
+                .with_for_update()
             ).all()
 
             if not allocations:
@@ -198,9 +206,12 @@ class ReturnRestockService:
                     StockMovement.note.like(f"%[order_item_id:{order_item_id}]%"),
                 )
             ).all()
+            legacy_mv_by_batch: dict[int, int] = {}
             for mv in prior_movements:
-                if mv.batch_id not in prior_by_batch:
-                    prior_by_batch[mv.batch_id] = mv.quantity
+                legacy_mv_by_batch[mv.batch_id] = legacy_mv_by_batch.get(mv.batch_id, 0) + mv.quantity
+            for b_id, mv_qty in legacy_mv_by_batch.items():
+                if b_id not in prior_by_batch:
+                    prior_by_batch[b_id] = mv_qty
 
             # Tính lượng còn có thể hoàn cho từng lô
             for g in grouped_allocations:

@@ -840,6 +840,8 @@ class ReturnService:
             })
 
         # BƯỚC 2: Thực thi cập nhật khi 100% kiểm định thành công
+        restock_by_wh: dict[int, list[dict[str, Any]]] = {}
+
         for plan in items_plan:
             item = plan["item"]
             condition = plan["condition"]
@@ -861,22 +863,13 @@ class ReturnService:
             # Xử lý cập nhật tồn kho nếu có số lượng nhập lại (Restock)
             if destination == RestockDestination.SELLABLE_STOCK.value and restock_qty > 0:
                 prod_id = item.order_item.product_id if item.order_item else (getattr(item, 'product_id', None))
-                ReturnRestockService.execute_return_restock(
-                    db=db,
-                    source_type="RETURN_REQUEST",
-                    source_code=ret.return_code,
-                    warehouse_id=item_wh_id,
-                    items_to_restock=[{
-                        "order_item_id": item.order_item_id,
-                        "product_id": prod_id,
-                        "product_name": item.product_name,
-                        "qty_to_restock": restock_qty,
-                        "return_item_id": item.id,
-                    }],
-                    actor_user_id=inspector_user.id,
-                    audit_note=f"Nhập lại kho bán từ phiếu hoàn {ret.return_code} (Tình trạng: {condition})",
-                    linked_reference_codes=linked_case_codes,
-                )
+                restock_by_wh.setdefault(item_wh_id, []).append({
+                    "order_item_id": item.order_item_id,
+                    "product_id": prod_id,
+                    "product_name": item.product_name,
+                    "qty_to_restock": restock_qty,
+                    "return_item_id": item.id,
+                })
             elif destination == RestockDestination.QUARANTINE.value and accepted_qty > 0:
                 cls._process_restock_movement(
                     db=db,
@@ -901,6 +894,19 @@ class ReturnService:
                     note=f"Tiêu hủy dược phẩm hỏng từ phiếu hoàn {ret.return_code} (Tình trạng: {condition})",
                     grouped_allocations=grouped_allocations,
                 )
+
+        # Gom và thực thi nhập kho nguyên tử 1 lần duy nhất cho mỗi kho
+        for wh_id, wh_items in restock_by_wh.items():
+            ReturnRestockService.execute_return_restock(
+                db=db,
+                source_type="RETURN_REQUEST",
+                source_code=ret.return_code,
+                warehouse_id=wh_id,
+                items_to_restock=wh_items,
+                actor_user_id=inspector_user.id,
+                audit_note=f"Nhập lại kho bán từ phiếu hoàn {ret.return_code}",
+                linked_reference_codes=linked_case_codes,
+            )
 
         old_status = ret.status
         ret.status = ReturnStatus.INSPECTION_COMPLETED.value

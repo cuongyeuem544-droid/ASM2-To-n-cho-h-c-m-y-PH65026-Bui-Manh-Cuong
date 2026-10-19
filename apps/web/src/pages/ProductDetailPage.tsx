@@ -149,7 +149,7 @@ export function ProductDetailPage() {
       <div className="notice-banner"><ShieldAlert size={19} /><span>Điểm này chỉ phản ánh mức độ khớp của hồ sơ dữ liệu. Không xác nhận chất lượng, tính chính hãng hoặc sự phù hợp điều trị.</span></div>
       <div className="detail-grid">
         <section className="panel">
-          <div className="panel-heading"><div><h2>Thông tin chuẩn hóa</h2><p>Giá trị hiện được hệ thống lựa chọn</p></div><CheckCircle2 size={20} /></div>
+          <div className="panel-heading"><div><h2>Thông tin chi tiết</h2><p>Giá trị hiện được hệ thống lựa chọn</p></div><CheckCircle2 size={20} /></div>
           <div className="info-grid">
             <Info label="Nhà sản xuất" value={product.manufacturer} />
             <Info label="Quốc gia" value={product.manufacturing_country} />
@@ -234,7 +234,7 @@ export function ProductDetailPage() {
 
       <section className="panel">
         <div className="panel-heading"><div><h2>Bằng chứng và nguồn dữ liệu</h2><p>Mỗi thông tin thuốc đều gắn liền với nguồn gốc và thời điểm đối soát</p></div><FileSearch size={20} /></div>
-        <div className="table-wrap"><table><thead><tr><th>Thông tin</th><th>Giá trị gốc từ nguồn</th><th>Giá trị chuẩn hóa</th><th>Nguồn</th><th>Độ tin cậy</th><th>Sử dụng</th></tr></thead><tbody>
+        <div className="table-wrap"><table><thead><tr><th>Thông tin</th><th>Giá trị gốc từ nguồn</th><th>Giá trị áp dụng</th><th>Nguồn</th><th>Độ tin cậy</th><th>Sử dụng</th></tr></thead><tbody>
           {product.source_fields.map(field => <tr key={field.id}><td><strong>{field.field_name}</strong></td><td>{field.original_value || '—'}</td><td>{field.normalized_value || '—'}</td><td>Nguồn #{field.source_id}</td><td>{Math.round(field.field_confidence * 100)}%</td><td>{field.is_selected_value ? <CheckCircle2 className="text-success" size={18} /> : '—'}</td></tr>)}
         </tbody></table></div>
       </section>

@@ -195,6 +195,12 @@ export function WarehouseReturnsPage() {
   const [showReinspectModal, setShowReinspectModal] = useState(false)
   const [reinspectReason, setReinspectReason] = useState('')
 
+  // Approve Modal (Explicit item quantities)
+  const [showApproveModal, setShowApproveModal] = useState(false)
+  const [approvalItems, setApprovalItems] = useState<Record<number, { approved_quantity: number | ''; rejected_quantity: number | ''; rejection_reason: string }>>({})
+  const [managerApproveNote, setManagerApproveNote] = useState('')
+  const [approveFormError, setApproveFormError] = useState('')
+
   // Reject Modal
   const [showRejectModal, setShowRejectModal] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
@@ -358,39 +364,110 @@ export function WarehouseReturnsPage() {
     }
   }
 
-  // 3. Phê duyệt ca hoàn
-  const handleApproveCase = async () => {
+  // 3. Phê duyệt ca hoàn (Quản lý nhập rõ ràng số lượng)
+  const openApproveModal = () => {
     if (!selectedCase) return
-    if (!confirm(`Bạn có chắc chắn muốn phê duyệt ca hoàn ${selectedCase.case_code}?`)) return
+    const initialMap: Record<number, { approved_quantity: number | ''; rejected_quantity: number | ''; rejection_reason: string }> = {}
+    selectedCase.items.forEach((item) => {
+      initialMap[item.id] = {
+        approved_quantity: '',
+        rejected_quantity: '',
+        rejection_reason: '',
+      }
+    })
+    setApprovalItems(initialMap)
+    setManagerApproveNote('')
+    setApproveFormError('')
+    setShowApproveModal(true)
+  }
+
+  const submitManagerApproval = async () => {
+    if (!selectedCase) return
+    setApproveFormError('')
+
+    const caseItemIds = selectedCase.items.map((it) => it.id)
+    const submittedIds = Object.keys(approvalItems).map(Number)
+
+    for (const id of caseItemIds) {
+      if (!submittedIds.includes(id)) {
+        setApproveFormError('Thiếu dữ liệu phê duyệt cho một số sản phẩm trong ca hoàn.')
+        return
+      }
+    }
+
+    let totalApproved = 0
+    const itemsPayload = []
+
+    for (const item of selectedCase.items) {
+      const appData = approvalItems[item.id]
+      if (!appData || appData.approved_quantity === '' || appData.rejected_quantity === '') {
+        setApproveFormError(`Vui lòng nhập đầy đủ số lượng duyệt và từ chối cho sản phẩm "${item.product_name}".`)
+        return
+      }
+
+      const appQty = Number(appData.approved_quantity)
+      const rejQty = Number(appData.rejected_quantity)
+
+      if (isNaN(appQty) || isNaN(rejQty) || appQty < 0 || rejQty < 0) {
+        setApproveFormError(`Số lượng nhập cho "${item.product_name}" không hợp lệ (không được âm).`)
+        return
+      }
+
+      const insp = selectedCase.inspections?.find((i) => i.return_item_id === item.id)
+      const recQty = insp ? insp.received_quantity : ((item as any).received_quantity ?? 0)
+
+      if (appQty + rejQty !== recQty) {
+        setApproveFormError(
+          `Sản phẩm "${item.product_name}": Tổng số lượng duyệt (${appQty}) và từ chối (${rejQty}) phải bằng đúng số lượng thực nhận (${recQty}).`
+        )
+        return
+      }
+
+      if (recQty === 0 && appQty > 0) {
+        setApproveFormError(`Sản phẩm "${item.product_name}" có số lượng thực nhận là 0, số lượng duyệt bắt buộc phải bằng 0.`)
+        return
+      }
+
+      if (appQty > recQty) {
+        setApproveFormError(`Sản phẩm "${item.product_name}": Số lượng duyệt (${appQty}) không được vượt quá số lượng thực nhận (${recQty}).`)
+        return
+      }
+
+      if (rejQty > 0 && (!appData.rejection_reason || !appData.rejection_reason.trim())) {
+        setApproveFormError(`Vui lòng nêu rõ lý do từ chối cho ${rejQty} sản phẩm "${item.product_name}".`)
+        return
+      }
+
+      totalApproved += appQty
+      itemsPayload.push({
+        return_item_id: item.id,
+        approved_quantity: appQty,
+        rejected_quantity: rejQty,
+        rejection_reason: rejQty > 0 ? appData.rejection_reason.trim() : undefined,
+      })
+    }
+
+    if (totalApproved === 0) {
+      setApproveFormError('Tổng số lượng sản phẩm được duyệt bằng 0. Nếu không chấp nhận hoàn hàng, Quản lý kho bắt buộc phải sử dụng chức năng "Từ chối ca hoàn".')
+      return
+    }
+
     setActionLoading(true)
     setActionError('')
     try {
-      const itemsPayload = (selectedCase.items || []).map((item) => {
-        const insp = selectedCase.inspections?.find((i) => i.return_item_id === item.id)
-        const recQty = insp ? insp.received_quantity : ((item as any).received_quantity ?? item.requested_quantity ?? 0)
-        const accQty = insp ? insp.accepted_quantity : (item.accepted_quantity ?? recQty)
-        const rejQty = insp ? insp.rejected_quantity : (item.rejected_quantity ?? Math.max(0, recQty - accQty))
-        const rejReason = rejQty > 0 ? (insp?.damage_description || insp?.inspection_note || 'Không đạt điều kiện hoàn tiền') : undefined
-        return {
-          return_item_id: item.id,
-          approved_quantity: accQty,
-          rejected_quantity: rejQty,
-          rejection_reason: rejReason,
-        }
-      })
-
       await api(`/warehouse/me/returns/${selectedCase.case_code}/approve`, {
         method: 'POST',
         body: JSON.stringify({
           items: itemsPayload,
-          manager_note: 'Quản lý kho phê duyệt ca hoàn sau khi đối chiếu biên bản kiểm tra.',
+          manager_note: managerApproveNote.trim() || 'Quản lý kho phê duyệt ca hoàn sau khi đối chiếu số lượng thực nhận.',
         }),
       })
       setActionSuccess('Đã phê duyệt ca hoàn thành công! Ca hoàn đã chuyển sang trạng thái chờ hoàn tiền.')
+      setShowApproveModal(false)
       await openCaseDetail(selectedCase.case_code)
       await fetchCases()
     } catch (err: any) {
-      setActionError(err?.message || 'Lỗi khi phê duyệt ca hoàn.')
+      setApproveFormError(err?.message || 'Lỗi khi phê duyệt ca hoàn.')
     } finally {
       setActionLoading(false)
     }
@@ -1206,7 +1283,7 @@ export function WarehouseReturnsPage() {
                 {selectedCase.status === 'WAITING_MANAGER_APPROVAL' && (
                   <button
                     type="button"
-                    onClick={handleApproveCase}
+                    onClick={openApproveModal}
                     disabled={actionLoading}
                     style={{
                       padding: '8px 18px',
@@ -1401,6 +1478,276 @@ export function WarehouseReturnsPage() {
                 }}
               >
                 Gửi yêu cầu
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PHÊ DUYỆT CA HOÀN (QUẢN LÝ NHẬP RÕ RÀNG SỐ LƯỢNG) */}
+      {showApproveModal && selectedCase && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(3px)',
+            zIndex: 1100,
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            padding: 20,
+          }}
+        >
+          <div
+            style={{
+              background: '#fff',
+              width: '100%',
+              maxWidth: 780,
+              maxHeight: '90vh',
+              borderRadius: 16,
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
+            }}
+          >
+            <div
+              style={{
+                padding: '16px 20px',
+                background: '#047857',
+                color: '#fff',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <CheckCircle2 size={18} />
+                <span>Phê Duyệt Số Lượng Hoàn Hàng (Quản Lý Kho)</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowApproveModal(false)}
+                style={{ background: 'none', border: 'none', color: '#a7f3d0', cursor: 'pointer' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ padding: 20, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div style={{ padding: '10px 14px', background: '#ecfdf5', borderRadius: 8, border: '1px solid #a7f3d0', fontSize: 13, color: '#065f46' }}>
+                <strong>Quy định phê duyệt:</strong> Quản lý kho bắt buộc phải nhập rõ ràng <strong>Số lượng duyệt</strong> và <strong>Số lượng từ chối</strong> cho từng mặt hàng dựa trên số lượng thực nhận từ kiểm định. Tổng SL duyệt + SL từ chối phải bằng đúng SL thực nhận.
+              </div>
+
+              {approveFormError && (
+                <div
+                  style={{
+                    padding: '10px 14px',
+                    background: '#fef2f2',
+                    border: '1px solid #fecaca',
+                    borderRadius: 8,
+                    color: '#b91c1c',
+                    fontSize: 13,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <AlertCircle size={16} />
+                  <span>{approveFormError}</span>
+                </div>
+              )}
+
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
+                    <th style={{ padding: '8px 10px', fontWeight: 600, color: '#475569' }}>Sản phẩm</th>
+                    <th style={{ padding: '8px 10px', fontWeight: 600, color: '#475569', textAlign: 'center' }}>SL yêu cầu</th>
+                    <th style={{ padding: '8px 10px', fontWeight: 600, color: '#475569', textAlign: 'center' }}>SL thực nhận</th>
+                    <th style={{ padding: '8px 10px', fontWeight: 600, color: '#047857', textAlign: 'center' }}>SL duyệt hoàn</th>
+                    <th style={{ padding: '8px 10px', fontWeight: 600, color: '#b91c1c', textAlign: 'center' }}>SL từ chối</th>
+                    <th style={{ padding: '8px 10px', fontWeight: 600, color: '#475569' }}>Lý do từ chối</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedCase.items.map((item) => {
+                    const insp = selectedCase.inspections?.find((i) => i.return_item_id === item.id)
+                    const recQty = insp ? insp.received_quantity : ((item as any).received_quantity ?? 0)
+                    const appData = approvalItems[item.id] || { approved_quantity: '', rejected_quantity: '', rejection_reason: '' }
+
+                    return (
+                      <tr key={item.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '10px' }}>
+                          <div style={{ fontWeight: 600, color: '#0f172a' }}>{item.product_name}</div>
+                          {item.product_sku && (
+                            <div style={{ fontSize: 11, color: '#64748b' }}>SKU: {item.product_sku}</div>
+                          )}
+                        </td>
+                        <td style={{ padding: '10px', textAlign: 'center', color: '#64748b' }}>
+                          {item.requested_quantity}
+                        </td>
+                        <td style={{ padding: '10px', textAlign: 'center', fontWeight: 700, color: '#0284c7' }}>
+                          {recQty}
+                        </td>
+                        <td style={{ padding: '10px', textAlign: 'center' }}>
+                          <input
+                            type="number"
+                            min="0"
+                            max={recQty}
+                            value={appData.approved_quantity}
+                            onChange={(e) => {
+                              const val = e.target.value === '' ? '' : Math.max(0, parseInt(e.target.value) || 0)
+                              setApprovalItems((prev) => ({
+                                ...prev,
+                                [item.id]: {
+                                  ...prev[item.id],
+                                  approved_quantity: val,
+                                  rejected_quantity: typeof val === 'number' ? Math.max(0, recQty - val) : '',
+                                },
+                              }))
+                            }}
+                            placeholder="0"
+                            style={{
+                              width: '70px',
+                              padding: '6px 8px',
+                              textAlign: 'center',
+                              borderRadius: 6,
+                              border: '1px solid #a7f3d0',
+                              background: '#f0fdf4',
+                              fontWeight: 700,
+                              color: '#047857',
+                            }}
+                          />
+                        </td>
+                        <td style={{ padding: '10px', textAlign: 'center' }}>
+                          <input
+                            type="number"
+                            min="0"
+                            max={recQty}
+                            value={appData.rejected_quantity}
+                            onChange={(e) => {
+                              const val = e.target.value === '' ? '' : Math.max(0, parseInt(e.target.value) || 0)
+                              setApprovalItems((prev) => ({
+                                ...prev,
+                                [item.id]: {
+                                  ...prev[item.id],
+                                  rejected_quantity: val,
+                                  approved_quantity: typeof val === 'number' ? Math.max(0, recQty - val) : '',
+                                },
+                              }))
+                            }}
+                            placeholder="0"
+                            style={{
+                              width: '70px',
+                              padding: '6px 8px',
+                              textAlign: 'center',
+                              borderRadius: 6,
+                              border: '1px solid #fecaca',
+                              background: '#fef2f2',
+                              fontWeight: 700,
+                              color: '#b91c1c',
+                            }}
+                          />
+                        </td>
+                        <td style={{ padding: '10px' }}>
+                          <input
+                            type="text"
+                            value={appData.rejection_reason}
+                            disabled={!appData.rejected_quantity || Number(appData.rejected_quantity) <= 0}
+                            onChange={(e) => {
+                              const reason = e.target.value
+                              setApprovalItems((prev) => ({
+                                ...prev,
+                                [item.id]: {
+                                  ...prev[item.id],
+                                  rejection_reason: reason,
+                                },
+                              }))
+                            }}
+                            placeholder={Number(appData.rejected_quantity) > 0 ? 'Nhập lý do từ chối...' : 'Không từ chối'}
+                            style={{
+                              width: '100%',
+                              padding: '6px 10px',
+                              borderRadius: 6,
+                              border: '1px solid #cbd5e1',
+                              fontSize: 12,
+                              background: Number(appData.rejected_quantity) > 0 ? '#fff' : '#f8fafc',
+                            }}
+                          />
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 6 }}>
+                  Ghi chú của Quản lý kho (Tùy chọn):
+                </label>
+                <textarea
+                  rows={2}
+                  value={managerApproveNote}
+                  onChange={(e) => setManagerApproveNote(e.target.value)}
+                  placeholder="Nhập ghi chú phê duyệt hoặc lưu ý đặc biệt..."
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: 8,
+                    border: '1px solid #cbd5e1',
+                    fontSize: 13,
+                    resize: 'vertical',
+                  }}
+                />
+              </div>
+            </div>
+
+            <div
+              style={{
+                padding: '14px 20px',
+                background: '#f8fafc',
+                borderTop: '1px solid #e2e8f0',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: 10,
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setShowApproveModal(false)}
+                disabled={actionLoading}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 8,
+                  background: '#fff',
+                  border: '1px solid #cbd5e1',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                onClick={submitManagerApproval}
+                disabled={actionLoading}
+                style={{
+                  padding: '8px 20px',
+                  borderRadius: 8,
+                  background: '#047857',
+                  color: '#fff',
+                  border: 'none',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                {actionLoading ? 'Đang xử lý...' : 'Xác nhận phê duyệt'}
               </button>
             </div>
           </div>
