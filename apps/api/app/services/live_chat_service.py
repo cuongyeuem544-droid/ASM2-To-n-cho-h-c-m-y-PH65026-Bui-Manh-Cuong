@@ -47,6 +47,9 @@ class LiveChatConnectionManager:
                 del self.staff_connections[staff_id]
         logger.info(f"[LiveChat] Staff {staff_id} disconnected")
 
+    def is_staff_online(self, staff_id: int) -> bool:
+        return bool(self.staff_connections.get(staff_id))
+
     def is_any_staff_online(self) -> bool:
         """Kiểm tra thực tế xem có bất kỳ nhân viên nào đang online (có active socket) không."""
         return any(len(sockets) > 0 for sockets in self.staff_connections.values())

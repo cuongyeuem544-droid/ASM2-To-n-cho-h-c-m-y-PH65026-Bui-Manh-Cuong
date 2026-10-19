@@ -48,6 +48,11 @@ class LiveChatSession(Base):
         cascade="all, delete-orphan",
         order_by="LiveChatMessage.created_at.asc()",
     )
+    attachments = relationship(
+        "LiveChatAttachment",
+        back_populates="session",
+        cascade="all, delete-orphan",
+    )
 
 
 class LiveChatMessage(Base):
@@ -151,3 +156,31 @@ class AIChatAttachment(Base):
     # Relationships
     conversation = relationship("AIChatConversation", back_populates="attachments")
     user = relationship("User", foreign_keys=[user_id])
+
+
+class LiveChatAttachment(Base):
+    __tablename__ = "live_chat_attachments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    attachment_code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("live_chat_sessions.id", ondelete="CASCADE"), index=True
+    )
+    message_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("live_chat_messages.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    original_filename: Mapped[str] = mapped_column(String(255))
+    stored_filename: Mapped[str] = mapped_column(String(255))
+    file_path: Mapped[str] = mapped_column(String(1000))
+    mime_type: Mapped[str] = mapped_column(String(100))
+    file_size: Mapped[int] = mapped_column(Integer)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+    # Relationships
+    session = relationship("LiveChatSession", back_populates="attachments")
+    message = relationship("LiveChatMessage")
+    uploader = relationship("User", foreign_keys=[user_id])
+

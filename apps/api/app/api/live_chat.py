@@ -32,7 +32,7 @@ from app.api.deps import get_current_user, get_optional_current_user
 from app.core.config import settings
 from app.core.security import decode_token
 from app.db.session import SessionLocal, get_db
-from app.models import LiveChatMessage, LiveChatSession, User
+from app.models import LiveChatAttachment, LiveChatMessage, LiveChatSession, User
 from app.models.enums import UserRole
 from app.services.live_chat_service import chat_manager
 
@@ -41,6 +41,37 @@ router = APIRouter(prefix="/live-chat", tags=["Live Chat Người Thật H4CARE"
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def authenticate_user_token(token_str: str, db: Session) -> User | None:
+    """
+    Xác thực JWT access token nghiêm ngặt:
+    - Kiểm tra chữ ký và hạn dùng.
+    - Bắt buộc type == 'access'.
+    - Bắt buộc người dùng tồn tại và is_active == True.
+    - Bắt buộc token_version trong payload bằng User.token_version.
+    """
+    if not token_str or not str(token_str).strip():
+        return None
+    try:
+        payload = decode_token(str(token_str).strip(), "access")
+        if payload.get("type") != "access":
+            return None
+        user_id = int(payload.get("sub", 0))
+        if not user_id:
+            return None
+        user = db.get(User, user_id)
+        if not user or not user.is_active:
+            return None
+        token_ver = payload.get("token_version")
+        if token_ver is None:
+            return None
+        if getattr(user, "token_version", 1) != token_ver:
+            return None
+        return user
+    except Exception:
+        return None
+
 
 
 CHAT_UPLOAD_DIR = settings.storage_root / "uploads" / "chat"
@@ -56,6 +87,10 @@ class InitSessionRequest(BaseModel):
     subject: Optional[str] = Field(default=None, max_length=255)
     initial_context: Optional[str] = Field(default=None, max_length=5000)
     shared_ai_history: bool = Field(default=True)
+    lat: Optional[float] = Field(default=None, description="Vĩ độ của khách hàng")
+    lng: Optional[float] = Field(default=None, description="Kinh độ của khách hàng")
+    address: Optional[str] = Field(default=None, max_length=500, description="Địa chỉ nhận hàng của khách")
+    city: Optional[str] = Field(default=None, max_length=100, description="Tỉnh/Thành phố của khách")
 
 
 class SendMessageRequest(BaseModel):
@@ -167,6 +202,117 @@ def verify_session_access(
 
 # ===================== ENDPOINTS KHÁCH HÀNG =====================
 
+def find_nearest_warehouse_staff(
+    db: Session,
+    customer_lat: Optional[float] = None,
+    customer_lng: Optional[float] = None,
+    customer_city: Optional[str] = None,
+    current_user: Optional[User] = None,
+) -> tuple[Optional[User], Optional[Any]]:
+    """
+    Tự động tìm nhân viên tại chi nhánh kho gần nhất với vị trí khách hàng.
+    Ưu tiên:
+    1. Nhân viên thuộc kho gần nhất đang trực tuyến (online trên chat WebSocket).
+    2. Nhân viên thuộc kho gần nhất đang hoạt động.
+    """
+    from app.models import CustomerAddress, Order, Warehouse
+    from app.services.geo_service import calculate_haversine_distance
+
+    target_lat = customer_lat
+    target_lng = customer_lng
+    target_city = customer_city
+
+    if (target_lat is None or target_lng is None) and current_user:
+        addr = db.scalar(
+            select(CustomerAddress)
+            .where(CustomerAddress.user_id == current_user.id)
+            .order_by(CustomerAddress.is_default.desc(), CustomerAddress.id.desc())
+        )
+        if addr:
+            if addr.latitude is not None and addr.longitude is not None:
+                target_lat = float(addr.latitude)
+                target_lng = float(addr.longitude)
+            if not target_city:
+                target_city = addr.city
+
+        if target_lat is None or target_lng is None:
+            last_order = db.scalar(
+                select(Order)
+                .where(Order.user_id == current_user.id)
+                .order_by(Order.created_at.desc())
+            )
+            if last_order:
+                if last_order.lat is not None and last_order.lng is not None:
+                    target_lat = float(last_order.lat)
+                    target_lng = float(last_order.lng)
+                if not target_city:
+                    target_city = last_order.shipping_city
+
+    warehouses = db.scalars(
+        select(Warehouse).where(Warehouse.is_active.is_(True))
+    ).all()
+    if not warehouses:
+        return None, None
+
+    if target_lat is not None and target_lng is not None:
+        sorted_warehouses = []
+        for wh in warehouses:
+            if wh.lat is not None and wh.lng is not None:
+                dist = calculate_haversine_distance(target_lat, target_lng, wh.lat, wh.lng)
+            else:
+                dist = 99999.0
+            sorted_warehouses.append((dist, wh))
+        sorted_warehouses.sort(key=lambda x: x[0])
+        ordered_whs = [w[1] for w in sorted_warehouses]
+    elif target_city:
+        norm_city = target_city.lower()
+        same_city_whs = [
+            w for w in warehouses
+            if (w.province and (norm_city in w.province.lower() or w.province.lower() in norm_city))
+            or (w.address and norm_city in w.address.lower())
+        ]
+        other_whs = [w for w in warehouses if w not in same_city_whs]
+        ordered_whs = same_city_whs + other_whs
+    else:
+        return None, None
+
+    valid_roles = [UserRole.WAREHOUSE_STAFF, UserRole.WAREHOUSE_MANAGER, UserRole.PHARMACIST]
+
+    # Vòng 1: Nhân viên online tại kho gần nhất
+    for wh in ordered_whs:
+        staff_list = db.scalars(
+            select(User).where(
+                User.warehouse_id == wh.id,
+                User.role.in_(valid_roles),
+                User.is_active.is_(True),
+            )
+        ).all()
+        online_staff = [s for s in staff_list if chat_manager.is_staff_online(s.id)]
+        if online_staff:
+            return online_staff[0], wh
+
+    # Vòng 2: Nhân viên active bất kỳ tại kho gần nhất
+    for wh in ordered_whs:
+        staff_list = db.scalars(
+            select(User).where(
+                User.warehouse_id == wh.id,
+                User.role.in_(valid_roles),
+                User.is_active.is_(True),
+            )
+        ).all()
+        if staff_list:
+            return staff_list[0], wh
+
+    # Fallback: Bất kỳ nhân viên nào online trên toàn hệ thống
+    for u_id in chat_manager.staff_connections.keys():
+        u = db.get(User, u_id)
+        if u and u.is_active and u.role in valid_roles:
+            wh = db.get(Warehouse, u.warehouse_id) if u.warehouse_id else None
+            return u, wh
+
+    return None, None
+
+
 @router.get("/staff-status")
 def check_staff_status():
     """Kiểm tra thực tế trạng thái online của đội ngũ nhân viên tư vấn."""
@@ -238,6 +384,18 @@ async def create_or_resume_session(
 
     context_str = payload.initial_context if payload.shared_ai_history else None
 
+    # Tự động tìm và điều phối đến nhân viên kho gần nhất với vị trí khách hàng
+    assigned_staff, nearest_wh = find_nearest_warehouse_staff(
+        db=db,
+        customer_lat=payload.lat,
+        customer_lng=payload.lng,
+        customer_city=payload.city,
+        current_user=current_user,
+    )
+
+    initial_status = "WAITING"
+    assigned_staff_id = assigned_staff.id if assigned_staff else None
+
     new_session = LiveChatSession(
         session_code=session_code,
         customer_id=current_user.id if current_user else None,
@@ -245,7 +403,8 @@ async def create_or_resume_session(
         customer_email=customer_email,
         customer_phone=customer_phone,
         guest_session_token=guest_token,
-        status="WAITING",
+        assigned_staff_id=assigned_staff_id,
+        status=initial_status,
         subject=payload.subject or "Tư vấn sức khỏe & đơn thuốc",
         initial_context=context_str,
         created_at=utcnow(),
@@ -260,7 +419,11 @@ async def create_or_resume_session(
         "Xin chào quý khách! Hệ thống đã kết nối bạn tới kênh **Tư vấn trực tiếp H4CARE**.\n\n"
         "Nhân viên tư vấn đang được thông báo để tiếp nhận cuộc trò chuyện. Quý khách vui lòng gửi câu hỏi hoặc mô tả triệu chứng/đơn thuốc tại đây nhé!"
     )
-    if not chat_manager.is_any_staff_online():
+    if assigned_staff:
+        staff_title = get_role_title(assigned_staff)
+        wh_suffix = f" tại **{nearest_wh.name}**" if nearest_wh else ""
+        welcome_msg += f"\n\n📍 Cuộc trò chuyện đã được tự động kết nối tới **{staff_title} {assigned_staff.full_name}**{wh_suffix} (kho gần nhất với vị trí của bạn)."
+    elif not chat_manager.is_any_staff_online():
         welcome_msg += (
             "\n\n*⚠️ Hiện tại không có nhân viên trực tuyến (khung giờ trực: 08:00 - 21:00). "
             "Quý khách vui lòng để lại lời nhắn cùng số điện thoại, nhân viên H4CARE sẽ liên hệ lại ngay khi vào ca.*"
@@ -269,7 +432,7 @@ async def create_or_resume_session(
     sys_msg = LiveChatMessage(
         session_id=new_session.id,
         sender_type="SYSTEM",
-        sender_id=None,
+        sender_id=assigned_staff.id if assigned_staff else None,
         sender_name="H4CARE System",
         sender_role_title="Hệ thống",
         content=welcome_msg,
@@ -300,9 +463,22 @@ async def create_or_resume_session(
             "session_code": new_session.session_code,
             "customer_name": new_session.customer_name,
             "subject": new_session.subject,
+            "assigned_staff_id": new_session.assigned_staff_id,
             "created_at": new_session.created_at.isoformat(),
         },
     )
+    if assigned_staff:
+        await chat_manager.broadcast_to_session(
+            session_code=new_session.session_code,
+            message_data={
+                "type": "SESSION_CLAIMED",
+                "session_code": new_session.session_code,
+                "assigned_staff_id": assigned_staff.id,
+                "assigned_staff_name": assigned_staff.full_name,
+                "assigned_staff_title": get_role_title(assigned_staff),
+            },
+            assigned_staff_id=assigned_staff.id,
+        )
 
     return _build_session_detail(new_session)
 
@@ -553,6 +729,13 @@ async def claim_session(
     if session.status == "CLOSED":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Phiên trò chuyện đã kết thúc")
 
+    # Chống giành phiên đang do nhân viên khác phụ trách (trừ ADMIN)
+    if session.assigned_staff_id and session.assigned_staff_id != staff_user.id and staff_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cuộc trò chuyện này đang được nhân viên khác phụ trách. Bạn không thể giành phiên.",
+        )
+
     session.assigned_staff_id = staff_user.id
     session.status = "ACTIVE"
     session.updated_at = utcnow()
@@ -603,9 +786,23 @@ async def assign_session(
     if not session:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy phiên trò chuyện")
 
+    # Kiểm tra quyền: Chỉ nhân viên đang phụ trách hoặc ADMIN mới được chuyển phiên
+    if session.assigned_staff_id and session.assigned_staff_id != staff_user.id and staff_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bạn không có quyền chuyển cuộc trò chuyện đang do nhân viên khác phụ trách.",
+        )
+
     target_staff = db.get(User, payload.staff_id)
     if not target_staff or not target_staff.is_active:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nhân viên được chọn không hợp lệ")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nhân viên được chọn không tồn tại hoặc đã bị vô hiệu hóa.")
+
+    valid_staff_roles = {UserRole.ADMIN, UserRole.PHARMACIST, UserRole.WAREHOUSE_MANAGER, UserRole.WAREHOUSE_STAFF}
+    if target_staff.role not in valid_staff_roles:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tài khoản đích không có vai trò nhân viên hợp lệ để tiếp nhận phiên tư vấn.",
+        )
 
     session.assigned_staff_id = target_staff.id
     session.status = "ACTIVE"
@@ -655,6 +852,13 @@ async def send_message_as_staff(
     )
     if not session:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy phiên trò chuyện")
+
+    # Kiểm tra quyền: Chỉ nhân viên đang phụ trách hoặc ADMIN mới được gửi tin nhắn
+    if session.assigned_staff_id and session.assigned_staff_id != staff_user.id and staff_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bạn không có quyền gửi tin nhắn trong cuộc trò chuyện do nhân viên khác đang phụ trách.",
+        )
 
     # Tự động gán nếu chưa ai nhận
     if not session.assigned_staff_id:
@@ -720,6 +924,13 @@ async def close_session_by_staff(
     )
     if not session:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy phiên trò chuyện")
+
+    # Kiểm tra quyền: Chỉ nhân viên đang phụ trách hoặc ADMIN mới được đóng phiên
+    if session.assigned_staff_id and session.assigned_staff_id != staff_user.id and staff_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bạn không có quyền đóng cuộc trò chuyện do nhân viên khác đang phụ trách.",
+        )
 
     session.status = "CLOSED"
     session.closed_at = utcnow()
@@ -798,11 +1009,66 @@ async def upload_chat_attachment(
 ):
     """
     Upload hình ảnh đính kèm trong tin nhắn chat.
-    Bảo vệ theo phiên (chống upload ẩn danh không thuộc phiên chat nào):
-    - Kiểm tra chặt chẽ mime type, kích thước tối đa 5MB.
-    - Yêu cầu session_code của phiên chat đang mở (hoặc quyền nhân viên hỗ trợ).
-    - Xác minh quyền sở hữu: nhân viên hỗ trợ, khách hàng sở hữu phiên, hoặc khách vãng lai có guest_session_token.
+    Bảo vệ theo phiên nghiêm ngặt (chống upload ẩn danh không thuộc phiên chat nào):
+    - Bắt buộc phải có session_code.
+    - Xác minh quyền sở hữu phiên TRƯỚC KHI lưu file:
+      + Nhân viên có quyền live chat hợp lệ.
+      + Khách hàng đã đăng nhập sở hữu phiên.
+      + Khách vãng lai có guest_session_token chính xác.
+    - Không cho upload vào phiên đã CLOSED.
+    - Lưu metadata vào LiveChatAttachment ngay khi upload.
+    - Không tạo file rác hay bản ghi database nếu request bị từ chối.
     """
+    # 1. Bắt buộc có session_code
+    if not session_code or not str(session_code).strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Vui lòng cung cấp session_code của phiên chat để tải tệp đính kèm.",
+        )
+
+    clean_session_code = str(session_code).strip()
+    session = db.scalar(
+        select(LiveChatSession).where(LiveChatSession.session_code == clean_session_code)
+    )
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Không tìm thấy phiên chat tương ứng.",
+        )
+
+    if session.status == "CLOSED":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Phiên chat đã kết thúc, không thể tải tệp lên.",
+        )
+
+    # 2. Xác minh quyền sở hữu TRƯỚC KHI đọc nội dung tệp
+    eff_guest_token = guest_token or x_chat_guest_token
+    is_staff = (
+        current_user is not None
+        and current_user.role in [UserRole.ADMIN, UserRole.PHARMACIST, UserRole.WAREHOUSE_MANAGER, UserRole.WAREHOUSE_STAFF]
+    )
+
+    authorized = False
+    if is_staff:
+        authorized = True
+    elif session.customer_id is not None:
+        # Phiên của khách có tài khoản: bắt buộc current_user là chính khách hàng sở hữu phiên
+        if current_user and current_user.id == session.customer_id:
+            authorized = True
+    else:
+        # Phiên của khách vãng lai: bắt buộc có guest_session_token khớp
+        if session.guest_session_token and eff_guest_token:
+            if secrets.compare_digest(str(eff_guest_token).strip(), session.guest_session_token.strip()):
+                authorized = True
+
+    if not authorized:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bạn không có quyền tải tệp lên phiên chat này.",
+        )
+
+    # 3. Kiểm tra định dạng và kích thước tệp
     content_type = (file.content_type or "").lower().strip()
     if content_type not in ALLOWED_MIME_TYPES:
         raise HTTPException(
@@ -811,55 +1077,54 @@ async def upload_chat_attachment(
         )
 
     content = await file.read()
+    if len(content) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tệp ảnh tải lên có dung lượng rỗng (0 bytes).",
+        )
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Dung lượng tệp quá lớn. Giới hạn tối đa là 5MB.",
         )
 
-    # Kiểm tra quyền truy cập theo phiên chat
-    is_staff = (
-        current_user is not None
-        and current_user.role in [UserRole.ADMIN, UserRole.PHARMACIST, UserRole.WAREHOUSE_MANAGER, UserRole.WAREHOUSE_STAFF]
-    )
-
-    if session_code:
-        session = db.scalar(
-            select(LiveChatSession).where(LiveChatSession.session_code == session_code)
-        )
-        if not session:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy phiên chat tương ứng")
-
-        if session.status == "CLOSED":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Phiên chat đã kết thúc, không thể tải tệp lên")
-
-        eff_guest_token = guest_token or x_chat_guest_token
-        verify_session_access(session, current_user, eff_guest_token)
-    elif not is_staff:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Vui lòng cung cấp session_code của phiên chat để tải tệp đính kèm",
-        )
-
+    # 4. Lưu tệp lên đĩa và tạo bản ghi LiveChatAttachment
     ext = ALLOWED_MIME_TYPES[content_type]
-    filename = f"chat_{datetime.now(UTC).strftime('%y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}{ext}"
-    target_path = CHAT_UPLOAD_DIR / filename
+    file_uuid = uuid.uuid4().hex
+    attachment_code = f"att-live-{file_uuid[:12]}"
+    stored_filename = f"{attachment_code}{ext}"
+    target_path = CHAT_UPLOAD_DIR / stored_filename
 
     with open(target_path, "wb") as f:
         f.write(content)
 
-    url = f"/api/v1/live-chat/attachments/{filename}"
+    attachment = LiveChatAttachment(
+        attachment_code=attachment_code,
+        session_id=session.id,
+        user_id=current_user.id if current_user else None,
+        original_filename=file.filename or stored_filename,
+        stored_filename=stored_filename,
+        file_path=str(target_path),
+        mime_type=content_type,
+        file_size=len(content),
+    )
+    db.add(attachment)
+    db.commit()
+    db.refresh(attachment)
+
+    url = f"/api/v1/live-chat/attachments/{attachment.attachment_code}"
     return {
         "url": url,
+        "attachment_code": attachment.attachment_code,
         "content_type": content_type,
-        "filename": filename,
+        "filename": stored_filename,
         "size": len(content),
     }
 
 
-@router.get("/attachments/{filename}")
+@router.get("/attachments/{identifier}")
 def serve_chat_attachment(
-    filename: str,
+    identifier: str,
     token: Optional[str] = Query(None),
     x_chat_guest_token: Optional[str] = Header(None),
     current_user: Optional[User] = Depends(get_optional_current_user),
@@ -867,46 +1132,88 @@ def serve_chat_attachment(
 ):
     """
     Phục vụ file ảnh đính kèm an toàn.
-    Chống path traversal và xác thực quyền truy cập theo phiên chat.
+    - Tìm kiếm bản ghi attachment trong database bằng mã hoặc tên tệp chính xác (không dùng LIKE hay tiền tố).
+    - Từ chối mọi file không có bản ghi sở hữu (tuyệt đối không fail-open).
+    - Xác minh quyền truy cập theo phiên chat:
+      + Nhân viên hợp lệ hoặc khách hàng sở hữu phiên (JWT kiểm tra token_version).
+      + Khách vãng lai sở hữu phiên (so sánh secrets.compare_digest với guest_session_token).
+    - Chặn path traversal.
     """
     # Chống path traversal
-    safe_name = os.path.basename(filename)
-    file_path = CHAT_UPLOAD_DIR / safe_name
-    if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy tệp ảnh")
+    safe_name = os.path.basename(identifier).strip()
+    if not safe_name:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mã tệp đính kèm không hợp lệ")
 
-    # Tìm tin nhắn và phiên chat sở hữu tệp này
-    msg = db.scalar(
-        select(LiveChatMessage).where(LiveChatMessage.attachment_url.like(f"%{safe_name}"))
+    # Tìm chính xác theo attachment_code hoặc stored_filename
+    att = db.scalar(
+        select(LiveChatAttachment).where(
+            or_(
+                LiveChatAttachment.attachment_code == safe_name,
+                LiveChatAttachment.stored_filename == safe_name,
+            )
+        )
     )
+    if not att:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Không tìm thấy bản ghi tệp đính kèm trong hệ thống",
+        )
 
-    if msg and msg.session:
-        session = msg.session
-        effective_guest_token = token or x_chat_guest_token
+    session = att.session
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Không tìm thấy phiên chat liên kết với tệp đính kèm",
+        )
 
-        auth_user = current_user
-        if not auth_user and token:
-            try:
-                payload = decode_token(token, "access")
-                uid = int(payload.get("sub", 0))
-                if uid:
-                    auth_user = db.get(User, uid)
-            except Exception:
-                pass
+    file_path = Path(att.file_path)
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tệp ảnh vật lý không tồn tại hoặc đã bị xóa",
+        )
 
-        verify_session_access(session, auth_user, effective_guest_token)
-    else:
-        # Nếu tệp mới tải lên chưa gắn vào tin nhắn: chỉ cho phép nếu có token nhân viên hoặc token phiên hợp lệ
-        if not current_user and not token and not x_chat_guest_token:
+    # Xác thực quyền truy cập
+    authorized = False
+    effective_token = str(token).strip() if token else ""
+    effective_guest_token = str(x_chat_guest_token).strip() if x_chat_guest_token else ""
+
+    # 1. Thử xác thực với tài khoản người dùng
+    actor = current_user
+    if not actor and effective_token:
+        actor = authenticate_user_token(effective_token, db)
+
+    if actor:
+        # Nhân viên hỗ trợ hợp lệ
+        if actor.role in [UserRole.ADMIN, UserRole.PHARMACIST, UserRole.WAREHOUSE_MANAGER, UserRole.WAREHOUSE_STAFF]:
+            authorized = True
+        # Khách hàng sở hữu phiên
+        elif session.customer_id is not None and actor.id == session.customer_id:
+            authorized = True
+        else:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Bạn không có quyền truy cập vào tệp đính kèm này",
             )
+    else:
+        # Khách vãng lai: kiểm tra guest_session_token
+        guest_candidate = effective_guest_token or effective_token
+        if session.customer_id is None and session.guest_session_token and guest_candidate:
+            if secrets.compare_digest(guest_candidate, session.guest_session_token):
+                authorized = True
+
+    if not authorized:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bạn không có quyền truy cập vào tệp đính kèm này",
+        )
 
     return FileResponse(
         str(file_path),
+        media_type=att.mime_type,
         headers={
             "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'",
             "Cache-Control": "private, max-age=3600",
         },
     )
@@ -922,10 +1229,11 @@ async def client_websocket(
 ):
     """
     WebSocket kết nối realtime cho khách hàng.
-    Bắt buộc xác thực danh tính (JWT của khách hàng hoặc guest_session_token của khách vãng lai)
-    trước khi accept kết nối.
+    Bắt buộc xác thực hoàn toàn trước khi gọi accept hoặc đưa vào chat_manager.
+    - 4401: thiếu token.
+    - 4404: không tìm thấy phiên.
+    - 4403: token sai, hết hạn, bị thu hồi, sai chủ phiên hoặc phiên đã đóng.
     """
-    # 1. Bắt buộc phải truyền token
     if not token or not str(token).strip():
         await websocket.close(code=4401)
         return
@@ -947,20 +1255,14 @@ async def client_websocket(
 
         authenticated = False
 
-        # 2. Thử xác thực nếu là khách hàng đã đăng nhập (JWT access token)
-        try:
-            payload = decode_token(raw_token, "access")
-            user_id = int(payload.get("sub", 0))
-            if user_id and session.customer_id and user_id == session.customer_id:
-                user = db.get(User, user_id)
-                if user and user.is_active:
-                    authenticated = True
-        except Exception:
-            pass
-
-        # 3. Thử xác thực nếu là khách vãng lai (guest_session_token)
-        if not authenticated and session.guest_session_token:
-            if secrets.compare_digest(raw_token, session.guest_session_token):
+        if session.customer_id is not None:
+            # Phiên của khách đăng nhập: chỉ được kết nối bằng JWT access token của đúng session.customer_id
+            user = authenticate_user_token(raw_token, db)
+            if user and user.id == session.customer_id:
+                authenticated = True
+        else:
+            # Phiên khách vãng lai: chỉ được kết nối khi guest_session_token khớp chính xác
+            if session.guest_session_token and secrets.compare_digest(raw_token, session.guest_session_token):
                 authenticated = True
 
         if not authenticated:
@@ -969,11 +1271,10 @@ async def client_websocket(
     finally:
         db.close()
 
-    # 4. Khi đã xác thực an toàn mới accept và đưa vào chat_manager
+    # Đăng ký kết nối an toàn vào connection manager
     await chat_manager.connect_client(session_code, websocket)
     try:
         while True:
-            # Nhận heartbeat ping từ client
             data = await websocket.receive_text()
             try:
                 msg_json = json.loads(data)
@@ -993,25 +1294,14 @@ async def staff_websocket(
     token: Optional[str] = Query(None),
 ):
     """WebSocket kết nối realtime cho nhân viên / Admin."""
-    if not token:
+    if not token or not str(token).strip():
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    try:
-        payload = decode_token(token, "access")
-        user_id = int(payload.get("sub", 0))
-        if not user_id:
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-            return
-    except Exception:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
-
-    # Xác minh tài khoản nhân viên/admin thực tế và đang hoạt động
     db = SessionLocal()
     try:
-        user = db.get(User, user_id)
-        if not user or not user.is_active:
+        user = authenticate_user_token(str(token).strip(), db)
+        if not user:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
         if user.role not in [UserRole.ADMIN, UserRole.PHARMACIST, UserRole.WAREHOUSE_MANAGER, UserRole.WAREHOUSE_STAFF]:
@@ -1020,7 +1310,7 @@ async def staff_websocket(
     finally:
         db.close()
 
-    await chat_manager.connect_staff(user_id, websocket)
+    await chat_manager.connect_staff(user.id, websocket)
     try:
         while True:
             data = await websocket.receive_text()
@@ -1031,11 +1321,12 @@ async def staff_websocket(
             except Exception:
                 pass
     except WebSocketDisconnect:
-        chat_manager.disconnect_staff(user_id, websocket)
+        chat_manager.disconnect_staff(user.id, websocket)
         await chat_manager.broadcast_staff_status_to_all()
     except Exception:
-        chat_manager.disconnect_staff(user_id, websocket)
+        chat_manager.disconnect_staff(user.id, websocket)
         await chat_manager.broadcast_staff_status_to_all()
+
 
 
 # ===================== INTERNAL BUILDERS =====================

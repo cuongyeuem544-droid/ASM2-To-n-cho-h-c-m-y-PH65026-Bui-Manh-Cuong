@@ -717,6 +717,7 @@ def get_my_orders(
     limit: Optional[int] = Query(None, ge=1, le=50),
     offset: Optional[int] = Query(None, ge=0),
     status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None, description="Tìm kiếm theo mã đơn hàng hoặc tên thuốc"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -726,23 +727,38 @@ def get_my_orders(
     - Truy vấn: Order.user_id == current_user.id.
     - Không nhận user_id, số điện thoại hoặc email từ query parameters để chống IDOR.
     - Sắp xếp đơn mới nhất trước (created_at.desc(), id.desc()).
-    - Phân trang page/page_size hoặc offset/limit, trả tổng số đơn.
+    - Phân trang page/page_size hoặc offset/limit, trả tổng số đơn và tổng số trang.
+    - Hỗ trợ tìm kiếm theo mã đơn hoặc tên sản phẩm thuốc trong đơn.
     - Eager load Order.items để tránh N+1 query.
     """
-    eff_limit = limit if limit is not None else page_size
-    eff_offset = offset if offset is not None else (page - 1) * eff_limit
+    import math
+
+    eff_limit = limit if isinstance(limit, int) else (page_size if isinstance(page_size, int) else 10)
+    eff_offset = offset if isinstance(offset, int) else (((page if isinstance(page, int) else 1) - 1) * eff_limit)
 
     stmt = (
         select(Order)
         .options(selectinload(Order.items))
         .where(Order.user_id == current_user.id)
     )
-    if status and status.strip() and status.strip().upper() != "ALL":
-        stmt = stmt.where(Order.order_status == status.strip().upper())
+    count_stmt = select(func.count(Order.id)).where(Order.user_id == current_user.id)
 
-    total = db.scalar(
-        select(func.count(Order.id)).where(Order.user_id == current_user.id)
-    ) or 0
+    if isinstance(status, str) and status.strip() and status.strip().upper() != "ALL":
+        st_clean = status.strip().upper()
+        stmt = stmt.where(Order.order_status == st_clean)
+        count_stmt = count_stmt.where(Order.order_status == st_clean)
+
+    if isinstance(search, str) and search.strip():
+        term = f"%{search.strip()}%"
+        search_filter = or_(
+            Order.order_code.ilike(term),
+            Order.items.any(OrderItem.product_name.ilike(term)),
+        )
+        stmt = stmt.where(search_filter)
+        count_stmt = count_stmt.where(search_filter)
+
+    total = db.scalar(count_stmt) or 0
+    total_pages = max(1, math.ceil(total / eff_limit)) if eff_limit > 0 else 1
 
     orders = db.scalars(
         stmt.order_by(desc(Order.id)).offset(eff_offset).limit(eff_limit)
@@ -787,6 +803,7 @@ def get_my_orders(
         "total": total,
         "page": page,
         "page_size": eff_limit,
+        "total_pages": total_pages,
     }
 
 

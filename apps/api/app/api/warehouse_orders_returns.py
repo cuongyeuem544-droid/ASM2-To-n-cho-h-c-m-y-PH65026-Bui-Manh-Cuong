@@ -95,7 +95,7 @@ class AssignReturnStaffPayload(BaseModel):
 class ReceiveReturnPayload(BaseModel):
     carrier_name: Optional[str] = None
     tracking_code: Optional[str] = None
-    package_condition: str = Field(default="SEALED")
+    package_condition: Optional[str] = None
     note: Optional[str] = None
 
 
@@ -546,7 +546,7 @@ def get_manager_return_case_detail(
     for it in case.items:
         oit = order_items_map.get(it.order_item_id)
         net_unit = RefundCalculationService.calculate_net_unit_price(order, oit) if (order and oit) else (it.unit_price_at_purchase or Decimal("0.0"))
-        line_proposed = net_unit * Decimal(str(it.accepted_quantity if (it.accepted_quantity is not None and it.accepted_quantity > 0) else (it.requested_quantity or 0)))
+        line_proposed = net_unit * Decimal(str(it.accepted_quantity or 0))
         items_refund_proposed += line_proposed
 
         items_data.append({
@@ -638,6 +638,7 @@ def get_manager_return_case_detail(
                 "seal_intact": insp.seal_intact,
                 "batch_matched": insp.batch_matched,
                 "expiry_matched": insp.expiry_matched,
+                "storage_condition_ok": insp.storage_condition_ok,
                 "suggested_action": insp.suggested_action,
                 "inspector_name": insp.inspector.full_name if insp.inspector else None,
                 "inspection_note": insp.inspection_note,
@@ -979,11 +980,7 @@ def get_staff_assigned_returns(
             selectinload(WarehouseReturnCase.items),
         )
         .where(
-            or_(
-                WarehouseReturnCase.assigned_staff_id == staff_user.id,
-                # Nếu chưa gán cụ thể cho ai, cho phép nhân viên trong kho xem để tiếp nhận
-                WarehouseReturnCase.assigned_staff_id.is_(None),
-            )
+            WarehouseReturnCase.assigned_staff_id == staff_user.id,
         )
         .order_by(desc(WarehouseReturnCase.id))
     ).all()

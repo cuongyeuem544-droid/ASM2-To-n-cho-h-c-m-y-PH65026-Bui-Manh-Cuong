@@ -315,12 +315,31 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
       const existingGuestToken = localStorage.getItem(STORAGE_GUEST_TOKEN_KEY);
       if (existingGuestToken) headers["X-Chat-Guest-Token"] = existingGuestToken;
 
+      let userLat: number | undefined = undefined;
+      let userLng: number | undefined = undefined;
+      let userCity: string | undefined = undefined;
+
+      try {
+        const savedLoc = localStorage.getItem("pharmatrust_user_location");
+        if (savedLoc) {
+          const parsed = JSON.parse(savedLoc);
+          if (parsed.lat && parsed.lng) {
+            userLat = Number(parsed.lat);
+            userLng = Number(parsed.lng);
+          }
+          if (parsed.city) userCity = parsed.city;
+        }
+      } catch {}
+
       const bodyPayload = {
         customer_name: customerName.trim() || undefined,
         customer_phone: customerPhone.trim() || undefined,
         subject: handoffContext ? "Tư vấn triệu chứng từ Trợ lý AI" : "Tư vấn trực tiếp với nhân viên",
         initial_context: includeAiContext && handoffContext ? handoffContext : undefined,
         shared_ai_history: includeAiContext && !!handoffContext,
+        lat: userLat,
+        lng: userLng,
+        city: userCity,
       };
 
       const res = await fetch(`${API_BASE}/api/v1/live-chat/sessions`, {

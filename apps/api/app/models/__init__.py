@@ -81,6 +81,7 @@ from app.models.security_and_promotions import (
 from app.models.chat_models import (
     LiveChatSession,
     LiveChatMessage,
+    LiveChatAttachment,
     AIChatConversation,
     AIChatMessage,
     AIChatAttachment,

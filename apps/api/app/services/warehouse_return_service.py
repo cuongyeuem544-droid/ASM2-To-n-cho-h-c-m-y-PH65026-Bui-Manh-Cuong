@@ -562,11 +562,40 @@ class WarehouseReturnService:
                 detail="Chỉ có thể nộp kết quả khi ca hoàn đang ở trạng thái 'Đang kiểm tra' (INSPECTING).",
             )
 
-        if not case.inspections:
+        if not case.inspections or len(case.inspections) < len(case.items):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Vui lòng lập biên bản kiểm tra từng sản phẩm trước khi nộp lên Quản lý.",
+                detail=f"Vui lòng lập biên bản kiểm tra đầy đủ cho tất cả {len(case.items)} sản phẩm trước khi nộp lên Quản lý.",
             )
+
+        # Kiểm tra tính toàn vẹn và độ tin cậy của biên bản kiểm định dược phẩm
+        inspected_item_ids = {insp.return_item_id for insp in case.inspections}
+        for it in case.items:
+            if it.id not in inspected_item_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Sản phẩm '{it.product_name}' chưa được kiểm định. Tuyệt đối không được nộp hồ sơ thiếu dữ liệu kiểm định.",
+                )
+
+        for insp in case.inspections:
+            if (
+                not insp.package_condition
+                or insp.seal_intact is None
+                or insp.batch_matched is None
+                or insp.expiry_matched is None
+                or insp.storage_condition_ok is None
+                or not insp.suggested_action
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Biên bản kiểm định thiếu chỉ số an toàn bắt buộc (bao bì, niêm phong, khớp lô, hạn dùng, bảo quản hoặc đề xuất xử lý). Không thể coi là đạt khi thiếu dữ liệu.",
+                )
+            if not (insp.seal_intact and insp.batch_matched and insp.expiry_matched and insp.storage_condition_ok):
+                if (insp.suggested_action or "").upper() == "RESTOCK":
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Sản phẩm không đạt đầy đủ tiêu chuẩn an toàn dược phẩm. Nghiêm cấm đề xuất hoặc nhập lại kho bán (RESTOCK).",
+                    )
 
         old_status = case.status
         case.status = ReturnStatus.WAITING_MANAGER_APPROVAL.value
@@ -726,10 +755,15 @@ class WarehouseReturnService:
                     db.add(ret_item)
                     total_accepted += acc_q
         else:
-            # Mặc định duyệt theo đề xuất của nhân viên kho hoặc toàn bộ số lượng nhận
+            # Duyệt theo đề xuất từ biên bản kiểm định của nhân viên kho (tuyệt đối không tự nâng số lượng)
             for ret_item in case.items:
                 insp = next((i for i in case.inspections if i.return_item_id == ret_item.id), None)
-                acc_q = insp.accepted_quantity if insp else ret_item.requested_quantity
+                if not insp or insp.accepted_quantity is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Sản phẩm '{ret_item.product_name}' chưa có biên bản kiểm định hợp lệ. Không thể tự động phê duyệt.",
+                    )
+                acc_q = int(insp.accepted_quantity or 0)
                 ret_item.approved_quantity = acc_q
                 ret_item.rejected_quantity = max(0, ret_item.requested_quantity - acc_q)
                 net_unit = RefundCalculationService.calculate_net_unit_price(case.return_request.order, ret_item.order_item)

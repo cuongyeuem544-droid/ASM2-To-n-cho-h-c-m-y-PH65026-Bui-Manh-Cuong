@@ -642,7 +642,12 @@ class ReturnService:
                 )
 
             raw_accepted = insp.get("accepted_quantity")
-            accepted_qty = int(raw_accepted) if raw_accepted is not None else item.requested_quantity
+            if raw_accepted is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Vui lòng chỉ định số lượng chấp nhận (accepted_quantity) cho sản phẩm '{item.product_name}'.",
+                )
+            accepted_qty = int(raw_accepted)
             rejected_qty = int(insp.get("rejected_quantity", 0))
 
             if accepted_qty < 0 or rejected_qty < 0:
@@ -855,28 +860,26 @@ class ReturnService:
         if quantity <= 0:
             return
 
-        # Tìm allocation lô ban đầu của order_item này
+        # Truy xuất thông tin lô xuất kho gốc từ OrderItemBatchAllocation
         alloc = db.scalar(
             select(OrderItemBatchAllocation).where(
                 OrderItemBatchAllocation.order_item_id == order_item_id
             ).order_by(OrderItemBatchAllocation.id.desc())
         )
 
-        batch_id = alloc.batch_id if alloc else None
+        if not alloc or not alloc.batch_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Không tìm thấy thông tin lô xuất kho gốc cho sản phẩm (order_item #{order_item_id}). Không thể nhập lại kho bán được để đảm bảo toàn vẹn dữ liệu thuốc.",
+            )
 
-        # Nếu không tìm thấy lô ban đầu, tìm lô ACTIVE gần nhất của sản phẩm
-        if not batch_id:
-            order_item = db.get(OrderItem, order_item_id)
-            if order_item and order_item.product_id:
-                sku = db.scalar(select(ProductSku).where(ProductSku.canonical_product_id == order_item.product_id))
-                if sku:
-                    batch = db.scalar(select(InventoryBatch).where(InventoryBatch.sku_id == sku.id, InventoryBatch.status == "ACTIVE"))
-                    if batch:
-                        batch_id = batch.id
-
-        if not batch_id:
-            logger.warning(f"[RETURN RESTOCK] Không tìm thấy batch_id cho order_item {order_item_id}, bỏ qua cập nhật lô cụ thể.")
-            return
+        batch_id = alloc.batch_id
+        batch = db.scalar(select(InventoryBatch).where(InventoryBatch.id == batch_id))
+        if not batch:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Lô xuất gốc #{batch_id} không tồn tại trong hệ thống.",
+            )
 
         batch_stock = db.scalar(
             select(WarehouseBatchStock).where(
