@@ -491,9 +491,18 @@ class WarehouseReturnService:
                     detail="Thiếu trường kiểm định bắt buộc: suggested_action",
                 )
 
+            # Kiểm tra bắt buộc có lý do từ chối nếu có sản phẩm bị loại bỏ
+            if rej_qty > 0:
+                rej_reason = insp_in.get("rejection_reason") or insp_in.get("damage_description")
+                if not rej_reason or not str(rej_reason).strip():
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=f"Thiếu trường kiểm định bắt buộc: rejection_reason cho sản phẩm #{item_id} khi có số lượng từ chối ({rej_qty}).",
+                    )
+
             # Quy tắc an toàn dược phẩm: Bất kỳ tiêu chí an toàn nào không đạt -> CẤM RESTOCK
             if not (seal_intact and batch_matched and expiry_matched and storage_condition_ok):
-                if sug_action == "RESTOCK":
+                if sug_action in ["RESTOCK", "SELLABLE_STOCK"]:
                     failed_criteria = []
                     if not seal_intact:
                         failed_criteria.append("tem niêm phong không nguyên vẹn (seal_intact=False)")
@@ -726,9 +735,18 @@ class WarehouseReturnService:
             )
 
         item_map = {item.id: item for item in case_items}
-        submitted_ids = {app.get("return_item_id") for app in items_approval}
+        submitted_list = [app.get("return_item_id") for app in items_approval]
 
-        # 1. Kiểm tra không có sản phẩm lạ
+        # 1. Kiểm tra không có sản phẩm bị trùng lặp
+        if len(submitted_list) != len(set(submitted_list)):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Danh sách phê duyệt chứa sản phẩm bị trùng lặp return_item_id.",
+            )
+
+        submitted_ids = set(submitted_list)
+
+        # 2. Kiểm tra không có sản phẩm lạ
         for it_id in submitted_ids:
             if it_id not in item_map:
                 raise HTTPException(
@@ -736,7 +754,7 @@ class WarehouseReturnService:
                     detail=f"Sản phẩm #{it_id} không thuộc ca hoàn {case.case_code}.",
                 )
 
-        # 2. Kiểm tra bắt buộc có mặt đầy đủ mọi sản phẩm của ca hoàn
+        # 3. Kiểm tra bắt buộc có mặt đầy đủ 100% mọi sản phẩm của ca hoàn
         for it_id, it in item_map.items():
             if it_id not in submitted_ids:
                 raise HTTPException(
@@ -770,16 +788,33 @@ class WarehouseReturnService:
                     detail=f"Số lượng duyệt ({acc_q}) và từ chối ({rej_q}) của '{ret_item.product_name}' không được âm.",
                 )
 
-            if acc_q > ret_item.requested_quantity:
+            rec_q = ret_item.received_quantity
+            if rec_q is None or rec_q == 0:
+                insp_match = next((ins for ins in case.inspections if ins.return_item_id == ret_item.id), None)
+                if insp_match and insp_match.received_quantity is not None:
+                    rec_q = insp_match.received_quantity
+                elif rec_q is None:
+                    rec_q = 0
+
+            # Ràng buộc: Nếu received_quantity == 0 thì approved_quantity bắt buộc = 0
+            if rec_q == 0 and acc_q > 0:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Số lượng duyệt ({acc_q}) không thể vượt quá số lượng yêu cầu hoàn ({ret_item.requested_quantity}) cho sản phẩm '{ret_item.product_name}'.",
+                    detail=f"Sản phẩm '{ret_item.product_name}' có số lượng thực nhận là 0, số lượng duyệt (approved_quantity) bắt buộc phải bằng 0.",
                 )
 
-            if ret_item.received_quantity is not None and ret_item.received_quantity > 0 and acc_q > ret_item.received_quantity:
+            # Ràng buộc: approved_quantity <= received_quantity
+            if acc_q > rec_q:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Số lượng duyệt ({acc_q}) không thể vượt quá số lượng thực nhận ({ret_item.received_quantity}) cho sản phẩm '{ret_item.product_name}'.",
+                    detail=f"Số lượng duyệt ({acc_q}) không thể vượt quá số lượng thực nhận ({rec_q}) cho sản phẩm '{ret_item.product_name}'.",
+                )
+
+            # Ràng buộc: approved_quantity + rejected_quantity == received_quantity
+            if acc_q + rej_q != rec_q:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Tổng số lượng duyệt ({acc_q}) và từ chối ({rej_q}) phải bằng đúng số lượng thực nhận ({rec_q}) của sản phẩm '{ret_item.product_name}'.",
                 )
 
             if rej_q > 0:

@@ -118,10 +118,7 @@ def seed_demo_data(db: Session, force: bool = False):
             u.full_name = name
             u.phone = phone
             u.is_active = True
-            if is_demo and is_dev:
-                u.password_hash = hash_password(pwd)
-                if hasattr(u, "must_change_password"):
-                    u.must_change_password = False
+            # Không tự động ghi đè mật khẩu của tài khoản đã tồn tại, bảo toàn dữ liệu người dùng
         if role == UserRole.CUSTOMER:
             buyer_user = u
 

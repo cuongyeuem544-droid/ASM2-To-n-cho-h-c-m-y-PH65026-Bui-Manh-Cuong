@@ -67,6 +67,7 @@ interface InspectionDraftItem {
   damage_description: string
   suggested_action: string
   inspection_note: string
+  rejection_reason?: string
 }
 
 interface StaffReturnCase {
@@ -292,16 +293,20 @@ export function StaffReturnsPage() {
 
       const payloadItems = Object.entries(inspectionDrafts).map(([itemIdStr, draft]) => ({
         return_item_id: Number(itemIdStr),
-        received_quantity: draft.received_quantity,
-        accepted_quantity: draft.accepted_quantity,
-        rejected_quantity: draft.rejected_quantity,
+        condition: draft.package_condition,
         package_condition: draft.package_condition,
         seal_intact: Boolean(draft.seal_intact),
         batch_matched: Boolean(draft.batch_matched),
         expiry_matched: Boolean(draft.expiry_matched),
         storage_condition_ok: Boolean(draft.storage_condition_ok),
-        damage_description: draft.damage_description,
+        received_quantity: draft.received_quantity,
+        accepted_quantity: draft.accepted_quantity,
+        rejected_quantity: draft.rejected_quantity,
+        restock_destination: draft.suggested_action,
         suggested_action: draft.suggested_action,
+        restock_quantity: draft.suggested_action === 'RESTOCK' ? draft.accepted_quantity : 0,
+        rejection_reason: draft.rejection_reason || draft.damage_description || (draft.rejected_quantity > 0 ? (draft.inspection_note || 'Hàng không đủ điều kiện nhập kho') : null),
+        damage_description: draft.damage_description,
         inspection_note: draft.inspection_note,
       }))
 

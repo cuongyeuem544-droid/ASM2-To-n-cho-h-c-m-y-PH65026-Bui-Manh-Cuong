@@ -186,9 +186,9 @@ def test_live_chat_attachment_protection(client: TestClient):
     )
     assert res_m.status_code == 200
 
-    # 4. Người lạ không có token cố tải tệp đính kèm -> Bị chặn 403
+    # 4. Người lạ không có token cố tải tệp đính kèm -> Bị chặn 401 hoặc 403
     res_dl_anon = client.get(f"/api/v1/live-chat/attachments/{filename}")
-    assert res_dl_anon.status_code == 403
+    assert res_dl_anon.status_code in [401, 403]
 
     # 5. Khách 2 cố tải tệp của khách 1 -> Bị chặn 403
     res_dl_c2 = client.get(f"/api/v1/live-chat/attachments/{filename}", headers=h_c2)

@@ -60,6 +60,7 @@ from app.models.returns import (
     ReturnEvidence,
     ReturnItem,
     ReturnRequest,
+    ReturnRestockAllocation,
     ReturnStatusHistory,
 )
 from app.models.chatbot import (

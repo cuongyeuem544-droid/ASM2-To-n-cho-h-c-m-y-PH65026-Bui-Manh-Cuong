@@ -23,9 +23,11 @@ from app.models import (
     Refund,
     StockMovement,
     StockReservation,
+    User,
     Warehouse,
     WarehouseBatchStock,
 )
+from app.models.enums import UserRole
 
 logger = logging.getLogger("pharmatrust.fulfillment")
 
@@ -500,6 +502,15 @@ class FulfillmentRoutingService:
         if not ff:
             raise HTTPException(status_code=404, detail="Không tìm thấy kiện hàng")
 
+        # Kiểm tra quyền sở hữu kho nếu user_id được cung cấp (chống can thiệp chéo kho)
+        if user_id:
+            user = db.get(User, user_id)
+            if user and user.role != UserRole.ADMIN and user.warehouse_id != ff.warehouse_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Kiện hàng {ff.fulfillment_code} thuộc kho #{ff.warehouse_id}. Bạn không có quyền thao tác trên kho này.",
+                )
+
         old_status = ff.status
 
         # Chuẩn hóa tên trạng thái (hỗ trợ PICKING và PICKED tương đương)
@@ -513,6 +524,7 @@ class FulfillmentRoutingService:
         elif curr_status == "PICKING":
             curr_status = "PICKED"
 
+        # Nếu đã ở trạng thái mục tiêu (gọi lặp lại / idempotent), trả về ngay mà không làm gì
         if target_status == curr_status:
             return ff
 
@@ -535,14 +547,10 @@ class FulfillmentRoutingService:
                 detail=f"Không thể chuyển trạng thái kiện hàng từ '{old_status}' sang '{new_status}'. Quy trình bắt buộc tuần tự: Lấy hàng (PICKED) -> Đóng gói (PACKED) -> Xuất kho (SHIPPED) -> Giao hàng (DELIVERED).",
             )
 
-        ff.status = target_status
         now = utcnow()
 
-        if target_status == "PICKED" and not ff.picked_at:
-            ff.picked_at = now
-        elif target_status == "PACKED" and not ff.packed_at:
-            ff.packed_at = now
-        elif target_status == "SHIPPED" and old_status != "SHIPPED":
+        # QUAN TRỌNG: Không gán ff.status = target_status trước khi kiểm định thành công
+        if target_status == "SHIPPED":
             # 1. Tiền kiểm định kiện hàng phải có sản phẩm
             if not ff.items:
                 raise HTTPException(
@@ -550,112 +558,153 @@ class FulfillmentRoutingService:
                     detail=f"Kiện hàng {ff.fulfillment_code} không có bất kỳ sản phẩm nào để xuất kho.",
                 )
 
-            # 2. Lấy tất cả phân bổ lô của kiện hàng này (hỗ trợ cả fulfillment_item_id lẫn order_item_id)
-            allocations = db.scalars(
-                select(OrderItemBatchAllocation).where(
-                    OrderItemBatchAllocation.fulfillment_item_id.in_([it.id for it in ff.items])
-                )
-            ).all()
+            # 2. Tiền kiểm định 100% FulfillmentItem phải có phân bổ lô hợp lệ và đúng số lượng
+            all_allocations: list[OrderItemBatchAllocation] = []
+            for item in ff.items:
+                item_allocs = db.scalars(
+                    select(OrderItemBatchAllocation).where(
+                        OrderItemBatchAllocation.fulfillment_item_id == item.id,
+                        OrderItemBatchAllocation.warehouse_id == ff.warehouse_id,
+                    )
+                ).all()
 
-            if not allocations:
-                order_item_ids = [it.order_item_id for it in ff.items if it.order_item_id]
-                if order_item_ids:
-                    allocations = db.scalars(
+                if not item_allocs and item.order_item_id:
+                    item_allocs = db.scalars(
                         select(OrderItemBatchAllocation).where(
-                            OrderItemBatchAllocation.order_item_id.in_(order_item_ids),
+                            OrderItemBatchAllocation.order_item_id == item.order_item_id,
                             OrderItemBatchAllocation.warehouse_id == ff.warehouse_id,
                         )
                     ).all()
 
-            if not allocations:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Không tìm thấy thông tin phân bổ lô xuất kho cho kiện hàng {ff.fulfillment_code}. Không thể thực hiện xuất kho.",
-                )
-
-            # 3. Tiền kiểm định 100% dữ liệu trước khi thay đổi bất kỳ tồn kho nào
-            dispatch_plans = []
-            for alloc in allocations:
-                # Kiểm tra kho của lô phân bổ phải khớp đúng với kho xuất hàng của kiện
-                if alloc.warehouse_id != ff.warehouse_id:
+                total_allocated = sum(a.allocated_quantity for a in item_allocs) if item_allocs else 0
+                if not item_allocs or total_allocated != item.quantity:
+                    prod_name = item.order_item.product_name if item.order_item else f"ID {item.id}"
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Lô xuất #{alloc.batch_id} thuộc kho #{alloc.warehouse_id}, không khớp với kho xuất của kiện hàng #{ff.warehouse_id}.",
+                        detail=(
+                            f"Sản phẩm '{prod_name}' trong kiện hàng {ff.fulfillment_code} "
+                            f"chưa được phân bổ đủ lô xuất kho (yêu cầu {item.quantity}, phân bổ {total_allocated}). "
+                            "Không thể thực hiện xuất kho."
+                        ),
                     )
 
-                # Kiểm tra lô tồn tại trong hệ thống
-                batch = db.scalar(select(InventoryBatch).where(InventoryBatch.id == alloc.batch_id))
+                for alloc in item_allocs:
+                    if alloc.warehouse_id != ff.warehouse_id:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Lô xuất #{alloc.batch_id} thuộc kho #{alloc.warehouse_id}, không khớp với kho xuất của kiện hàng #{ff.warehouse_id}.",
+                        )
+
+                all_allocations.extend(item_allocs)
+
+            # Khử trùng lặp allocations nếu có
+            unique_allocs = list({a.id: a for a in all_allocations}.values())
+
+            # 3. Tiền kiểm định theo từng lô (Batch): tồn tại, đúng kho, đủ on_hand, đủ reserved, và có StockReservation hợp lệ
+            batch_demand: dict[int, int] = {}
+            for alloc in unique_allocs:
+                batch_demand[alloc.batch_id] = batch_demand.get(alloc.batch_id, 0) + alloc.allocated_quantity
+
+            batch_plans = []
+            for batch_id, req_qty in batch_demand.items():
+                batch = db.scalar(select(InventoryBatch).where(InventoryBatch.id == batch_id))
                 if not batch:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Lô xuất #{alloc.batch_id} không tồn tại trong hệ thống.",
+                        detail=f"Lô xuất #{batch_id} không tồn tại trong hệ thống.",
                     )
 
-                # Kiểm tra bản ghi tồn kho
                 stock = db.scalar(
                     select(WarehouseBatchStock).where(
-                        WarehouseBatchStock.warehouse_id == alloc.warehouse_id,
-                        WarehouseBatchStock.batch_id == alloc.batch_id,
+                        WarehouseBatchStock.warehouse_id == ff.warehouse_id,
+                        WarehouseBatchStock.batch_id == batch_id,
                     )
                 )
                 if not stock:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Không tìm thấy dữ liệu tồn kho cho lô #{alloc.batch_id} tại kho #{alloc.warehouse_id}.",
+                        detail=f"Không tìm thấy dữ liệu tồn kho cho lô #{batch_id} tại kho #{ff.warehouse_id}.",
                     )
 
-                if stock.quantity_on_hand < alloc.allocated_quantity:
+                if stock.quantity_on_hand < req_qty:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Tồn kho thực tế của lô #{alloc.batch_id} ({stock.quantity_on_hand}) không đủ để xuất ({alloc.allocated_quantity}).",
+                        detail=f"Tồn kho thực tế của lô #{batch_id} ({stock.quantity_on_hand}) không đủ để xuất ({req_qty}).",
                     )
 
-                if stock.quantity_reserved < alloc.allocated_quantity:
+                if stock.quantity_reserved < req_qty:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Số lượng tồn kho giữ chỗ của lô #{alloc.batch_id} ({stock.quantity_reserved}) không đủ ({alloc.allocated_quantity}) để xuất kho.",
+                        detail=f"Số lượng tồn kho giữ chỗ của lô #{batch_id} ({stock.quantity_reserved}) không đủ ({req_qty}) để xuất kho.",
                     )
 
-                # Kiểm tra phiếu giữ chỗ tồn kho
-                res = db.scalar(
+                reservations = db.scalars(
                     select(StockReservation).where(
                         StockReservation.order_id == ff.order_id,
-                        StockReservation.batch_id == alloc.batch_id,
-                        StockReservation.warehouse_id == alloc.warehouse_id,
+                        StockReservation.batch_id == batch_id,
+                        StockReservation.warehouse_id == ff.warehouse_id,
                         StockReservation.status == "RESERVED",
                     )
-                )
-                if not res:
+                ).all()
+
+                total_res_qty = sum(r.quantity for r in reservations)
+                if total_res_qty < req_qty:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Không tìm thấy phiếu giữ chỗ tồn kho hợp lệ (RESERVED) cho lô #{alloc.batch_id} thuộc đơn hàng #{ff.order_id}.",
+                        detail=f"Không tìm thấy đủ phiếu giữ chỗ tồn kho hợp lệ (RESERVED) cho lô #{batch_id} thuộc đơn hàng #{ff.order_id} (yêu cầu {req_qty}, có {total_res_qty}).",
                     )
 
-                dispatch_plans.append({
-                    "alloc": alloc,
+                batch_plans.append({
+                    "batch_id": batch_id,
+                    "batch": batch,
                     "stock": stock,
-                    "res": res,
+                    "req_qty": req_qty,
+                    "reservations": reservations,
                 })
 
-            # 4. Thực thi nguyên tử (atomic) sau khi vượt qua 100% tiền kiểm định
+            # 4. Khi 100% tiền kiểm định đạt yêu cầu: Thực thi nguyên tử trong transaction
+            ff.status = "SHIPPED"
             ff.shipped_at = now
-            for plan in dispatch_plans:
-                alloc = plan["alloc"]
+
+            for plan in batch_plans:
                 stock = plan["stock"]
-                res = plan["res"]
+                req_qty = plan["req_qty"]
+                reservations = plan["reservations"]
+                b_id = plan["batch_id"]
 
-                stock.quantity_reserved -= alloc.allocated_quantity
-                stock.quantity_on_hand -= alloc.allocated_quantity
-                res.status = "FULFILLED"
+                stock.quantity_reserved -= req_qty
+                stock.quantity_on_hand -= req_qty
 
-                # Ghi nhận Thẻ kho (StockMovement - DISPATCH)
+                # Cập nhật StockReservation -> FULFILLED
+                rem_to_fulfill = req_qty
+                for r in reservations:
+                    if rem_to_fulfill <= 0:
+                        break
+                    if r.quantity <= rem_to_fulfill:
+                        r.status = "FULFILLED"
+                        rem_to_fulfill -= r.quantity
+                    else:
+                        r.quantity -= rem_to_fulfill
+                        db.add(
+                            StockReservation(
+                                order_id=r.order_id,
+                                batch_id=r.batch_id,
+                                warehouse_id=r.warehouse_id,
+                                quantity=rem_to_fulfill,
+                                status="FULFILLED",
+                                expires_at=r.expires_at,
+                            )
+                        )
+                        rem_to_fulfill = 0
+
+                # Sinh duy nhất 1 bản ghi Thẻ kho (StockMovement - DISPATCH) cho mỗi lô
                 db.add(
                     StockMovement(
-                        movement_code=f"MOV-DISP-{ff.id}-{alloc.batch_id}-{uuid.uuid4().hex[:6].upper()}",
+                        movement_code=f"MOV-DISP-{ff.id}-{b_id}-{uuid.uuid4().hex[:6].upper()}",
                         movement_type="DISPATCH",
-                        warehouse_id=alloc.warehouse_id,
-                        batch_id=alloc.batch_id,
-                        quantity=-alloc.allocated_quantity,
+                        warehouse_id=ff.warehouse_id,
+                        batch_id=b_id,
+                        quantity=-req_qty,
                         balance_after=stock.quantity_on_hand,
                         reference_type="ORDER_FULFILLMENT",
                         reference_id=ff.fulfillment_code,
@@ -664,10 +713,20 @@ class FulfillmentRoutingService:
                     )
                 )
 
-        elif new_status == "DELIVERED":
-            ff.delivered_at = now
-
-        elif new_status == "CANCELLED" and old_status != "CANCELLED":
+        elif target_status == "PICKED":
+            ff.status = "PICKED"
+            if not ff.picked_at:
+                ff.picked_at = now
+        elif target_status == "PACKED":
+            ff.status = "PACKED"
+            if not ff.packed_at:
+                ff.packed_at = now
+        elif target_status == "DELIVERED":
+            ff.status = "DELIVERED"
+            if not ff.delivered_at:
+                ff.delivered_at = now
+        elif target_status == "CANCELLED":
+            ff.status = "CANCELLED"
             # Hoàn trả lại tồn kho khả dụng nếu kiện bị hủy trước khi SHIPPED
             if old_status not in ["SHIPPED", "DELIVERED"]:
                 allocations = db.scalars(

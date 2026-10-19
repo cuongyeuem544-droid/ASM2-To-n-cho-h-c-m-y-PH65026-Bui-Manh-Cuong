@@ -135,6 +135,37 @@ export default function AccountPage() {
   const [orderSearchTerm, setOrderSearchTerm] = useState<string>("");
   const [orderStatusFilter, setOrderStatusFilter] = useState<string>("ALL");
 
+  // Tab navigation state
+  type AccountTab = "profile" | "addresses" | "prescriptions" | "orders" | "returns";
+  const [activeTab, setActiveTab] = useState<AccountTab>("profile");
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      if (typeof window === "undefined") return;
+      const rawHash = window.location.hash.replace("#", "").toLowerCase();
+      if (
+        rawHash === "addresses" ||
+        rawHash === "prescriptions" ||
+        rawHash === "orders" ||
+        rawHash === "returns" ||
+        rawHash === "profile"
+      ) {
+        setActiveTab(rawHash as AccountTab);
+      }
+    };
+
+    handleHashChange();
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
+
+  const handleTabClick = (tab: AccountTab) => {
+    setActiveTab(tab);
+    if (typeof window !== "undefined") {
+      window.history.replaceState(null, "", `#${tab}`);
+    }
+  };
+
   // Load authenticated customer's orders strictly via JWT token with pagination & search
   const reloadOrders = async (
     targetPage: number = orderPage,
@@ -403,7 +434,7 @@ export default function AccountPage() {
     <div className="min-h-screen flex flex-col bg-[#f4f6f9]">
       <Header />
 
-      <main className="flex-1 max-w-5xl w-full mx-auto px-4 py-8 sm:py-10">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10">
         
         {/* Admin Direct Banner for Admin Users */}
         {user.isAdmin && (
@@ -508,23 +539,32 @@ export default function AccountPage() {
         </div>
 
         {/* Dashboard Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
           
           {/* Left Navigation Sidebar */}
-          <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs h-fit space-y-1">
-            <Link
-              href="/account"
-              className="flex items-center justify-between p-3 rounded-xl bg-brand-blue-50 text-brand-blue-700 font-bold text-xs transition-colors"
+          <div className="lg:col-span-1 bg-white rounded-2xl p-4 border border-slate-200 shadow-xs h-fit space-y-1.5 sticky top-24">
+            <button
+              type="button"
+              onClick={() => handleTabClick("profile")}
+              className={`w-full flex items-center justify-between p-3 rounded-xl font-bold text-xs transition-all text-left ${
+                activeTab === "profile"
+                  ? "bg-brand-blue-50 text-brand-blue-700 border border-brand-blue-200/80 shadow-xs"
+                  : "text-slate-700 hover:bg-slate-50 font-medium"
+              }`}
             >
               <div className="flex items-center gap-2.5">
                 <User className="w-4 h-4" />
                 <span>Hồ sơ thành viên</span>
               </div>
-              <ChevronRight className="w-4 h-4" />
-            </Link>
+              <ChevronRight className={`w-4 h-4 ${activeTab === "profile" ? "text-brand-blue-600" : "text-slate-400"}`} />
+            </button>
 
             <button
-              onClick={() => setIsEditingProfile(true)}
+              type="button"
+              onClick={() => {
+                handleTabClick("profile");
+                setIsEditingProfile(true);
+              }}
               className="w-full flex items-center justify-between p-3 rounded-xl text-slate-700 hover:bg-slate-50 font-medium text-xs transition-colors text-left"
             >
               <div className="flex items-center gap-2.5">
@@ -534,16 +574,21 @@ export default function AccountPage() {
               <ChevronRight className="w-4 h-4 text-slate-400" />
             </button>
 
-            <a
-              href="#addresses"
-              className="flex items-center justify-between p-3 rounded-xl text-slate-700 hover:bg-slate-50 font-medium text-xs transition-colors"
+            <button
+              type="button"
+              onClick={() => handleTabClick("addresses")}
+              className={`w-full flex items-center justify-between p-3 rounded-xl font-bold text-xs transition-all text-left ${
+                activeTab === "addresses"
+                  ? "bg-brand-blue-50 text-brand-blue-700 border border-brand-blue-200/80 shadow-xs"
+                  : "text-slate-700 hover:bg-slate-50 font-medium"
+              }`}
             >
               <div className="flex items-center gap-2.5">
                 <MapPin className="w-4 h-4 text-brand-blue-600" />
-                <span className="font-bold text-slate-800">Sổ địa chỉ của tôi</span>
+                <span>Sổ địa chỉ của tôi</span>
               </div>
-              <ChevronRight className="w-4 h-4 text-slate-400" />
-            </a>
+              <ChevronRight className={`w-4 h-4 ${activeTab === "addresses" ? "text-brand-blue-600" : "text-slate-400"}`} />
+            </button>
 
             {user.isAdmin && (
               <button
@@ -559,38 +604,53 @@ export default function AccountPage() {
               </button>
             )}
 
-            <a
-              href="#prescriptions"
-              className="flex items-center justify-between p-3 rounded-xl text-slate-700 hover:bg-slate-50 font-medium text-xs transition-colors"
+            <button
+              type="button"
+              onClick={() => handleTabClick("prescriptions")}
+              className={`w-full flex items-center justify-between p-3 rounded-xl font-bold text-xs transition-all text-left ${
+                activeTab === "prescriptions"
+                  ? "bg-brand-blue-50 text-brand-blue-700 border border-brand-blue-200/80 shadow-xs"
+                  : "text-slate-700 hover:bg-slate-50 font-medium"
+              }`}
             >
               <div className="flex items-center gap-2.5">
                 <HeartPulse className="w-4 h-4 text-slate-500" />
                 <span>Toa thuốc điện tử của tôi</span>
               </div>
-              <ChevronRight className="w-4 h-4 text-slate-400" />
-            </a>
+              <ChevronRight className={`w-4 h-4 ${activeTab === "prescriptions" ? "text-brand-blue-600" : "text-slate-400"}`} />
+            </button>
 
-            <a
-              href="#orders"
-              className="flex items-center justify-between p-3 rounded-xl text-slate-700 hover:bg-slate-50 font-medium text-xs transition-colors"
+            <button
+              type="button"
+              onClick={() => handleTabClick("orders")}
+              className={`w-full flex items-center justify-between p-3 rounded-xl font-bold text-xs transition-all text-left ${
+                activeTab === "orders"
+                  ? "bg-brand-blue-50 text-brand-blue-700 border border-brand-blue-200/80 shadow-xs"
+                  : "text-slate-700 hover:bg-slate-50 font-medium"
+              }`}
             >
               <div className="flex items-center gap-2.5">
                 <Package className="w-4 h-4 text-slate-500" />
-                <span>Lịch sử đơn hàng ({orders.length})</span>
+                <span>Lịch sử đơn hàng ({orderTotal || orders.length})</span>
               </div>
-              <ChevronRight className="w-4 h-4 text-slate-400" />
-            </a>
+              <ChevronRight className={`w-4 h-4 ${activeTab === "orders" ? "text-brand-blue-600" : "text-slate-400"}`} />
+            </button>
 
-            <a
-              href="#returns"
-              className="flex items-center justify-between p-3 rounded-xl text-slate-700 hover:bg-slate-50 font-medium text-xs transition-colors"
+            <button
+              type="button"
+              onClick={() => handleTabClick("returns")}
+              className={`w-full flex items-center justify-between p-3 rounded-xl font-bold text-xs transition-all text-left ${
+                activeTab === "returns"
+                  ? "bg-brand-blue-50 text-brand-blue-700 border border-brand-blue-200/80 shadow-xs"
+                  : "text-slate-700 hover:bg-slate-50 font-medium"
+              }`}
             >
               <div className="flex items-center gap-2.5">
                 <RotateCcw className="w-4 h-4 text-brand-blue-600" />
-                <span className="font-bold text-slate-800">Đổi trả & Hoàn tiền</span>
+                <span>Đổi trả & Hoàn tiền</span>
               </div>
-              <ChevronRight className="w-4 h-4 text-slate-400" />
-            </a>
+              <ChevronRight className={`w-4 h-4 ${activeTab === "returns" ? "text-brand-blue-600" : "text-slate-400"}`} />
+            </button>
 
             <div className="pt-3 mt-2 border-t border-slate-100">
               <button
@@ -598,7 +658,7 @@ export default function AccountPage() {
                   logout();
                   router.push("/login");
                 }}
-                className="w-full flex items-center gap-2.5 p-3 rounded-xl text-rose-600 hover:bg-rose-50 font-bold text-xs transition-colors"
+                className="w-full flex items-center gap-2.5 p-3 rounded-xl text-rose-600 hover:bg-rose-50 font-bold text-xs transition-colors text-left"
               >
                 <LogOut className="w-4 h-4" />
                 <span>Đăng xuất tài khoản</span>
@@ -606,52 +666,155 @@ export default function AccountPage() {
             </div>
           </div>
 
-          {/* Right Main Content */}
-          <div className="md:col-span-2 space-y-6">
+          {/* Right Main Content: Each tab displays ONLY its corresponding panel */}
+          <div className="lg:col-span-3 min-w-0">
             
-            {/* Customer Address Book V2 Section */}
-            <div id="addresses" className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs">
-              <CustomerAddressBook
-                userName={user.fullName}
-                userPhone={user.phone}
-              />
-            </div>
+            {/* TAB 1: Hồ sơ thành viên */}
+            {activeTab === "profile" && (
+              <div id="profile" className="bg-white rounded-2xl p-6 sm:p-8 border border-slate-200 shadow-xs space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 gap-3">
+                  <div>
+                    <h2 className="font-extrabold text-lg text-slate-900 flex items-center gap-2">
+                      <User className="w-5 h-5 text-brand-blue-600" />
+                      <span>Hồ sơ thông tin thành viên</span>
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Quản lý thông tin định danh cá nhân, tài khoản bảo mật và quyền lợi hội viên H4Care
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingProfile(true)}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-brand-blue-600 hover:bg-brand-blue-700 text-white text-xs font-bold transition-all shadow-xs shrink-0 self-start sm:self-auto"
+                  >
+                    <Edit3 className="w-4 h-4" />
+                    <span>Chỉnh sửa thông tin</span>
+                  </button>
+                </div>
 
-            {/* Health Records Section */}
-            <div id="prescriptions" className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs">
-              <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1">
+                    <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Họ và tên</span>
+                    <p className="text-sm font-bold text-slate-900">{user.fullName || "Chưa cập nhật"}</p>
+                  </div>
+                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1">
+                    <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Số điện thoại</span>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-bold text-slate-900">{user.phone || "Chưa cập nhật"}</p>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        Đã xác thực
+                      </span>
+                    </div>
+                  </div>
+                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1">
+                    <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Email liên hệ</span>
+                    <p className="text-sm font-bold text-slate-900">{user.email || "Chưa cập nhật"}</p>
+                  </div>
+                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1">
+                    <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Hạng hội viên</span>
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2.5 py-0.5 rounded-full text-xs border ${tier.badgeClass}`}>
+                        {tier.label}
+                      </span>
+                      <span className="text-xs font-bold text-brand-blue-700">({points} điểm)</span>
+                    </div>
+                  </div>
+                </div>
+
                 <div>
-                  <h2 className="font-extrabold text-base text-slate-900">Toa thuốc điện tử gần nhất</h2>
-                  <p className="text-xs text-slate-500">Lưu trữ đơn thuốc của bạn và gia đình chuẩn GPP</p>
-                </div>
-                <span className="text-xs font-bold text-brand-blue-700 bg-brand-blue-50 px-2.5 py-1 rounded-lg border border-brand-blue-100">
-                  1 Toa thuốc đang dùng
-                </span>
-              </div>
+                  <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-3">Truy cập nhanh danh mục</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleTabClick("addresses")}
+                      className="p-4 rounded-xl border border-slate-200 hover:border-brand-blue-300 hover:bg-brand-blue-50/40 transition-all text-left group"
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <MapPin className="w-5 h-5 text-brand-blue-600" />
+                        <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-brand-blue-600" />
+                      </div>
+                      <p className="font-bold text-xs text-slate-900 group-hover:text-brand-blue-700">Sổ địa chỉ</p>
+                      <p className="text-[11px] text-slate-500">Quản lý địa chỉ giao thuốc tận nơi</p>
+                    </button>
 
-              {/* Sample Prescription Card */}
-              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80 space-y-3">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold text-slate-900">Đơn thuốc: Điều trị cảm cúm & tăng đề kháng</span>
-                  <span className="text-slate-500">Kê ngày: 20/09/2026</span>
+                    <button
+                      type="button"
+                      onClick={() => handleTabClick("orders")}
+                      className="p-4 rounded-xl border border-slate-200 hover:border-brand-blue-300 hover:bg-brand-blue-50/40 transition-all text-left group"
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <Package className="w-5 h-5 text-brand-blue-600" />
+                        <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-brand-blue-600" />
+                      </div>
+                      <p className="font-bold text-xs text-slate-900 group-hover:text-brand-blue-700">Lịch sử đơn hàng</p>
+                      <p className="text-[11px] text-slate-500">{orderTotal || orders.length} đơn hàng đã thực hiện</p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleTabClick("returns")}
+                      className="p-4 rounded-xl border border-slate-200 hover:border-brand-blue-300 hover:bg-brand-blue-50/40 transition-all text-left group"
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <RotateCcw className="w-5 h-5 text-brand-blue-600" />
+                        <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-brand-blue-600" />
+                      </div>
+                      <p className="font-bold text-xs text-slate-900 group-hover:text-brand-blue-700">Đổi trả & Hoàn tiền</p>
+                      <p className="text-[11px] text-slate-500">Xem tiến độ hoàn hàng & hoàn tiền</p>
+                    </button>
+                  </div>
                 </div>
-                <div className="text-xs text-slate-600 space-y-1">
-                  <p>• Paracetamol 500mg (Hộp 50 viên) - Uống sau ăn</p>
-                  <p>• Vitamin C 1000mg Tuýp sủi - 1 viên/ngày</p>
-                </div>
-                <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between text-[11px]">
-                  <span className="text-emerald-700 font-bold flex items-center gap-1">
-                    <ShieldCheck className="w-3.5 h-3.5" /> Dược sĩ tư vấn: DS. Nguyễn Minh Anh
+              </div>
+            )}
+
+            {/* TAB 2: Customer Address Book V2 Section */}
+            {activeTab === "addresses" && (
+              <div id="addresses" className="bg-white rounded-2xl p-6 sm:p-8 border border-slate-200 shadow-xs">
+                <CustomerAddressBook
+                  userName={user.fullName}
+                  userPhone={user.phone}
+                />
+              </div>
+            )}
+
+            {/* TAB 3: Health Records / Prescriptions Section */}
+            {activeTab === "prescriptions" && (
+              <div id="prescriptions" className="bg-white rounded-2xl p-6 sm:p-8 border border-slate-200 shadow-xs">
+                <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
+                  <div>
+                    <h2 className="font-extrabold text-base text-slate-900">Toa thuốc điện tử gần nhất</h2>
+                    <p className="text-xs text-slate-500">Lưu trữ đơn thuốc của bạn và gia đình chuẩn GPP</p>
+                  </div>
+                  <span className="text-xs font-bold text-brand-blue-700 bg-brand-blue-50 px-2.5 py-1 rounded-lg border border-brand-blue-100">
+                    1 Toa thuốc đang dùng
                   </span>
-                  <Link href="/prescription" className="text-brand-blue-600 font-bold hover:underline">
-                    Tư vấn lại trực tuyến
-                  </Link>
+                </div>
+
+                {/* Sample Prescription Card */}
+                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80 space-y-3">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-slate-900">Đơn thuốc: Điều trị cảm cúm & tăng đề kháng</span>
+                    <span className="text-slate-500">Kê ngày: 20/09/2026</span>
+                  </div>
+                  <div className="text-xs text-slate-600 space-y-1">
+                    <p>• Paracetamol 500mg (Hộp 50 viên) - Uống sau ăn</p>
+                    <p>• Vitamin C 1000mg Tuýp sủi - 1 viên/ngày</p>
+                  </div>
+                  <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between text-[11px]">
+                    <span className="text-emerald-700 font-bold flex items-center gap-1">
+                      <ShieldCheck className="w-3.5 h-3.5" /> Dược sĩ tư vấn: DS. Nguyễn Minh Anh
+                    </span>
+                    <Link href="/prescription" className="text-brand-blue-600 font-bold hover:underline">
+                      Tư vấn lại trực tuyến
+                    </Link>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
 
-            {/* Orders Section - Authenticated Customer Orders */}
-            <div id="orders" className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs">
+            {/* TAB 4: Orders Section - Authenticated Customer Orders */}
+            {activeTab === "orders" && (
+              <div id="orders" className="bg-white rounded-2xl p-6 sm:p-8 border border-slate-200 shadow-xs">
               <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
                 <div>
                   <h2 className="font-extrabold text-base text-slate-900">Đơn hàng gần đây</h2>
@@ -889,14 +1052,17 @@ export default function AccountPage() {
                 </div>
               )}
             </div>
+            )}
 
-            {/* Customer Returns & Refunds Section */}
-            <div id="returns" className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs">
-              <CustomerReturnsSection
-                userPhone={user.phone}
-                userName={user.fullName}
-              />
-            </div>
+            {/* TAB 5: Customer Returns & Refunds Section */}
+            {activeTab === "returns" && (
+              <div id="returns" className="bg-white rounded-2xl p-6 sm:p-8 border border-slate-200 shadow-xs">
+                <CustomerReturnsSection
+                  userPhone={user.phone}
+                  userName={user.fullName}
+                />
+              </div>
+            )}
 
           </div>
 

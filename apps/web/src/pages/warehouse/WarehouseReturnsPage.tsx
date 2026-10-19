@@ -365,9 +365,26 @@ export function WarehouseReturnsPage() {
     setActionLoading(true)
     setActionError('')
     try {
+      const itemsPayload = (selectedCase.items || []).map((item) => {
+        const insp = selectedCase.inspections?.find((i) => i.return_item_id === item.id)
+        const recQty = insp ? insp.received_quantity : ((item as any).received_quantity ?? item.requested_quantity ?? 0)
+        const accQty = insp ? insp.accepted_quantity : (item.accepted_quantity ?? recQty)
+        const rejQty = insp ? insp.rejected_quantity : (item.rejected_quantity ?? Math.max(0, recQty - accQty))
+        const rejReason = rejQty > 0 ? (insp?.damage_description || insp?.inspection_note || 'Không đạt điều kiện hoàn tiền') : undefined
+        return {
+          return_item_id: item.id,
+          approved_quantity: accQty,
+          rejected_quantity: rejQty,
+          rejection_reason: rejReason,
+        }
+      })
+
       await api(`/warehouse/me/returns/${selectedCase.case_code}/approve`, {
         method: 'POST',
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          items: itemsPayload,
+          manager_note: 'Quản lý kho phê duyệt ca hoàn sau khi đối chiếu biên bản kiểm tra.',
+        }),
       })
       setActionSuccess('Đã phê duyệt ca hoàn thành công! Ca hoàn đã chuyển sang trạng thái chờ hoàn tiền.')
       await openCaseDetail(selectedCase.case_code)

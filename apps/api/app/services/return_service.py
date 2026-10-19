@@ -917,13 +917,14 @@ class ReturnService:
             note=general_inspection_note or "Dược sĩ hoàn tất kiểm định chất lượng hàng hoàn trả.",
         )
 
-        # Chuyển tiếp luồng tiếp theo: REFUND_PENDING hoặc EXCHANGE_PENDING
+        # Chuyển tiếp luồng tiếp theo:
+        # Kiểm định chỉ ghi nhận mặt kỹ thuật; KHÔNG được tự ý biến thành phê duyệt của Quản lý kho và KHÔNG được kích hoạt hoàn tiền.
         if ret.request_type == ReturnRequestType.EXCHANGE.value:
             next_status = ReturnStatus.EXCHANGE_PENDING.value
             next_note = "Chuyển tiếp: Đang chờ tạo đơn đổi hàng mới."
         else:
-            next_status = ReturnStatus.REFUND_PENDING.value
-            next_note = "Chuyển tiếp: Đang chờ bộ phận Kế toán thực hiện hoàn tiền."
+            next_status = ReturnStatus.WAITING_MANAGER_APPROVAL.value
+            next_note = "Chuyển tiếp: Kiểm định hoàn tất, đang chờ Quản lý kho xem xét và phê duyệt hoàn tiền."
 
         cls._add_status_history(
             db=db,

@@ -7,8 +7,12 @@ from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+_ENV_FILES = (_REPO_ROOT / ".env", _REPO_ROOT / "apps" / "api" / ".env", ".env")
+
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
+    model_config = SettingsConfigDict(env_file=_ENV_FILES, extra="ignore", case_sensitive=False)
 
     app_name: str = "PharmaTrust Data Hub"
     app_env: str = "development"
@@ -85,15 +89,6 @@ class Settings(BaseSettings):
     smtp_ssl: bool = False
     smtp_enabled: bool = True
 
-    @field_validator("database_url", mode="before")
-    @classmethod
-    def resolve_database_url(cls, value):
-        if isinstance(value, str) and value.startswith("sqlite:///./"):
-            repo_root = Path(__file__).resolve().parents[4]
-            db_file = repo_root / value.removeprefix("sqlite:///./")
-            return f"sqlite:///{db_file.as_posix()}"
-        return value
-
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_origins(cls, value):
@@ -106,21 +101,30 @@ class Settings(BaseSettings):
                 return [item.strip() for item in decoded if item.strip()]
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
+
     @field_validator("database_url", mode="after")
     @classmethod
     def canonicalize_sqlite_url(cls, v: str) -> str:
-        if isinstance(v, str) and (v.startswith("sqlite:///./") or v == "sqlite:///pharmatrust.db"):
-            rel_name = v.replace("sqlite:///./", "").replace("sqlite:///", "")
-            # Project root is 5 levels up: config.py -> core -> app -> api -> apps -> repo_root
-            repo_root = Path(__file__).resolve().parent.parent.parent.parent.parent
-            canonical_db = repo_root / rel_name
-            return f"sqlite:///{canonical_db.as_posix()}"
+        if not isinstance(v, str):
+            return v
+        if v.startswith("sqlite:///") and not v.startswith("sqlite:///:memory:"):
+            raw_path = v[len("sqlite:///"):]
+            if raw_path.startswith("./"):
+                raw_path = raw_path[2:]
+            path_obj = Path(raw_path)
+            if not path_obj.is_absolute():
+                canonical_db = (_REPO_ROOT / path_obj).resolve()
+                return f"sqlite:///{canonical_db.as_posix()}"
         return v
 
     @model_validator(mode="after")
     def validate_production_security(self) -> "Settings":
         env = (self.app_env or "").lower().strip()
         if env in {"production", "prod", "staging"}:
+            if self.database_url.lower().startswith("sqlite"):
+                raise ValueError(
+                    "BẢO MẬT & TOÀN VẸN CSDL: Môi trường production/staging bắt buộc phải dùng CSDL dùng chung (PostgreSQL), tuyệt đối không được dùng SQLite cục bộ vì nguy cơ chia tách dữ liệu giữa các tiến trình worker."
+                )
             if (
                 not self.secret_key
                 or self.secret_key == "development-only-secret-change-me-please"

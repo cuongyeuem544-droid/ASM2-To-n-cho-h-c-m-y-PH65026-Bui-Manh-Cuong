@@ -45,7 +45,7 @@ def seed_users(db):
         else:
             u.role = role
             u.is_active = True
-            u.password_hash = hash_password(password)
+            # Không ghi đè password_hash nếu tài khoản đã tồn tại
 
 
 REAL_SOURCES = [

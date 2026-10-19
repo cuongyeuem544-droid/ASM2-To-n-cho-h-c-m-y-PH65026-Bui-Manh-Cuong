@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 from fastapi import HTTPException, status
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.entities import User
@@ -16,7 +17,7 @@ from app.models.inventory import (
     StockMovement,
     WarehouseBatchStock,
 )
-from app.models.returns import ReturnItem, ReturnStatus
+from app.models.returns import ReturnItem, ReturnRestockAllocation, ReturnStatus
 from app.services.audit import write_audit
 
 logger = logging.getLogger("return_restock")
@@ -30,11 +31,12 @@ class ReturnRestockService:
     """
     Dịch vụ dùng chung duy nhất thực thi nhập kho hàng hoàn (Restock) cho cả Admin và Quản lý kho.
     Bảo đảm:
-    - Thuật toán phân bổ đa lô (Multi-batch) chính xác.
+    - Thuật toán phân bổ đa lô (Multi-batch) chính xác: trừ lượng đã hoàn trước đó theo từng allocation/batch,
+      không phân bổ lại từ batch đầu ở mỗi lần hoàn.
     - Tiền kiểm định (Pre-validation) 100% trước khi sửa đổi bất kỳ số liệu tồn kho nào.
-    - Chống nhập trùng lặp hai chiều (Two-way Idempotency).
-    - Kiểm tra giới hạn số lượng hoàn lũy kế.
-    - Sinh StockMovement loại RETURN_RESTOCK và WarehouseAuditLog đầy đủ.
+    - Chống nhập trùng lặp hai chiều (Two-way Idempotency) và ràng buộc bền vững trong CSDL (ReturnRestockAllocation).
+    - Kiểm tra giới hạn số lượng hoàn lũy kế của từng lô.
+    - Sinh StockMovement loại RETURN_RESTOCK và WarehouseAuditLog đầy đủ trong cùng transaction.
     """
 
     @classmethod
@@ -52,11 +54,40 @@ class ReturnRestockService:
         if not items_to_restock:
             return []
 
-        # 1. Chống nhập trùng hai chiều (Two-way Idempotency check)
+        # 1. Xác định canonical_return_code và danh sách mã đối soát chéo (Admin / Kho)
+        canonical_return_code = source_code
         check_codes = [source_code]
         if linked_reference_codes:
             check_codes.extend([c for c in linked_reference_codes if c])
 
+        from app.models.returns import WarehouseReturnCase
+        if source_type == "WAREHOUSE_RETURN_CASE":
+            case_obj = db.scalar(
+                select(WarehouseReturnCase).where(WarehouseReturnCase.case_code == source_code)
+            )
+            if case_obj and case_obj.return_request:
+                canonical_return_code = case_obj.return_request.return_code
+                if canonical_return_code not in check_codes:
+                    check_codes.append(canonical_return_code)
+        elif source_type == "RETURN_REQUEST":
+            cases = db.scalars(
+                select(WarehouseReturnCase).where(
+                    WarehouseReturnCase.return_request.has(return_code=source_code)
+                )
+            ).all()
+            for c in cases:
+                if c.case_code not in check_codes:
+                    check_codes.append(c.case_code)
+
+        # 2. Chống nhập trùng hai chiều (Two-way Idempotency check)
+        existing_alloc = db.scalar(
+            select(ReturnRestockAllocation).where(
+                or_(
+                    ReturnRestockAllocation.canonical_return_code == canonical_return_code,
+                    ReturnRestockAllocation.source_code.in_(check_codes),
+                )
+            )
+        )
         existing_mv = db.scalar(
             select(StockMovement).where(
                 StockMovement.movement_type == "RETURN_RESTOCK",
@@ -69,13 +100,13 @@ class ReturnRestockService:
                 ),
             )
         )
-        if existing_mv:
+        if existing_alloc or existing_mv:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Chứng từ hoàn '{source_code}' hoặc ca hoàn liên quan đã được nhập lại kho bán trước đó. Không thể thực hiện nhập kho lần hai.",
             )
 
-        # 2. Tiền kiểm định toàn bộ items TRƯỚC KHI cập nhật bất kỳ bản ghi nào
+        # 3. Tiền kiểm định toàn bộ items TRƯỚC KHI cập nhật bất kỳ bản ghi nào
         plans: list[dict[str, Any]] = []
 
         for it in items_to_restock:
@@ -137,7 +168,7 @@ class ReturnRestockService:
                         detail=f"Kho của lô xuất gốc #{alloc.batch_id} (Kho #{alloc.warehouse_id}) không khớp với kho tiếp nhận hàng hoàn (Kho #{warehouse_id}).",
                     )
 
-                # Gộp allocation nếu cùng lô xuất hiện nhiều lần
+                # Gộp allocation nếu cùng lô xuất hiện nhiều lần trong cùng order item
                 if alloc.batch_id not in seen_batches:
                     entry = {
                         "batch_id": alloc.batch_id,
@@ -151,99 +182,160 @@ class ReturnRestockService:
 
             total_allocated = sum(g["allocated_quantity"] for g in grouped_allocations)
 
-            # Kiểm tra số lượng hoàn lần này so với số lượng xuất
-            if qty_restock > total_allocated:
+            # Lấy lượng đã hoàn trước đó theo TỪNG BATCH của order_item này
+            prior_alloc_rows = db.execute(
+                select(ReturnRestockAllocation.batch_id, func.sum(ReturnRestockAllocation.quantity))
+                .where(ReturnRestockAllocation.order_item_id == order_item_id)
+                .group_by(ReturnRestockAllocation.batch_id)
+            ).all()
+            prior_by_batch: dict[int, int] = {row[0]: int(row[1]) for row in prior_alloc_rows}
+
+            # Đối soát thêm với StockMovement của các lần hoàn trước đó nếu có (hỗ trợ dữ liệu lịch sử)
+            prior_movements = db.scalars(
+                select(StockMovement).where(
+                    StockMovement.movement_type == "RETURN_RESTOCK",
+                    StockMovement.batch_id.in_([g["batch_id"] for g in grouped_allocations]),
+                    StockMovement.note.like(f"%[order_item_id:{order_item_id}]%"),
+                )
+            ).all()
+            for mv in prior_movements:
+                if mv.batch_id not in prior_by_batch:
+                    prior_by_batch[mv.batch_id] = mv.quantity
+
+            # Tính lượng còn có thể hoàn cho từng lô
+            for g in grouped_allocations:
+                bid = g["batch_id"]
+                already_restocked = prior_by_batch.get(bid, 0)
+                available_in_batch = max(0, g["allocated_quantity"] - already_restocked)
+                g["already_restocked"] = already_restocked
+                g["available_to_return"] = available_in_batch
+
+            total_available = sum(g["available_to_return"] for g in grouped_allocations)
+
+            # Kiểm tra số lượng hoàn lần này so với số lượng còn có thể hoàn
+            if qty_restock > total_available:
+                total_already_done = sum(g["already_restocked"] for g in grouped_allocations)
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Số lượng hoàn ({qty_restock}) vượt quá tổng số lượng đã xuất từ các lô gốc ({total_allocated}) cho sản phẩm '{product_name}'.",
+                    detail=(
+                        f"Số lượng hoàn ({qty_restock}) vượt quá số lượng còn có thể hoàn ({total_available}) "
+                        f"từ các lô gốc của sản phẩm '{product_name}' (đã xuất {total_allocated}, đã hoàn {total_already_done})."
+                    ),
                 )
 
-            # Kiểm tra giới hạn hoàn lũy kế (tổng số lượng đã hoàn từ trước đến nay + lần này không được vượt quá số lượng đã xuất)
-            prior_restocked_query = (
-                select(func.coalesce(func.sum(ReturnItem.restock_quantity), 0))
-                .where(
-                    ReturnItem.order_item_id == order_item_id,
-                    ReturnItem.restock_quantity > 0,
-                )
-            )
-            ret_item_id = it.get("return_item_id")
-            if ret_item_id:
-                prior_restocked_query = prior_restocked_query.where(ReturnItem.id != ret_item_id)
+            # Phân bổ tuần tự theo các allocation còn dung lượng (không quay lại lô đầu nếu đã hoàn đủ)
+            remaining_qty = qty_restock
+            batch_plans: list[dict[str, Any]] = []
+            for g in grouped_allocations:
+                if remaining_qty <= 0:
+                    break
+                avail = g["available_to_return"]
+                if avail <= 0:
+                    continue
+                portion = min(remaining_qty, avail)
+                remaining_qty -= portion
+                batch_plans.append({
+                    "batch_id": g["batch_id"],
+                    "warehouse_id": g["warehouse_id"],
+                    "portion": portion,
+                })
 
-            prior_restocked = db.scalar(prior_restocked_query) or 0
-            if (prior_restocked + qty_restock) > total_allocated:
+            if remaining_qty > 0:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Tổng số lượng hoàn lũy kế ({prior_restocked + qty_restock}) vượt quá tổng số lượng đã xuất từ các lô gốc ({total_allocated}) cho sản phẩm '{product_name}'.",
+                    detail=f"Không thể phân bổ đủ số lượng hoàn cho '{product_name}'. Thiếu {remaining_qty} đơn vị.",
                 )
 
             plans.append({
                 "it": it,
+                "order_item_id": order_item_id,
                 "qty_restock": qty_restock,
-                "grouped_allocations": grouped_allocations,
+                "batch_plans": batch_plans,
             })
 
-        # 3. Thực thi cập nhật tồn kho (chỉ chạy khi toàn bộ tiền kiểm định pass 100%)
+        # 4. Thực thi cập nhật tồn kho (nguyên tử trong cùng transaction sau khi 100% tiền kiểm định thành công)
         created_movements: list[StockMovement] = []
-        for plan in plans:
-            qty_restock = plan["qty_restock"]
-            grouped_allocations = plan["grouped_allocations"]
-            item_info = plan["it"]
+        try:
+            for plan in plans:
+                order_item_id = plan["order_item_id"]
+                item_info = plan["it"]
+                batch_plans = plan["batch_plans"]
 
-            remaining_qty = qty_restock
-            for g in grouped_allocations:
-                if remaining_qty <= 0:
-                    break
-                portion = min(remaining_qty, g["allocated_quantity"])
-                remaining_qty -= portion
+                for bp in batch_plans:
+                    portion = bp["portion"]
+                    batch_id = bp["batch_id"]
+                    wh_id = bp["warehouse_id"]
 
-                # Cập nhật WarehouseBatchStock
-                stock = db.scalar(
-                    select(WarehouseBatchStock).where(
-                        WarehouseBatchStock.warehouse_id == warehouse_id,
-                        WarehouseBatchStock.batch_id == g["batch_id"],
+                    # Cập nhật WarehouseBatchStock
+                    stock = db.scalar(
+                        select(WarehouseBatchStock).where(
+                            WarehouseBatchStock.warehouse_id == wh_id,
+                            WarehouseBatchStock.batch_id == batch_id,
+                        )
                     )
-                )
-                if stock:
-                    stock.quantity_on_hand += portion
-                    stock.quantity_available += portion
-                    db.add(stock)
-                else:
-                    stock = WarehouseBatchStock(
-                        warehouse_id=warehouse_id,
-                        batch_id=g["batch_id"],
-                        quantity_on_hand=portion,
-                        quantity_available=portion,
-                        quantity_reserved=0,
+                    if stock:
+                        stock.quantity_on_hand += portion
+                        stock.quantity_available += portion
+                    else:
+                        stock = WarehouseBatchStock(
+                            warehouse_id=wh_id,
+                            batch_id=batch_id,
+                            quantity_on_hand=portion,
+                            quantity_available=portion,
+                            quantity_reserved=0,
+                        )
+                        db.add(stock)
+                    db.flush()
+
+                    # Sinh bản ghi StockMovement
+                    movement = StockMovement(
+                        movement_code=f"MOV-RET-{uuid.uuid4().hex[:6].upper()}",
+                        batch_id=batch_id,
+                        warehouse_id=wh_id,
+                        movement_type="RETURN_RESTOCK",
+                        quantity=portion,
+                        balance_after=stock.quantity_on_hand,
+                        reference_type=source_type,
+                        reference_id=source_code,
+                        note=audit_note or f"Nhập lại kho bán {portion} hộp thuốc từ hoàn trả ({source_code}) [order_item_id:{order_item_id}]",
+                        created_by=actor_user_id,
+                        created_at=utcnow(),
                     )
-                    db.add(stock)
+                    db.add(movement)
+                    db.flush()
+                    created_movements.append(movement)
 
-                # Sinh bản ghi StockMovement
-                movement = StockMovement(
-                    movement_code=f"MOV-RET-{uuid.uuid4().hex[:6].upper()}",
-                    batch_id=g["batch_id"],
-                    warehouse_id=warehouse_id,
-                    movement_type="RETURN_RESTOCK",
-                    quantity=portion,
-                    balance_after=stock.quantity_on_hand,
-                    reference_type=source_type,
-                    reference_id=source_code,
-                    note=audit_note or f"Nhập lại kho bán {portion} hộp thuốc từ hoàn trả ({source_code})",
-                    created_by=actor_user_id,
-                    created_at=utcnow(),
-                )
-                db.add(movement)
-                created_movements.append(movement)
+                    # Lưu bản ghi ReturnRestockAllocation với ràng buộc UniqueConstraint
+                    restock_alloc = ReturnRestockAllocation(
+                        canonical_return_code=canonical_return_code,
+                        source_type=source_type,
+                        source_code=source_code,
+                        order_item_id=order_item_id,
+                        batch_id=batch_id,
+                        warehouse_id=wh_id,
+                        quantity=portion,
+                        stock_movement_id=movement.id,
+                        created_at=utcnow(),
+                    )
+                    db.add(restock_alloc)
 
-                # Ghi nhận AuditLog
-                actor = db.scalar(select(User).where(User.id == actor_user_id)) if actor_user_id else None
-                write_audit(
-                    db=db,
-                    action="RETURN_RESTOCK",
-                    entity_type=source_type,
-                    entity_id=source_code,
-                    user=actor,
-                    details=f"Nhập lại kho bán {portion} đơn vị sản phẩm #{item_info.get('product_id')} ({item_info.get('product_name')}) vào lô #{g['batch_id']}.",
-                )
+                    # Ghi nhận AuditLog
+                    actor = db.scalar(select(User).where(User.id == actor_user_id)) if actor_user_id else None
+                    write_audit(
+                        db=db,
+                        action="RETURN_RESTOCK",
+                        entity_type=source_type,
+                        entity_id=source_code,
+                        user=actor,
+                        details=f"Nhập lại kho bán {portion} đơn vị sản phẩm #{item_info.get('product_id')} ({item_info.get('product_name')}) vào lô #{batch_id}.",
+                    )
+
+            db.flush()
+        except IntegrityError as ex:
+            logger.exception("Xung đột Idempotency khi nhập kho hàng hoàn")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Chứng từ hoàn '{source_code}' đã được xử lý nhập kho bởi một phiên khác. Tránh nhập trùng.",
+            ) from ex
 
         return created_movements

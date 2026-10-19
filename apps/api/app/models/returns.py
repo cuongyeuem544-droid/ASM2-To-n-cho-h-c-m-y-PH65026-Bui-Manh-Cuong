@@ -22,6 +22,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -241,11 +242,14 @@ class ReturnItem(Base):
 
     @property
     def accepted_quantity(self) -> int:
+        # Tách biệt số lượng chấp nhận khi kiểm định kỹ thuật khỏi số lượng được Quản lý kho duyệt hoàn tiền (approved_quantity)
+        if hasattr(self, "_inspected_accepted_qty"):
+            return self._inspected_accepted_qty
         return self.approved_quantity
 
     @accepted_quantity.setter
     def accepted_quantity(self, val: int) -> None:
-        self.approved_quantity = val
+        self._inspected_accepted_qty = val
 
     @property
     def inspected_condition(self) -> str:
@@ -718,3 +722,32 @@ class ExchangeItem(Base):
 
     exchange_order: Mapped[ExchangeOrder] = relationship("ExchangeOrder", back_populates="items")
     replacement_product: Mapped["CanonicalProduct"] = relationship("CanonicalProduct")
+
+
+class ReturnRestockAllocation(Base):
+    """
+    Bản ghi phân bổ nhập lại kho hàng hoàn (Restock Allocation).
+    Ràng buộc Idempotency chặt chẽ:
+    - UniqueConstraint(canonical_return_code, order_item_id, batch_id) ngăn chặn hoàn toàn
+      nhập kho trùng lặp giữa Admin và Kho, hoặc khi bấm liên tiếp.
+    - Lưu vết chi tiết từng lô xuất được nhập lại bao nhiêu đơn vị.
+    """
+    __tablename__ = "return_restock_allocations"
+    __table_args__ = (
+        UniqueConstraint("canonical_return_code", "order_item_id", "batch_id", name="uq_restock_canonical_item_batch"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    canonical_return_code: Mapped[str] = mapped_column(String(50), index=True)
+    source_type: Mapped[str] = mapped_column(String(50))  # "RETURN_REQUEST" | "WAREHOUSE_RETURN_CASE"
+    source_code: Mapped[str] = mapped_column(String(50), index=True)
+    order_item_id: Mapped[int] = mapped_column(ForeignKey("order_items.id", ondelete="CASCADE"), index=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("inventory_batches.id", ondelete="RESTRICT"), index=True)
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id", ondelete="RESTRICT"), index=True)
+    quantity: Mapped[int] = mapped_column(Integer)
+    stock_movement_id: Mapped[int | None] = mapped_column(ForeignKey("stock_movements.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    batch: Mapped["InventoryBatch"] = relationship()
+    warehouse: Mapped["Warehouse"] = relationship()
+

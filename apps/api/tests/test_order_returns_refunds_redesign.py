@@ -687,15 +687,22 @@ def test_19_manager_approves_return_case(client, manager_hcm_headers):
         wh_hcm = db.scalar(select(Warehouse).where(Warehouse.code == "KHO-HCM-01"))
         case = db.scalar(select(WarehouseReturnCase).where(WarehouseReturnCase.warehouse_id == wh_hcm.id))
         case.status = ReturnStatus.WAITING_MANAGER_APPROVAL.value
+        items_payload = []
         for it in case.items:
+            it.received_quantity = it.requested_quantity
             it.approved_quantity = it.requested_quantity
+            items_payload.append({
+                "return_item_id": it.id,
+                "approved_quantity": it.requested_quantity,
+                "rejected_quantity": 0,
+            })
         db.commit()
         case_code = case.case_code
 
     res = client.post(
         f"/api/v1/warehouse/me/returns/{case_code}/approve",
         headers=manager_hcm_headers,
-        json={"manager_note": "Duyệt toàn bộ hàng hoàn"},
+        json={"manager_note": "Duyệt toàn bộ hàng hoàn", "items": items_payload},
     )
     assert res.status_code == 200
     with SessionLocal() as db:

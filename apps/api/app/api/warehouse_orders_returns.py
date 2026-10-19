@@ -112,37 +112,82 @@ class EvidencePayload(BaseModel):
 
 class ItemInspectionItem(BaseModel):
     return_item_id: int = Field(..., description="ID sản phẩm đổi/trả bắt buộc")
-    received_quantity: int = Field(..., ge=0, description="Số lượng nhận bắt buộc")
-    accepted_quantity: int = Field(..., ge=0, description="Số lượng chấp nhận bắt buộc")
-    rejected_quantity: int = Field(..., ge=0, description="Số lượng từ chối bắt buộc (không mặc định)")
+    condition: Optional[str] = Field(default=None, description="Tình trạng thực tế bắt buộc")
     package_condition: str = Field(..., min_length=1, description="Trạng thái bao bì bắt buộc")
     seal_intact: bool = Field(..., description="Tem niêm phong nguyên vẹn bắt buộc (True/False)")
     batch_matched: bool = Field(..., description="Khớp số lô đã xuất bắt buộc (True/False)")
     expiry_matched: bool = Field(..., description="Khớp hạn sử dụng bắt buộc (True/False)")
     storage_condition_ok: bool = Field(..., description="Điều kiện bảo quản đạt bắt buộc (True/False)")
+    received_quantity: int = Field(..., ge=0, description="Số lượng nhận bắt buộc")
+    accepted_quantity: int = Field(..., ge=0, description="Số lượng chấp nhận bắt buộc")
+    rejected_quantity: int = Field(..., ge=0, description="Số lượng từ chối bắt buộc (không mặc định)")
+    restock_destination: Optional[str] = Field(default=None, description="Phân luồng kho bắt buộc")
+    suggested_action: Optional[str] = Field(default=None, description="Đề xuất xử lý bắt buộc (RESTOCK/QUARANTINE/DISPOSE)")
+    restock_quantity: Optional[int] = Field(default=None, ge=0, description="Số lượng nhập lại kho bán nếu có")
+    rejection_reason: Optional[str] = Field(default=None, description="Lý do từ chối nếu có rejected_quantity > 0")
     damage_description: Optional[str] = None
-    suggested_action: str = Field(..., min_length=1, description="Đề xuất xử lý bắt buộc (RESTOCK/QUARANTINE/DISPOSE)")
     inspection_note: Optional[str] = None
+
+    @model_validator(mode="before")
+    def populate_aliases(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if not data.get("condition") and data.get("package_condition"):
+                data["condition"] = data["package_condition"]
+            if not data.get("package_condition") and data.get("condition"):
+                data["package_condition"] = data["condition"]
+            if not data.get("suggested_action") and data.get("restock_destination"):
+                data["suggested_action"] = data["restock_destination"]
+            if not data.get("restock_destination") and data.get("suggested_action"):
+                data["restock_destination"] = data["suggested_action"]
+            if not data.get("rejection_reason") and data.get("damage_description"):
+                data["rejection_reason"] = data["damage_description"]
+        return data
 
     @model_validator(mode="after")
     def validate_inspection_safety(self):
-        # 1. Tổng nhận phải bằng tổng chấp nhận + từ chối
+        # 1. Bắt buộc có condition và package_condition
+        if not self.condition or not str(self.condition).strip():
+            raise ValueError("Thiếu trường kiểm định bắt buộc: condition")
+        if not self.package_condition or not str(self.package_condition).strip():
+            raise ValueError("Thiếu trường kiểm định bắt buộc: package_condition")
+
+        # 2. Bắt buộc có restock_destination hoặc suggested_action
+        action = (self.restock_destination or self.suggested_action or "").strip().upper()
+        if not action:
+            raise ValueError("Thiếu trường kiểm định bắt buộc: restock_destination / suggested_action")
+
+        # 3. Tổng nhận phải bằng tổng chấp nhận + từ chối
         if self.accepted_quantity + self.rejected_quantity != self.received_quantity:
             raise ValueError(
                 f"Tổng số lượng chấp nhận ({self.accepted_quantity}) và từ chối ({self.rejected_quantity}) "
                 f"phải bằng số lượng nhận ({self.received_quantity})."
             )
 
-        # 2. Kiểm định an toàn khi đề xuất nhập lại kho bán (RESTOCK)
-        if self.suggested_action.upper() in ["RESTOCK", "SELLABLE_STOCK"]:
+        # 4. Bắt buộc có rejection_reason khi có rejected_quantity > 0
+        if self.rejected_quantity > 0 and (not self.rejection_reason or not str(self.rejection_reason).strip()):
+            raise ValueError(f"Sản phẩm #{self.return_item_id} có {self.rejected_quantity} đơn vị bị từ chối, bắt buộc phải nêu rõ lý do từ chối (rejection_reason).")
+
+        # 5. Kiểm định an toàn khi đề xuất nhập lại kho bán (RESTOCK / SELLABLE_STOCK)
+        if action in ["RESTOCK", "SELLABLE_STOCK"]:
+            if self.restock_quantity is not None and self.restock_quantity > self.accepted_quantity:
+                raise ValueError(f"Số lượng nhập kho bán ({self.restock_quantity}) không được lớn hơn số lượng chấp nhận ({self.accepted_quantity}).")
+
+            failed = []
             if not self.seal_intact:
-                raise ValueError("Không thể đề xuất nhập lại kho bán (RESTOCK) khi tem niêm phong không nguyên vẹn.")
+                failed.append("tem niêm phong không nguyên vẹn (seal_intact=False)")
             if not self.batch_matched:
-                raise ValueError("Không thể đề xuất nhập lại kho bán (RESTOCK) khi số lô không khớp với lô đã xuất.")
+                failed.append("số lô không khớp đã xuất (batch_matched=False)")
             if not self.expiry_matched:
-                raise ValueError("Không thể đề xuất nhập lại kho bán (RESTOCK) khi hạn sử dụng không khớp hoặc đã hết hạn.")
+                failed.append("hạn sử dụng không khớp hoặc hết hạn (expiry_matched=False)")
             if not self.storage_condition_ok:
-                raise ValueError("Không thể đề xuất nhập lại kho bán (RESTOCK) khi điều kiện bảo quản không đạt chuẩn GSP.")
+                failed.append("điều kiện bảo quản không đạt chuẩn GSP (storage_condition_ok=False)")
+
+            if failed:
+                raise ValueError(
+                    f"Sản phẩm không đạt chuẩn an toàn dược phẩm ({', '.join(failed)}). "
+                    "Tuyệt đối không được đề xuất hoặc nhập lại kho bán (RESTOCK/SELLABLE_STOCK). Bắt buộc chuyển sang QUARANTINE hoặc DISPOSE."
+                )
+
             pkg_lower = self.package_condition.lower()
             if any(bad in pkg_lower for bad in ["rách", "móp", "vỡ", "hỏng", "damaged", "broken", "torn"]):
                 raise ValueError(f"Bao bì '{self.package_condition}' bị hư hại, không đạt chuẩn nhập lại kho bán.")
