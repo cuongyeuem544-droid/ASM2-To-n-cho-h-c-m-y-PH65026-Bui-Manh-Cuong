@@ -83,50 +83,163 @@ export async function GET(
     const filePrefix = attachmentId.replace("att-", "");
     const baseDir = path.join(process.cwd(), "storage", "chat-attachments");
 
-    // Tìm file trong storage/chat-attachments
-    const findFile = async (dir: string): Promise<{ path: string; ext: string } | null> => {
+    interface FileCandidate {
+      metaPath?: string;
+      dataPath?: string;
+      ext?: string;
+    }
+
+    const candidates: FileCandidate[] = [];
+
+    const scanDir = async (dir: string) => {
       try {
         const entries = await fs.readdir(dir, { withFileTypes: true });
         for (const entry of entries) {
-          const full = path.join(dir, entry.name);
+          const fullPath = path.join(dir, entry.name);
           if (entry.isDirectory()) {
-            const nested = await findFile(full);
-            if (nested) return nested;
-          } else if (entry.isFile() && entry.name.startsWith(filePrefix) && !entry.name.endsWith(".meta.json")) {
-            return { path: full, ext: path.extname(entry.name).toLowerCase() };
+            await scanDir(fullPath);
+          } else if (entry.isFile() && entry.name.startsWith(filePrefix)) {
+            if (entry.name.endsWith(".meta.json")) {
+              const stem = entry.name.slice(0, -10);
+              let cand = candidates.find(
+                (c) =>
+                  c.metaPath === fullPath ||
+                  (c.dataPath && path.basename(c.dataPath, c.ext || path.extname(c.dataPath)) === stem)
+              );
+              if (!cand) {
+                cand = {};
+                candidates.push(cand);
+              }
+              cand.metaPath = fullPath;
+            } else {
+              const ext = path.extname(entry.name).toLowerCase();
+              const stem = path.basename(entry.name, ext);
+              let cand = candidates.find(
+                (c) =>
+                  c.dataPath === fullPath ||
+                  (c.metaPath && path.basename(c.metaPath, ".meta.json") === stem)
+              );
+              if (!cand) {
+                cand = {};
+                candidates.push(cand);
+              }
+              cand.dataPath = fullPath;
+              cand.ext = ext;
+            }
           }
         }
-      } catch {}
-      return null;
+      } catch {
+        // Base dir or sub dir might not exist yet
+      }
     };
 
-    const found = await findFile(baseDir);
-    if (!found) {
+    await scanDir(baseDir);
+
+    if (candidates.length === 0) {
       return NextResponse.json({ error: "Không tìm thấy tệp đính kèm" }, { status: 404 });
     }
 
-    const { path: foundPath, ext: foundExt } = found;
-    // Kiểm tra quyền sở hữu nếu có file metadata
-    const metaPath = foundPath.replace(path.extname(foundPath), ".meta.json");
-    try {
-      const metaContent = await fs.readFile(metaPath, "utf-8");
-      const meta = JSON.parse(metaContent);
-      if (
-        meta &&
-        meta.userId &&
-        verifiedUser &&
-        verifiedUser.id !== meta.userId &&
-        verifiedUser.role !== "ADMIN"
-      ) {
+    // Kiểm tra từng candidate tìm attachment khớp chính xác attachmentId
+    let matchingCandidate: FileCandidate | null = null;
+    let hasCorruptedMeta = false;
+    let hasMismatchedId = false;
+    let hasMissingUser = false;
+    let hasMissingMeta = false;
+
+    for (const cand of candidates) {
+      if (!cand.metaPath) {
+        hasMissingMeta = true;
+        continue;
+      }
+
+      let metaContent = "";
+      try {
+        metaContent = await fs.readFile(cand.metaPath, "utf-8");
+      } catch {
+        hasCorruptedMeta = true;
+        continue;
+      }
+
+      let meta: any = null;
+      try {
+        meta = JSON.parse(metaContent);
+      } catch {
+        hasCorruptedMeta = true;
+        continue;
+      }
+
+      if (!meta || typeof meta !== "object") {
+        hasCorruptedMeta = true;
+        continue;
+      }
+
+      if (meta.attachmentId !== attachmentId) {
+        hasMismatchedId = true;
+        continue;
+      }
+
+      if (meta.userId === undefined || meta.userId === null || String(meta.userId).trim() === "") {
+        hasMissingUser = true;
+        continue;
+      }
+
+      // Khớp chính xác attachmentId và metadata hợp lệ
+      matchingCandidate = cand;
+      (matchingCandidate as any)._meta = meta;
+      break;
+    }
+
+    if (!matchingCandidate) {
+      if (hasCorruptedMeta) {
         return NextResponse.json(
-          { error: "Bạn không có quyền truy cập vào tệp đính kèm này." },
+          { error: "Metadata của tệp đính kèm bị hỏng hoặc không đúng định dạng." },
           { status: 403 }
         );
       }
-    } catch {}
+      if (hasMissingUser) {
+        return NextResponse.json(
+          { error: "Metadata của tệp đính kèm thiếu thông tin người sở hữu." },
+          { status: 403 }
+        );
+      }
+      if (hasMismatchedId) {
+        return NextResponse.json(
+          { error: "Mã định danh trong metadata không khớp với tệp yêu cầu." },
+          { status: 403 }
+        );
+      }
+      if (hasMissingMeta) {
+        return NextResponse.json(
+          { error: "Tệp đính kèm thiếu tệp metadata chứng thực quyền sở hữu." },
+          { status: 403 }
+        );
+      }
+      return NextResponse.json({ error: "Không tìm thấy tệp đính kèm hợp lệ" }, { status: 404 });
+    }
 
-    const fileBuffer = await fs.readFile(foundPath);
-    const mimeType = resolveMimeType(foundExt);
+    const validMeta = (matchingCandidate as any)._meta;
+
+    // Xác thực quyền sở hữu: người dùng phải là người upload hoặc có vai trò ADMIN
+    const isOwner = String(verifiedUser.id) === String(validMeta.userId);
+    const userRole = (verifiedUser.role || "").toUpperCase();
+    const isAdmin = userRole === "ADMIN";
+
+    if (!isOwner && !isAdmin) {
+      return NextResponse.json(
+        { error: "Bạn không có quyền truy cập vào tệp đính kèm này." },
+        { status: 403 }
+      );
+    }
+
+    if (!matchingCandidate.dataPath) {
+      return NextResponse.json(
+        { error: "Không tìm thấy nội dung tệp đính kèm trên máy chủ." },
+        { status: 404 }
+      );
+    }
+
+    const fileBuffer = await fs.readFile(matchingCandidate.dataPath);
+    const mimeType = resolveMimeType(matchingCandidate.ext || path.extname(matchingCandidate.dataPath).toLowerCase());
 
     return new NextResponse(fileBuffer, {
       status: 200,

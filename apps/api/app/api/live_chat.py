@@ -1226,6 +1226,7 @@ async def client_websocket(
     websocket: WebSocket,
     session_code: str,
     token: Optional[str] = Query(None),
+    guest_token: Optional[str] = Query(None),
 ):
     """
     WebSocket kết nối realtime cho khách hàng.
@@ -1234,11 +1235,12 @@ async def client_websocket(
     - 4404: không tìm thấy phiên.
     - 4403: token sai, hết hạn, bị thu hồi, sai chủ phiên hoặc phiên đã đóng.
     """
-    if not token or not str(token).strip():
+    effective_token = token or guest_token
+    if not effective_token or not str(effective_token).strip():
         await websocket.close(code=4401)
         return
 
-    raw_token = str(token).strip()
+    raw_token = str(effective_token).strip()
 
     db = SessionLocal()
     try:
