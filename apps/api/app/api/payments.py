@@ -597,6 +597,13 @@ def get_order_payment_status(
         action_name="tra cứu thanh toán",
     )
 
+    if order.payment_method == "PAYOS" and order.payment_status == "PENDING" and settings.is_payos_configured:
+        try:
+            PayOSPaymentService.check_payment_status(db, clean_code)
+            db.refresh(order)
+        except Exception:
+            pass
+
     return PaymentIntentService.get_order_payment_summary(
         db=db,
         order_code=clean_code,

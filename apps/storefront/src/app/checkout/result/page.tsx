@@ -58,13 +58,20 @@ function CheckoutResultContent() {
   const [orderData, setOrderData] = useState<PaymentStatusResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isRetrying, setIsRetrying] = useState(false);
+  const [isCancellingOrder, setIsCancellingOrder] = useState(false);
   const [retryMessage, setRetryMessage] = useState<string | null>(null);
 
-  const isSuccess =
-    resultCode === "0" ||
-    resultCode === "00" ||
-    statusParam === "PAID" ||
-    orderData?.payment_status === "PAID";
+  // Xác định người dùng hoặc cổng thanh toán có yêu cầu hủy hay không
+  const cancelParam = (searchParams.get("cancel") || "").toLowerCase();
+  const isCancelled =
+    cancelParam === "true" ||
+    statusParam === "CANCELLED" ||
+    resultCode === "1006" ||
+    orderData?.order_status === "CANCELLED" ||
+    orderData?.payment_status === "CANCELLED";
+
+  // CHỈ THÀNH CÔNG KHI KHÔNG BỊ HỦY VÀ CÓ XÁC NHẬN PAID TỪ DATABASE
+  const isSuccess = !isCancelled && orderData?.payment_status === "PAID";
 
   useEffect(() => {
     if (!cleanOrderCode) {
@@ -86,6 +93,16 @@ function CheckoutResultContent() {
         if (phone) queryParts.push(`phone_verify=${encodeURIComponent(phone)}`);
         const queryParam = queryParts.length ? `?${queryParts.join("&")}` : "";
 
+        // Nếu là payOS và chưa có xác nhận PAID, thử tra cứu đối soát nhanh
+        if (cleanOrderCode && !isCancelled) {
+          try {
+            await fetch(`/api/v1/payments/payos/check/${cleanOrderCode}${queryParam}`, {
+              method: "POST",
+              headers,
+            });
+          } catch (_) {}
+        }
+
         const res = await fetch(`/api/v1/payments/orders/${cleanOrderCode}/status${queryParam}`, { headers });
         if (res.ok) {
           const data = await res.json();
@@ -101,7 +118,7 @@ function CheckoutResultContent() {
     }
 
     fetchStatus();
-  }, [cleanOrderCode, searchParams]);
+  }, [cleanOrderCode, searchParams, isCancelled]);
 
   // Switch to COD with 1-click retry
   const handleSwitchToCod = async () => {
@@ -128,7 +145,7 @@ function CheckoutResultContent() {
         }),
       });
       if (res.ok) {
-        setRetryMessage("Đã chuyển thành công sang Thanh toán khi nhận hàng (COD)!");
+        setRetryMessage("Đã chuyển thành công sang Thanh toán khi nhận hàng (COD)! Đơn sẽ được xuất kho giao tới bạn.");
         // Refresh status
         const queryParts = [];
         if (phone) queryParts.push(`phone_verify=${encodeURIComponent(phone)}`);
@@ -146,6 +163,51 @@ function CheckoutResultContent() {
       alert("Lỗi khi xử lý: " + (e.message || "Unknown"));
     } finally {
       setIsRetrying(false);
+    }
+  };
+
+  // Hủy hẳn đơn hàng và giải phóng tồn kho
+  const handleCancelEntireOrder = async () => {
+    if (!cleanOrderCode) return;
+    if (!confirm("Bạn có chắc chắn muốn hủy bỏ đơn hàng này không? Lượng thuốc giữ chỗ sẽ được giải phóng hoàn trả lại kho.")) return;
+    setIsCancellingOrder(true);
+    setRetryMessage(null);
+    try {
+      const phone = searchParams.get("phone") || (typeof window !== "undefined" ? localStorage.getItem("h4care_checkout_phone") || "" : "");
+      const token = typeof window !== "undefined" ? localStorage.getItem("h4care_auth_token") || localStorage.getItem("pharmatrust_token") : null;
+      const orderToken = (typeof window !== "undefined" ? localStorage.getItem(`h4care_order_token_${cleanOrderCode}`) || localStorage.getItem("h4care_latest_order_token") || "" : "");
+
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      if (orderToken) headers["X-Order-Token"] = orderToken;
+
+      const res = await fetch(`/api/v1/payments/orders/${cleanOrderCode}/cancel`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          reason: "Khách hàng hủy sau khi không thanh toán trực tuyến",
+          phone_verify: phone || undefined,
+          order_token: orderToken || undefined,
+        }),
+      });
+      if (res.ok) {
+        setRetryMessage("Đã hủy bỏ đơn hàng thành công và giải phóng tồn kho!");
+        const queryParts = [];
+        if (phone) queryParts.push(`phone_verify=${encodeURIComponent(phone)}`);
+        const queryParam = queryParts.length ? `?${queryParts.join("&")}` : "";
+        const statusRes = await fetch(`/api/v1/payments/orders/${cleanOrderCode}/status${queryParam}`, { headers });
+        if (statusRes.ok) {
+          const fresh = await statusRes.json();
+          setOrderData(fresh);
+        }
+      } else {
+        const err = await res.json();
+        alert(err.detail || "Không thể hủy đơn hàng");
+      }
+    } catch (e: any) {
+      alert("Lỗi khi xử lý: " + (e.message || "Unknown"));
+    } finally {
+      setIsCancellingOrder(false);
     }
   };
 
@@ -240,6 +302,160 @@ function CheckoutResultContent() {
             </Link>
           </div>
         </div>
+      ) : isCancelled ? (
+        /* CANCELLED SCREEN */
+        <div className="bg-white rounded-3xl p-8 sm:p-12 border border-slate-200 shadow-xs text-center">
+          <div className="w-20 h-20 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center mx-auto mb-6 ring-8 ring-rose-50/50">
+            <XCircle className="w-10 h-10" />
+          </div>
+
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-50 text-rose-700 text-xs font-bold border border-rose-200 mb-3">
+            <XCircle className="w-3.5 h-3.5" />
+            Giao dịch đã hủy / Chưa thanh toán
+          </span>
+
+          <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+            {orderData?.order_status === "CANCELLED"
+              ? "Đơn hàng đã được hủy bỏ"
+              : "Bạn đã hủy thanh toán đơn hàng"}
+          </h1>
+
+          <p className="text-sm text-slate-600 mt-2 max-w-md mx-auto">
+            {orderData?.order_status === "CANCELLED"
+              ? "Đơn thuốc này đã được hủy bỏ và lượng tồn kho giữ chỗ đã được giải phóng hoàn trả lại kho dược."
+              : "Bạn đã thao tác hủy trên cổng thanh toán. Đơn thuốc chưa được thanh toán và kho chưa xử lý soạn hàng. Quý khách có thể chuyển sang hình thức thanh toán khi nhận hàng (COD), thanh toán lại hoặc hủy hẳn đơn."}
+          </p>
+
+          {retryMessage && (
+            <div className="mt-4 p-3 bg-emerald-50 text-emerald-800 rounded-xl border border-emerald-200 text-xs font-bold flex items-center justify-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              <span>{retryMessage}</span>
+            </div>
+          )}
+
+          {/* Details Card */}
+          <div className="mt-8 p-6 bg-slate-50 rounded-2xl border border-slate-200/80 text-left space-y-3.5 text-sm">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <span className="text-slate-500">Mã đơn hàng:</span>
+              <span className="font-mono font-bold text-slate-800 text-base">
+                {orderData?.order_code || cleanOrderCode || "N/A"}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-slate-500">Phương thức đã chọn:</span>
+              <span className="inline-flex items-center gap-1.5 font-bold text-slate-800 bg-white px-2.5 py-0.5 rounded-full border border-slate-200 text-xs">
+                {orderData?.payment_method === "PAYOS"
+                  ? "Cổng thanh toán payOS"
+                  : orderData?.payment_method === "MOMO"
+                  ? "Ví điện tử MoMo"
+                  : orderData?.payment_method || "Trực tuyến"}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-slate-500">Trạng thái thanh toán:</span>
+              <span className="inline-flex items-center gap-1 font-bold text-rose-600 text-xs">
+                <XCircle className="w-3.5 h-3.5" />
+                ĐÃ HỦY GIAO DỊCH (CHƯA THANH TOÁN)
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-slate-500">Trạng thái xử lý kho:</span>
+              <span className="inline-flex items-center gap-1 font-semibold text-slate-700 text-xs">
+                {orderData?.order_status === "CANCELLED"
+                  ? "ĐÃ HỦY ĐƠN (KHÔNG SOẠN HÀNG)"
+                  : "TẠM GIỮ CHỖ (CHỜ THANH TOÁN - CHƯA XUẤT KHO)"}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between pt-3 border-t border-slate-200 text-base">
+              <span className="font-bold text-slate-900">Số tiền đơn hàng:</span>
+              <span className="font-black text-rose-600 text-lg">
+                {(orderData?.total_amount || (amountStr ? Number(amountStr) : 0)).toLocaleString("vi-VN")} đ
+              </span>
+            </div>
+          </div>
+
+          {/* Action buttons */}
+          <div className="mt-8 flex flex-col sm:flex-row flex-wrap items-center justify-center gap-3">
+            {orderData?.order_status === "CANCELLED" ? (
+              <>
+                <Link
+                  href={`/account?order=${encodeURIComponent(cleanOrderCode)}`}
+                  className="w-full sm:w-auto px-5 py-3 rounded-xl bg-brand-blue-600 hover:bg-brand-blue-700 text-white font-bold text-xs shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <FileText className="w-4 h-4" />
+                  <span>Xem chi tiết đơn hàng</span>
+                </Link>
+                <Link
+                  href="/products"
+                  className="w-full sm:w-auto px-5 py-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <ShoppingBag className="w-4 h-4" />
+                  <span>Tiếp tục mua hàng</span>
+                </Link>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  disabled={isRetrying || isCancellingOrder}
+                  onClick={handleSwitchToCod}
+                  className="w-full sm:w-auto px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {isRetrying ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Đang chuyển sang COD...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Banknote className="w-4 h-4" />
+                      <span>Chuyển sang trả khi nhận hàng (COD)</span>
+                    </>
+                  )}
+                </button>
+
+                <Link
+                  href={`/account?order=${encodeURIComponent(cleanOrderCode)}`}
+                  className="w-full sm:w-auto px-5 py-3 rounded-xl bg-brand-blue-600 hover:bg-brand-blue-700 text-white font-bold text-xs shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  <span>Mở chi tiết & Thanh toán lại</span>
+                </Link>
+
+                <button
+                  type="button"
+                  disabled={isRetrying || isCancellingOrder}
+                  onClick={handleCancelEntireOrder}
+                  className="w-full sm:w-auto px-5 py-3 rounded-xl border border-rose-300 bg-rose-50/50 hover:bg-rose-100/70 text-rose-700 font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {isCancellingOrder ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Đang hủy đơn...</span>
+                    </>
+                  ) : (
+                    <>
+                      <XCircle className="w-4 h-4" />
+                      <span>Hủy bỏ đơn hàng này</span>
+                    </>
+                  )}
+                </button>
+
+                <Link
+                  href="/products"
+                  className="w-full sm:w-auto px-5 py-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <ShoppingBag className="w-4 h-4" />
+                  <span>Tiếp tục mua hàng</span>
+                </Link>
+              </>
+            )}
+          </div>
+        </div>
       ) : (
         /* FAILED OR PENDING SCREEN */
         <div className="bg-white rounded-3xl p-8 sm:p-12 border border-slate-200 shadow-xs text-center">
@@ -279,6 +495,13 @@ function CheckoutResultContent() {
                   : orderData?.payment_method || "Trực tuyến"}
               </span>
             </div>
+            <div className="flex justify-between">
+              <span className="text-slate-500">Trạng thái thanh toán:</span>
+              <span className="inline-flex items-center gap-1 font-semibold text-amber-700 text-xs">
+                <Clock className="w-3.5 h-3.5" />
+                CHỜ THANH TOÁN (KHO CHƯA XỬ LÝ)
+              </span>
+            </div>
             {orderData?.total_amount && (
               <div className="flex justify-between pt-2 border-t border-slate-200">
                 <span className="text-slate-500">Tổng tiền cần thanh toán:</span>
@@ -288,12 +511,12 @@ function CheckoutResultContent() {
           </div>
 
           {/* Action buttons including 1-click switch to COD */}
-          <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
+          <div className="mt-8 flex flex-col sm:flex-row flex-wrap items-center justify-center gap-3">
             <button
               type="button"
-              disabled={isRetrying}
+              disabled={isRetrying || isCancellingOrder}
               onClick={handleSwitchToCod}
-              className="w-full sm:w-auto px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+              className="w-full sm:w-auto px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
               {isRetrying ? (
                 <>
@@ -316,11 +539,31 @@ function CheckoutResultContent() {
               <span>Mở chi tiết & Thanh toán lại</span>
             </Link>
 
+            <button
+              type="button"
+              disabled={isRetrying || isCancellingOrder}
+              onClick={handleCancelEntireOrder}
+              className="w-full sm:w-auto px-5 py-3 rounded-xl border border-rose-300 bg-rose-50/50 hover:bg-rose-100/70 text-rose-700 font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+            >
+              {isCancellingOrder ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Đang hủy đơn...</span>
+                </>
+              ) : (
+                <>
+                  <XCircle className="w-4 h-4" />
+                  <span>Hủy bỏ đơn hàng này</span>
+                </>
+              )}
+            </button>
+
             <Link
               href="/products"
-              className="w-full sm:w-auto px-5 py-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs transition-all"
+              className="w-full sm:w-auto px-5 py-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
-              Tiếp tục mua hàng
+              <ShoppingBag className="w-4 h-4" />
+              <span>Tiếp tục mua hàng</span>
             </Link>
           </div>
         </div>

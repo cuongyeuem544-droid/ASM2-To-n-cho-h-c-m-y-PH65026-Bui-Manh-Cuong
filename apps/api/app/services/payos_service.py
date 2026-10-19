@@ -104,8 +104,13 @@ class PayOSPaymentService:
                 )
             )
 
-        ret_url = return_url or f"{settings.payos_return_url}?order_code={order.order_code}"
-        cancel_url = f"{settings.payos_cancel_url}?order_code={order.order_code}&status=CANCELLED"
+        if return_url:
+            base_url = return_url.split("?")[0]
+            ret_url = return_url
+            cancel_url = f"{base_url}?order_code={order.order_code}&status=CANCELLED&cancel=true"
+        else:
+            ret_url = f"{settings.payos_return_url}?order_code={order.order_code}"
+            cancel_url = f"{settings.payos_cancel_url}?order_code={order.order_code}&status=CANCELLED&cancel=true"
 
         # Mô tả giao dịch cho payOS (tối đa 25 ký tự)
         desc_text = f"DH {order.order_code}".strip()[:25]
@@ -457,6 +462,22 @@ class PayOSPaymentService:
                 "total_amount": float(order.total_amount),
                 "is_paid": True,
                 "synced_from_gateway": True,
+            }
+
+        if payos_status in ["CANCELLED", "EXPIRED"]:
+            if trans and trans.status == "PENDING":
+                trans.status = payos_status
+                trans.updated_at = utcnow()
+                db.commit()
+            return {
+                "order_code": order.order_code,
+                "payment_status": order.payment_status,
+                "payment_method": order.payment_method,
+                "fulfillment_status": order.fulfillment_status,
+                "total_amount": float(order.total_amount),
+                "is_paid": False,
+                "is_cancelled": True,
+                "payos_status": payos_status,
             }
 
         return {
