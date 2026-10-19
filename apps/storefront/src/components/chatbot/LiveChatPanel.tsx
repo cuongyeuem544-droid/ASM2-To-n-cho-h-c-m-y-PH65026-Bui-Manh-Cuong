@@ -92,6 +92,100 @@ function playNotificationChime() {
   }
 }
 
+/**
+ * Component hiển thị hình ảnh đính kèm bảo mật:
+ * - Tải ảnh qua fetch() với Bearer token và guest token.
+ * - Chuyển dữ liệu nhị phân thành Blob URL.
+ * - Thu hồi URL bằng URL.revokeObjectURL() khi unmount để chống rò rỉ bộ nhớ.
+ * - Tuyệt đối không truyền JWT qua URL query string.
+ */
+function SecureChatImage({
+  url,
+  onClick,
+}: {
+  url: string;
+  onClick: (blobUrl: string) => void;
+}) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    let createdUrl: string | null = null;
+
+    const fetchImage = async () => {
+      try {
+        setLoading(true);
+        setError(false);
+
+        const headers: Record<string, string> = {};
+        const authToken = localStorage.getItem("pharmatrust_access_token") || localStorage.getItem("token");
+        if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+
+        const guestToken = localStorage.getItem(STORAGE_GUEST_TOKEN_KEY);
+        if (guestToken) headers["X-Chat-Guest-Token"] = guestToken;
+
+        const targetUrl = url.startsWith("http")
+          ? url
+          : url.startsWith("/api/chat/attachments/")
+          ? url
+          : `${API_BASE}${url.startsWith("/") ? "" : "/"}${url}`;
+
+        const res = await fetch(targetUrl, { headers });
+        if (!res.ok) {
+          if (active) setError(true);
+          return;
+        }
+
+        const blob = await res.blob();
+        if (!active) return;
+
+        createdUrl = URL.createObjectURL(blob);
+        setBlobUrl(createdUrl);
+      } catch {
+        if (active) setError(true);
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+
+    fetchImage();
+
+    return () => {
+      active = false;
+      if (createdUrl) {
+        URL.revokeObjectURL(createdUrl);
+      }
+    };
+  }, [url]);
+
+  if (loading) {
+    return (
+      <div className="h-28 w-44 bg-slate-100/80 animate-pulse rounded-xl flex items-center justify-center text-slate-400 text-[10px]">
+        Đang tải ảnh an toàn...
+      </div>
+    );
+  }
+
+  if (error || !blobUrl) {
+    return (
+      <div className="p-2 bg-red-50/90 border border-red-200 text-red-600 rounded-xl text-[10px] flex items-center gap-1.5">
+        <span>Không thể tải ảnh đính kèm (yêu cầu quyền xem).</span>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={blobUrl}
+      alt="Đính kèm"
+      onClick={() => onClick(blobUrl)}
+      className="max-h-48 w-auto object-cover hover:opacity-95 transition-opacity"
+    />
+  );
+}
+
 export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
   handoffContext,
   onClearHandoff,
@@ -833,11 +927,9 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
                   {/* Hình ảnh đính kèm (nếu có) */}
                   {msg.attachment_url && (
                     <div className="mb-2 overflow-hidden rounded-xl cursor-pointer">
-                      <img
-                        src={msg.attachment_url}
-                        alt="Đính kèm"
-                        onClick={() => setZoomImage(msg.attachment_url!)}
-                        className="max-h-48 w-auto object-cover hover:opacity-95 transition-opacity"
+                      <SecureChatImage
+                        url={msg.attachment_url}
+                        onClick={(blobUrl) => setZoomImage(blobUrl)}
                       />
                     </div>
                   )}

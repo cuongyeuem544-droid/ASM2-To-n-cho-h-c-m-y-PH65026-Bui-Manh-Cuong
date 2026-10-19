@@ -117,6 +117,7 @@ class FulfillmentTransitionPayload(BaseModel):
     fulfillment_status: Optional[str] = None
     status: Optional[str] = None
     note: Optional[str] = None
+    fulfillment_id: Optional[int] = None
 
 
 class StaffCreatePayload(BaseModel):
@@ -589,18 +590,27 @@ def update_order_fulfillment_status(
     if not fulfillments:
         raise HTTPException(status_code=404, detail="Đơn hàng chưa có kiện hàng fulfillment nào.")
 
-    # Kiểm tra phân quyền kho nghiêm ngặt:
-    # Nhân viên / Quản lý kho chỉ được phép cập nhật kiện hàng thuộc đúng kho của mình
-    if user.role != UserRole.ADMIN:
-        user_wh_id = user.warehouse_id
-        if not user_wh_id:
-            raise HTTPException(status_code=403, detail="Tài khoản chưa được phân công quản lý kho cụ thể.")
+    # Xử lý đơn hàng có nhiều fulfillment:
+    # Nếu đơn hàng có nhiều hơn 1 fulfillment, bắt buộc payload phải chỉ định rõ fulfillment_id
+    if len(fulfillments) > 1 and not payload.fulfillment_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Đơn hàng có nhiều kiện hàng fulfillment. Vui lòng chỉ định rõ 'fulfillment_id' cần cập nhật tiến trình.",
+        )
 
-        target_ffs = [ff for ff in fulfillments if ff.warehouse_id == user_wh_id]
-        if not target_ffs:
-            raise HTTPException(status_code=403, detail="Đơn hàng này không có kiện hàng thuộc phạm vi xử lý của kho bạn.")
+    if payload.fulfillment_id:
+        target_ff = next((ff for ff in fulfillments if ff.id == payload.fulfillment_id), None)
+        if not target_ff:
+            raise HTTPException(status_code=404, detail=f"Không tìm thấy kiện hàng #{payload.fulfillment_id} trong đơn hàng.")
+        # Kiểm tra quyền sở hữu kho
+        if user.role != UserRole.ADMIN and target_ff.warehouse_id != user.warehouse_id:
+            raise HTTPException(status_code=403, detail="Kiện hàng này không thuộc phạm vi kho của bạn.")
+        target_ffs = [target_ff]
     else:
-        target_ffs = fulfillments
+        single_ff = fulfillments[0]
+        if user.role != UserRole.ADMIN and single_ff.warehouse_id != user.warehouse_id:
+            raise HTTPException(status_code=403, detail="Đơn hàng này không có kiện hàng thuộc phạm vi xử lý của kho bạn.")
+        target_ffs = [single_ff]
 
     before_status = order.fulfillment_status
 

@@ -179,6 +179,10 @@ class LiveChatAttachment(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
+    @property
+    def file_name(self) -> str:
+        return self.original_filename
+
     # Relationships
     session = relationship("LiveChatSession", back_populates="attachments")
     message = relationship("LiveChatMessage")

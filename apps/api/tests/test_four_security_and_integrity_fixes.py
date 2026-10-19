@@ -16,6 +16,7 @@ from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import and_, or_, select
 from starlette.websockets import WebSocketDisconnect
 
 from app.core.config import settings
@@ -457,8 +458,10 @@ def test_return_restock_single_and_multi_batch_integrity():
         # Tạo Đơn hàng 1: Multi-batch (3 hộp từ Batch A, 2 hộp từ Batch B = tổng 5 hộp)
         order_multi = Order(
             order_code=f"ORD-MULTI-{uid}",
-            customer_id=customer.id,
             user_id=customer.id,
+            customer_name="Test Customer",
+            customer_phone="0901234567",
+            shipping_address="123 Duong Test",
             total_amount=Decimal("500000"),
             payment_status="PAID",
             order_status="DELIVERED",
@@ -510,10 +513,13 @@ def test_return_restock_single_and_multi_batch_integrity():
         ret_req_1 = ReturnRequest(
             return_code=f"RET-MULTI-{uid}",
             order_id=order_multi.id,
-            customer_id=customer.id,
-            request_type=ReturnRequestType.REFUND_ONLY.value,
+            user_id=customer.id,
+            customer_name="Khách Trả Hàng",
+            customer_phone="0901234567",
+            request_type=ReturnRequestType.RETURN.value,
             status=ReturnStatus.REFUNDED.value,
-            reason="Thừa thuốc sau điều trị",
+            reason_code="OTHER",
+            reason_text="Thừa thuốc sau điều trị",
         )
         db.add(ret_req_1)
         db.commit()
@@ -524,8 +530,12 @@ def test_return_restock_single_and_multi_batch_integrity():
             order_item_id=order_item_multi.id,
             product_name="Thuốc Kháng Sinh Test",
             product_id=sku.canonical_product_id,
+            original_quantity=5,
             requested_quantity=4,
             approved_quantity=4,
+            unit_price_at_purchase=Decimal("100000"),
+            net_paid_amount=Decimal("400000"),
+            requested_refund_amount=Decimal("400000"),
         )
         db.add(ret_item_1)
         db.commit()
@@ -614,8 +624,10 @@ def test_return_restock_single_and_multi_batch_integrity():
         # Tạo Order 2 & ReturnRequest 2
         order_2 = Order(
             order_code=f"ORD-REQ-FIRST-{uid}",
-            customer_id=customer.id,
             user_id=customer.id,
+            customer_name="Test Customer",
+            customer_phone="0901234567",
+            shipping_address="123 Duong Test",
             total_amount=Decimal("200000"),
             payment_status="PAID",
             order_status="DELIVERED",
@@ -648,10 +660,13 @@ def test_return_restock_single_and_multi_batch_integrity():
         ret_req_2 = ReturnRequest(
             return_code=f"RET-REQ-FIRST-{uid}",
             order_id=order_2.id,
-            customer_id=customer.id,
-            request_type=ReturnRequestType.REFUND_ONLY.value,
+            user_id=customer.id,
+            customer_name="Khách Trả Hàng",
+            customer_phone="0901234567",
+            request_type=ReturnRequestType.RETURN.value,
             status=ReturnStatus.RECEIVED.value,
-            reason="Bác sĩ đổi đơn",
+            reason_code="OTHER",
+            reason_text="Bác sĩ đổi đơn",
         )
         db.add(ret_req_2)
         db.commit()
@@ -662,7 +677,11 @@ def test_return_restock_single_and_multi_batch_integrity():
             order_item_id=order_item_2.id,
             product_name="Thuốc Kháng Sinh Test",
             product_id=sku.canonical_product_id,
+            original_quantity=2,
             requested_quantity=2,
+            unit_price_at_purchase=Decimal("100000"),
+            net_paid_amount=Decimal("200000"),
+            requested_refund_amount=Decimal("200000"),
         )
         db.add(ret_item_2)
         db.commit()
@@ -707,8 +726,10 @@ def test_return_restock_single_and_multi_batch_integrity():
         # --- TEST 5: Thiếu OrderItemBatchAllocation -> Báo lỗi 400, không thay đổi tồn kho ---
         order_no_alloc = Order(
             order_code=f"ORD-NOALLOC-{uid}",
-            customer_id=customer.id,
             user_id=customer.id,
+            customer_name="Test Customer",
+            customer_phone="0901234567",
+            shipping_address="123 Duong Test",
             total_amount=Decimal("100000"),
             payment_status="PAID",
             order_status="DELIVERED",
@@ -731,9 +752,13 @@ def test_return_restock_single_and_multi_batch_integrity():
         ret_no_alloc = ReturnRequest(
             return_code=f"RET-NOALLOC-{uid}",
             order_id=order_no_alloc.id,
-            customer_id=customer.id,
-            request_type=ReturnRequestType.REFUND_ONLY.value,
+            user_id=customer.id,
+            customer_name="Khách Trả Hàng",
+            customer_phone="0901234567",
+            request_type=ReturnRequestType.RETURN.value,
             status=ReturnStatus.RECEIVED.value,
+            reason_code="OTHER",
+            reason_text="Không có lô",
         )
         db.add(ret_no_alloc)
         db.commit()
@@ -743,7 +768,11 @@ def test_return_restock_single_and_multi_batch_integrity():
             order_item_id=item_no_alloc.id,
             product_name="Thuốc Kháng Sinh Test",
             product_id=sku.canonical_product_id,
+            original_quantity=1,
             requested_quantity=1,
+            unit_price_at_purchase=Decimal("100000"),
+            net_paid_amount=Decimal("100000"),
+            requested_refund_amount=Decimal("100000"),
         )
         db.add(ret_item_no_alloc)
         db.commit()
@@ -768,8 +797,10 @@ def test_return_restock_single_and_multi_batch_integrity():
         # --- TEST 6: Kho của allocation không khớp kho ca hoàn -> Báo lỗi 400 ---
         order_wrong_wh = Order(
             order_code=f"ORD-WRONGWH-{uid}",
-            customer_id=customer.id,
             user_id=customer.id,
+            customer_name="Test Customer",
+            customer_phone="0901234567",
+            shipping_address="123 Duong Test",
             total_amount=Decimal("100000"),
             payment_status="PAID",
             order_status="DELIVERED",
@@ -801,6 +832,7 @@ def test_return_restock_single_and_multi_batch_integrity():
 
         case_wrong_wh = WarehouseReturnCase(
             case_code=f"WHC-WRONGWH-{uid}",
+            return_request_id=ret_req_1.id,
             warehouse_id=wh1.id,
             status=ReturnStatus.APPROVED.value,
         )
@@ -812,8 +844,12 @@ def test_return_restock_single_and_multi_batch_integrity():
             order_item_id=item_wrong_wh.id,
             product_name="Thuốc Kháng Sinh Test",
             product_id=sku.canonical_product_id,
+            original_quantity=1,
             requested_quantity=1,
             approved_quantity=1,
+            unit_price_at_purchase=Decimal("100000"),
+            net_paid_amount=Decimal("100000"),
+            requested_refund_amount=Decimal("100000"),
         )
         db.add(ret_item_wrong_wh)
         case_wrong_wh.items.append(ret_item_wrong_wh)
@@ -833,6 +869,7 @@ def test_return_restock_single_and_multi_batch_integrity():
         # --- TEST 7: QUARANTINE và DISPOSE tuyệt đối không tăng tồn kho có thể bán ---
         case_quar = WarehouseReturnCase(
             case_code=f"WHC-QUAR-{uid}",
+            return_request_id=ret_req_1.id,
             warehouse_id=wh1.id,
             status=ReturnStatus.APPROVED.value,
         )

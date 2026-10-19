@@ -472,14 +472,30 @@ def test_manager_approve_does_not_auto_raise_approved_quantity(db_session: Sessi
     db_session.add(insp)
     db_session.commit()
 
-    # 1. Duyệt không truyền items_approval: Phải lấy đúng accepted_quantity = 0 từ inspection
-    # Khi tổng approved = 0, phải chặn không cho duyệt hoàn tiền
+    # 1. Duyệt không truyền items_approval: Bắt buộc fail-closed yêu cầu Quản lý kho duyệt chi tiết
     with pytest.raises(HTTPException) as exc1:
         WarehouseReturnService.manager_approve_case(
             db=db_session, case_code=case.case_code, manager_user=mgr, warehouse_id=wh.id
         )
     assert exc1.value.status_code == 400
-    assert "Tổng số lượng sản phẩm được duyệt là 0" in exc1.value.detail
+    assert any(msg in exc1.value.detail for msg in ["Tổng số lượng sản phẩm được duyệt là 0", "Vui lòng cung cấp danh sách phê duyệt chi tiết"])
+
+    # Khi tổng approved = 0, phải chặn không cho duyệt hoàn tiền
+    with pytest.raises(HTTPException) as exc1_zero:
+        WarehouseReturnService.manager_approve_case(
+            db=db_session,
+            case_code=case.case_code,
+            manager_user=mgr,
+            warehouse_id=wh.id,
+            items_approval=[{
+                "return_item_id": ret_item.id,
+                "approved_quantity": 0,
+                "rejected_quantity": 2,
+                "rejection_reason": "Hàng hỏng hoàn toàn",
+            }],
+        )
+    assert exc1_zero.value.status_code == 400
+    assert "Tổng số lượng sản phẩm được duyệt là 0" in exc1_zero.value.detail
 
     # Đảm bảo ret_item.approved_quantity KHÔNG bị nâng lên requested_quantity (2)
     db_session.refresh(ret_item)

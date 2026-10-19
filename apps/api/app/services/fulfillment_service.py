@@ -2,6 +2,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 import logging
 from typing import Any, Optional
+import uuid
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
@@ -542,9 +543,14 @@ class FulfillmentRoutingService:
         elif target_status == "PACKED" and not ff.packed_at:
             ff.packed_at = now
         elif target_status == "SHIPPED" and old_status != "SHIPPED":
-            ff.shipped_at = now
+            # 1. Tiền kiểm định kiện hàng phải có sản phẩm
+            if not ff.items:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Kiện hàng {ff.fulfillment_code} không có bất kỳ sản phẩm nào để xuất kho.",
+                )
 
-            # Lấy tất cả phân bổ lô của kiện hàng này (hỗ trợ cả fulfillment_item_id lẫn order_item_id)
+            # 2. Lấy tất cả phân bổ lô của kiện hàng này (hỗ trợ cả fulfillment_item_id lẫn order_item_id)
             allocations = db.scalars(
                 select(OrderItemBatchAllocation).where(
                     OrderItemBatchAllocation.fulfillment_item_id.in_([it.id for it in ff.items])
@@ -561,18 +567,56 @@ class FulfillmentRoutingService:
                         )
                     ).all()
 
+            if not allocations:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Không tìm thấy thông tin phân bổ lô xuất kho cho kiện hàng {ff.fulfillment_code}. Không thể thực hiện xuất kho.",
+                )
+
+            # 3. Tiền kiểm định 100% dữ liệu trước khi thay đổi bất kỳ tồn kho nào
+            dispatch_plans = []
             for alloc in allocations:
+                # Kiểm tra kho của lô phân bổ phải khớp đúng với kho xuất hàng của kiện
+                if alloc.warehouse_id != ff.warehouse_id:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Lô xuất #{alloc.batch_id} thuộc kho #{alloc.warehouse_id}, không khớp với kho xuất của kiện hàng #{ff.warehouse_id}.",
+                    )
+
+                # Kiểm tra lô tồn tại trong hệ thống
+                batch = db.scalar(select(InventoryBatch).where(InventoryBatch.id == alloc.batch_id))
+                if not batch:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Lô xuất #{alloc.batch_id} không tồn tại trong hệ thống.",
+                    )
+
+                # Kiểm tra bản ghi tồn kho
                 stock = db.scalar(
                     select(WarehouseBatchStock).where(
                         WarehouseBatchStock.warehouse_id == alloc.warehouse_id,
                         WarehouseBatchStock.batch_id == alloc.batch_id,
                     )
                 )
-                if stock:
-                    stock.quantity_reserved = max(0, stock.quantity_reserved - alloc.allocated_quantity)
-                    stock.quantity_on_hand = max(0, stock.quantity_on_hand - alloc.allocated_quantity)
+                if not stock:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Không tìm thấy dữ liệu tồn kho cho lô #{alloc.batch_id} tại kho #{alloc.warehouse_id}.",
+                    )
 
-                # Cập nhật reservation
+                if stock.quantity_on_hand < alloc.allocated_quantity:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Tồn kho thực tế của lô #{alloc.batch_id} ({stock.quantity_on_hand}) không đủ để xuất ({alloc.allocated_quantity}).",
+                    )
+
+                if stock.quantity_reserved < alloc.allocated_quantity:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Số lượng tồn kho giữ chỗ của lô #{alloc.batch_id} ({stock.quantity_reserved}) không đủ ({alloc.allocated_quantity}) để xuất kho.",
+                    )
+
+                # Kiểm tra phiếu giữ chỗ tồn kho
                 res = db.scalar(
                     select(StockReservation).where(
                         StockReservation.order_id == ff.order_id,
@@ -581,18 +625,38 @@ class FulfillmentRoutingService:
                         StockReservation.status == "RESERVED",
                     )
                 )
-                if res:
-                    res.status = "FULFILLED"
+                if not res:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Không tìm thấy phiếu giữ chỗ tồn kho hợp lệ (RESERVED) cho lô #{alloc.batch_id} thuộc đơn hàng #{ff.order_id}.",
+                    )
+
+                dispatch_plans.append({
+                    "alloc": alloc,
+                    "stock": stock,
+                    "res": res,
+                })
+
+            # 4. Thực thi nguyên tử (atomic) sau khi vượt qua 100% tiền kiểm định
+            ff.shipped_at = now
+            for plan in dispatch_plans:
+                alloc = plan["alloc"]
+                stock = plan["stock"]
+                res = plan["res"]
+
+                stock.quantity_reserved -= alloc.allocated_quantity
+                stock.quantity_on_hand -= alloc.allocated_quantity
+                res.status = "FULFILLED"
 
                 # Ghi nhận Thẻ kho (StockMovement - DISPATCH)
                 db.add(
                     StockMovement(
-                        movement_code=f"MOV-DISP-{ff.id}-{alloc.batch_id}-{int(now.timestamp())}",
+                        movement_code=f"MOV-DISP-{ff.id}-{alloc.batch_id}-{uuid.uuid4().hex[:6].upper()}",
                         movement_type="DISPATCH",
                         warehouse_id=alloc.warehouse_id,
                         batch_id=alloc.batch_id,
                         quantity=-alloc.allocated_quantity,
-                        balance_after=stock.quantity_on_hand if stock else 0,
+                        balance_after=stock.quantity_on_hand,
                         reference_type="ORDER_FULFILLMENT",
                         reference_id=ff.fulfillment_code,
                         created_by=user_id,

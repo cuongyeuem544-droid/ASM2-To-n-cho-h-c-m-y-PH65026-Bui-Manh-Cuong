@@ -56,6 +56,7 @@ from app.services.alert_notifier import dispatch_alert
 from app.services.audit import write_audit
 from app.services.refund_calculation_service import RefundCalculationService
 from app.services.refund_service import RefundService
+from app.services.return_restock_service import ReturnRestockService
 
 logger = logging.getLogger("pharmatrust.warehouse_returns")
 
@@ -714,67 +715,96 @@ class WarehouseReturnService:
             )
 
         old_status = case.status
-        item_map = {item.id: item for item in case.items}
+        case_items = list(case.items)
+        if not case_items and case.return_request:
+            case_items = list(case.return_request.items)
+
+        if not items_approval:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Vui lòng cung cấp danh sách phê duyệt chi tiết (items) cho từng sản phẩm do Quản lý kho duyệt. Tuyệt đối không tự động duyệt khi thiếu dữ liệu.",
+            )
+
+        item_map = {item.id: item for item in case_items}
+        submitted_ids = {app.get("return_item_id") for app in items_approval}
+
+        # 1. Kiểm tra không có sản phẩm lạ
+        for it_id in submitted_ids:
+            if it_id not in item_map:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Sản phẩm #{it_id} không thuộc ca hoàn {case.case_code}.",
+                )
+
+        # 2. Kiểm tra bắt buộc có mặt đầy đủ mọi sản phẩm của ca hoàn
+        for it_id, it in item_map.items():
+            if it_id not in submitted_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Thiếu thông tin phê duyệt cho sản phẩm '{it.product_name}' (ID #{it_id}). Quản lý kho bắt buộc phải duyệt/từ chối tất cả sản phẩm trong ca hoàn.",
+                )
+
         total_accepted = 0
+        approval_details = []
 
-        if items_approval:
-            for app_in in items_approval:
-                it_id = app_in.get("return_item_id")
-                if it_id in item_map:
-                    ret_item = item_map[it_id]
-                    if "approved_quantity" not in app_in or app_in.get("approved_quantity") is None:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Vui lòng chỉ định số lượng duyệt (approved_quantity) cho sản phẩm '{ret_item.product_name}'.",
-                        )
-                    acc_q = int(app_in["approved_quantity"])
-                    raw_rej = app_in.get("rejected_quantity")
-                    rej_q = int(raw_rej) if raw_rej is not None else max(0, ret_item.requested_quantity - acc_q)
+        for app_in in items_approval:
+            it_id = app_in.get("return_item_id")
+            ret_item = item_map[it_id]
+            if "approved_quantity" not in app_in or app_in.get("approved_quantity") is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Vui lòng chỉ định số lượng duyệt (approved_quantity) cho sản phẩm '{ret_item.product_name}'.",
+                )
+            acc_q = int(app_in["approved_quantity"])
+            raw_rej = app_in.get("rejected_quantity")
+            if raw_rej is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Vui lòng chỉ định rõ số lượng từ chối (rejected_quantity) cho sản phẩm '{ret_item.product_name}'.",
+                )
+            rej_q = int(raw_rej)
 
-                    if acc_q < 0 or acc_q > ret_item.requested_quantity:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Số lượng duyệt ({acc_q}) không hợp lệ cho sản phẩm '{ret_item.product_name}'.",
-                        )
+            if acc_q < 0 or rej_q < 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Số lượng duyệt ({acc_q}) và từ chối ({rej_q}) của '{ret_item.product_name}' không được âm.",
+                )
 
-                    if ret_item.received_quantity is not None and ret_item.received_quantity > 0 and acc_q > ret_item.received_quantity:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Số lượng duyệt ({acc_q}) không thể vượt quá số lượng thực nhận ({ret_item.received_quantity}) cho sản phẩm '{ret_item.product_name}'.",
-                        )
+            if acc_q > ret_item.requested_quantity:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Số lượng duyệt ({acc_q}) không thể vượt quá số lượng yêu cầu hoàn ({ret_item.requested_quantity}) cho sản phẩm '{ret_item.product_name}'.",
+                )
 
-                    ret_item.approved_quantity = acc_q
-                    ret_item.rejected_quantity = rej_q
-                    if acc_q == 0:
-                        rej_reason = app_in.get("rejection_reason") or app_in.get("reason") or "Từ chối duyệt hoàn tiền"
-                        ret_item.inspection_note = f"{ret_item.inspection_note or ''} [Lý do từ chối: {rej_reason}]".strip()
+            if ret_item.received_quantity is not None and ret_item.received_quantity > 0 and acc_q > ret_item.received_quantity:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Số lượng duyệt ({acc_q}) không thể vượt quá số lượng thực nhận ({ret_item.received_quantity}) cho sản phẩm '{ret_item.product_name}'.",
+                )
 
-                    # Tính lại tiền hoàn được duyệt theo net_unit_price
-                    net_unit = RefundCalculationService.calculate_net_unit_price(case.return_request.order, ret_item.order_item)
-                    ret_item.approved_refund_amount = net_unit * Decimal(str(acc_q))
-                    db.add(ret_item)
-                    total_accepted += acc_q
-        else:
-            # Duyệt theo đề xuất từ biên bản kiểm định của nhân viên kho (tuyệt đối không tự nâng số lượng)
-            for ret_item in case.items:
-                insp = next((i for i in case.inspections if i.return_item_id == ret_item.id), None)
-                if not insp or insp.accepted_quantity is None:
+            if rej_q > 0:
+                rej_reason = app_in.get("rejection_reason") or app_in.get("reason")
+                if not rej_reason or not str(rej_reason).strip():
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Sản phẩm '{ret_item.product_name}' chưa có biên bản kiểm định hợp lệ. Không thể tự động phê duyệt.",
+                        detail=f"Sản phẩm '{ret_item.product_name}' có {rej_q} đơn vị bị từ chối, bắt buộc phải nêu rõ lý do từ chối (rejection_reason).",
                     )
-                acc_q = int(insp.accepted_quantity or 0)
-                ret_item.approved_quantity = acc_q
-                ret_item.rejected_quantity = max(0, ret_item.requested_quantity - acc_q)
-                net_unit = RefundCalculationService.calculate_net_unit_price(case.return_request.order, ret_item.order_item)
-                ret_item.approved_refund_amount = net_unit * Decimal(str(acc_q))
-                db.add(ret_item)
-                total_accepted += acc_q
+                ret_item.inspection_note = f"{ret_item.inspection_note or ''} [Lý do từ chối {rej_q} sp: {str(rej_reason).strip()}]".strip()
+
+            ret_item.approved_quantity = acc_q
+            ret_item.rejected_quantity = rej_q
+
+            # BẮT BUỘC: Tính lại tiền hoàn được duyệt theo approved_quantity do Quản lý kho duyệt
+            net_unit = RefundCalculationService.calculate_net_unit_price(case.return_request.order, ret_item.order_item)
+            ret_item.approved_refund_amount = net_unit * Decimal(str(acc_q))
+            db.add(ret_item)
+            total_accepted += acc_q
+            approval_details.append(f"SP #{ret_item.product_id} ({ret_item.product_name}): duyệt {acc_q}, từ chối {rej_q}")
 
         if total_accepted == 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Tổng số lượng sản phẩm được duyệt là 0. Nếu không chấp nhận hoàn hàng, vui lòng sử dụng chức năng 'Từ chối'.",
+                detail="Tổng số lượng sản phẩm được duyệt là 0. Nếu không chấp nhận hoàn hàng, Quản lý kho bắt buộc phải sử dụng chức năng 'Từ chối' (reject).",
             )
 
         case.status = ReturnStatus.REFUND_PENDING.value
@@ -1134,169 +1164,48 @@ class WarehouseReturnService:
                 detail=f"Chỉ có thể phân luồng tồn kho khi ca hoàn đã được hoàn tiền hoặc duyệt (Hiện tại: '{case.status}').",
             )
 
-        # Idempotency chéo: Kiểm tra ca hoàn kho hoặc phiếu hoàn cấp ReturnRequest đã từng được restock chưa
+        old_status = case.status
+        case_items = list(case.items)
+        if not case_items and case.return_request:
+            case_items = list(case.return_request.items)
+
         if disposition == "RESTOCK":
-            existing_restock_conditions = [
-                and_(
-                    StockMovement.movement_type == "RETURN_RESTOCK",
-                    StockMovement.reference_type == "WAREHOUSE_RETURN_CASE",
-                    StockMovement.reference_id == case.case_code,
-                )
-            ]
-            if case.return_request:
-                existing_restock_conditions.append(
-                    and_(
-                        StockMovement.movement_type == "RETURN_RESTOCK",
-                        StockMovement.reference_type == "RETURN_REQUEST",
-                        StockMovement.reference_id == case.return_request.return_code,
-                    )
-                )
-            existing_restock_mv = db.scalar(
-                select(StockMovement).where(or_(*existing_restock_conditions))
-            )
-            if existing_restock_mv:
+            items_to_restock = []
+            for ret_item in case_items:
+                qty_restock = ret_item.approved_quantity or 0
+                if qty_restock > 0:
+                    items_to_restock.append({
+                        "order_item_id": ret_item.order_item_id,
+                        "product_id": ret_item.product_id,
+                        "product_name": ret_item.product_name,
+                        "qty_to_restock": qty_restock,
+                        "return_item_id": ret_item.id,
+                    })
+
+            if not items_to_restock:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Ca hoàn này hoặc phiếu hoàn liên quan ({case.return_request.return_code if case.return_request else ''}) đã được nhập lại kho bán trước đó. Không thể thực hiện nhập kho lần hai.",
+                    detail="Không có sản phẩm nào có số lượng được duyệt > 0 để nhập lại kho bán.",
                 )
 
-        # BƯỚC 1: Tiền kiểm định (Pre-validation) toàn bộ sản phẩm TRƯỚC KHI cập nhật bất kỳ tồn kho nào
-        items_to_restock_plan: list[dict[str, Any]] = []
+            linked_codes = [case.return_request.return_code] if case.return_request else []
+            ReturnRestockService.execute_return_restock(
+                db=db,
+                source_type="WAREHOUSE_RETURN_CASE",
+                source_code=case.case_code,
+                warehouse_id=case.warehouse_id,
+                items_to_restock=items_to_restock,
+                actor_user_id=manager_user.id,
+                audit_note=note or f"Nhập lại kho từ ca hoàn {case.case_code}",
+                linked_reference_codes=linked_codes,
+            )
 
-        if disposition == "RESTOCK":
-            for ret_item in case.items:
-                qty_restock = ret_item.approved_quantity or 0
-                if qty_restock <= 0:
-                    continue
+            for ret_item in case_items:
+                if ret_item.approved_quantity and ret_item.approved_quantity > 0:
+                    ret_item.restock_quantity = ret_item.approved_quantity
+                    db.add(ret_item)
 
-                # 1. Truy xuất OrderItemBatchAllocation của order_item này
-                allocations = db.scalars(
-                    select(OrderItemBatchAllocation)
-                    .where(OrderItemBatchAllocation.order_item_id == ret_item.order_item_id)
-                    .order_by(OrderItemBatchAllocation.id.asc())
-                ).all()
-
-                if not allocations:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Không tìm thấy thông tin lô xuất kho gốc cho sản phẩm {ret_item.product_id} (order_item: {ret_item.order_item_id}). Không thể nhập lại kho bán được.",
-                    )
-
-                # 2. Kiểm tra tính toàn vẹn của các lô xuất kho gốc và khớp kho
-                grouped_allocations: list[dict[str, Any]] = []
-                seen_batches: dict[int, dict[str, Any]] = {}
-
-                for alloc in allocations:
-                    if not alloc.batch_id:
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=f"Thông tin phân bổ lô xuất kho bị thiếu batch_id cho sản phẩm #{ret_item.product_id}.",
-                        )
-
-                    batch = db.scalar(select(InventoryBatch).where(InventoryBatch.id == alloc.batch_id))
-                    if not batch:
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=f"Lô xuất gốc #{alloc.batch_id} không tồn tại trong hệ thống.",
-                        )
-
-                    sku = db.scalar(select(ProductSku).where(ProductSku.id == batch.sku_id))
-                    if not sku or sku.canonical_product_id != ret_item.product_id:
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=f"Lô xuất gốc #{alloc.batch_id} (SKU #{batch.sku_id}) không thuộc sản phẩm #{ret_item.product_id}.",
-                        )
-
-                    # Kiểm tra kho sở hữu: Lô và allocation phải thuộc đúng kho xử lý ca hoàn
-                    if alloc.warehouse_id != case.warehouse_id:
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=f"Kho của lô xuất gốc #{alloc.batch_id} (Kho #{alloc.warehouse_id}) không khớp với kho của ca hoàn (Kho #{case.warehouse_id}).",
-                        )
-
-                    # Gộp allocation nếu cùng lô xuất hiện nhiều lần
-                    if alloc.batch_id not in seen_batches:
-                        entry = {
-                            "batch_id": alloc.batch_id,
-                            "warehouse_id": alloc.warehouse_id,
-                            "allocated_quantity": alloc.allocated_quantity,
-                        }
-                        seen_batches[alloc.batch_id] = entry
-                        grouped_allocations.append(entry)
-                    else:
-                        seen_batches[alloc.batch_id]["allocated_quantity"] += alloc.allocated_quantity
-
-                total_allocated = sum(g["allocated_quantity"] for g in grouped_allocations)
-                if qty_restock > total_allocated:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Số lượng hoàn ({qty_restock}) vượt quá tổng số lượng đã xuất từ các lô gốc ({total_allocated}) cho sản phẩm '{ret_item.product_name}'.",
-                    )
-
-                items_to_restock_plan.append({
-                    "ret_item": ret_item,
-                    "qty_restock": qty_restock,
-                    "grouped_allocations": grouped_allocations,
-                })
-
-        # BƯỚC 2: Thực thi cập nhật tồn kho (chỉ khi toàn bộ sản phẩm hợp lệ 100%)
-        old_status = case.status
-        case.disposition = disposition
-        case.disposition_note = note
-        case.disposition_at = utcnow()
-        case.updated_at = utcnow()
-
-        if disposition == "RESTOCK":
             case.status = ReturnStatus.RESTOCKED.value
-            for plan in items_to_restock_plan:
-                ret_item = plan["ret_item"]
-                qty_restock = plan["qty_restock"]
-                grouped_allocations = plan["grouped_allocations"]
-
-                remaining_qty = qty_restock
-                for g in grouped_allocations:
-                    if remaining_qty <= 0:
-                        break
-                    portion = min(remaining_qty, g["allocated_quantity"])
-                    remaining_qty -= portion
-
-                    # Cập nhật WarehouseBatchStock
-                    stock = db.scalar(
-                        select(WarehouseBatchStock).where(
-                            WarehouseBatchStock.warehouse_id == case.warehouse_id,
-                            WarehouseBatchStock.batch_id == g["batch_id"],
-                        )
-                    )
-                    if stock:
-                        stock.quantity_on_hand += portion
-                        stock.quantity_available += portion
-                        db.add(stock)
-                    else:
-                        stock = WarehouseBatchStock(
-                            warehouse_id=case.warehouse_id,
-                            batch_id=g["batch_id"],
-                            quantity_on_hand=portion,
-                            quantity_available=portion,
-                            quantity_reserved=0,
-                        )
-                        db.add(stock)
-
-                    # Tạo StockMovement
-                    movement = StockMovement(
-                        movement_code=f"MOV-RET-{uuid.uuid4().hex[:6].upper()}",
-                        batch_id=g["batch_id"],
-                        warehouse_id=case.warehouse_id,
-                        movement_type="RETURN_RESTOCK",
-                        quantity=portion,
-                        reference_type="WAREHOUSE_RETURN_CASE",
-                        reference_id=case.case_code,
-                        note=f"Nhập lại kho từ ca hoàn {case.case_code}, đơn hàng #{case.return_request.order_id if case.return_request else 'N/A'}, order_item #{ret_item.order_item_id}, lô gốc #{g['batch_id']}",
-                        balance_after=stock.quantity_on_hand,
-                        created_by=manager_user.id,
-                        created_at=utcnow(),
-                    )
-                    db.add(movement)
-
         elif disposition == "QUARANTINE":
             case.status = ReturnStatus.QUARANTINED.value
         elif disposition == "DISPOSE":

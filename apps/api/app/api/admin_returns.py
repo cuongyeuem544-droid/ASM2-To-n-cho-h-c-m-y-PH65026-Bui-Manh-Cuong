@@ -19,7 +19,7 @@ from decimal import Decimal
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session
 
@@ -83,13 +83,35 @@ class ReceivePayload(BaseModel):
 
 
 class ItemInspectionPayload(BaseModel):
-    return_item_id: int
-    condition: str = Field(default=ItemCondition.GOOD_CONDITION.value)
-    restock_destination: str = Field(default=RestockDestination.SELLABLE_STOCK.value)
-    accepted_quantity: int = Field(ge=0)
-    rejected_quantity: int = Field(default=0, ge=0)
-    restock_quantity: Optional[int] = Field(default=None, ge=0)
+    return_item_id: int = Field(..., description="ID sản phẩm đổi/trả bắt buộc")
+    condition: str = Field(..., description="Tình trạng thực tế của sản phẩm bắt buộc (không mặc định)")
+    restock_destination: str = Field(..., description="Phân luồng kho bắt buộc (không mặc định)")
+    accepted_quantity: int = Field(..., ge=0, description="Số lượng chấp nhận bắt buộc")
+    rejected_quantity: int = Field(..., ge=0, description="Số lượng loại bỏ bắt buộc")
+    restock_quantity: Optional[int] = Field(default=None, ge=0, description="Số lượng nhập lại kho bán (bắt buộc khi restock_destination là SELLABLE_STOCK)")
     notes: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_inspection(self):
+        # 1. Tổng số lượng kiểm định phải > 0
+        if self.accepted_quantity + self.rejected_quantity <= 0:
+            raise ValueError(f"Tổng số lượng chấp nhận ({self.accepted_quantity}) và từ chối ({self.rejected_quantity}) phải lớn hơn 0.")
+
+        # 2. Nếu phân luồng vào kho bán SELLABLE_STOCK
+        if self.restock_destination == RestockDestination.SELLABLE_STOCK.value:
+            # Bắt buộc phải nhập restock_quantity rõ ràng
+            if self.restock_quantity is None:
+                raise ValueError("Bắt buộc phải chỉ định 'restock_quantity' khi phân luồng vào kho bán (SELLABLE_STOCK). Tuyệt đối không tự động mặc định.")
+            if self.restock_quantity <= 0:
+                raise ValueError("Số lượng nhập lại kho bán (restock_quantity) phải lớn hơn 0 khi phân luồng vào kho bán.")
+            if self.restock_quantity > self.accepted_quantity:
+                raise ValueError(f"Số lượng nhập kho bán ({self.restock_quantity}) không được lớn hơn số lượng chấp nhận ({self.accepted_quantity}).")
+            
+            # Tiêu chuẩn an toàn GSP: chỉ cho phép khi condition là GOOD_CONDITION hoặc SEALED
+            gsp_compliant = [ItemCondition.GOOD_CONDITION.value, ItemCondition.SEALED.value]
+            if self.condition not in gsp_compliant:
+                raise ValueError(f"Sản phẩm có tình trạng '{self.condition}', không đạt tiêu chuẩn an toàn GSP để nhập lại kho bán (SELLABLE_STOCK).")
+        return self
 
 
 class InspectionPayload(BaseModel):

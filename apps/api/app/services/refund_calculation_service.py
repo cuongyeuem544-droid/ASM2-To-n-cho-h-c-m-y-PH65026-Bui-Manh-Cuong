@@ -112,7 +112,7 @@ class RefundCalculationService:
                 continue
 
             net_unit_price = cls.calculate_net_unit_price(order, order_item)
-            qty = Decimal(str(ret_item.accepted_quantity or 0))
+            qty = Decimal(str(ret_item.approved_quantity or 0))
             line_refund = net_unit_price * qty
             items_total += line_refund
 

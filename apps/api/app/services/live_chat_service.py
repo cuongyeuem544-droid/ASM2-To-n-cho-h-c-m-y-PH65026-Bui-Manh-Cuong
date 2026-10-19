@@ -15,6 +15,10 @@ class LiveChatConnectionManager:
         # Map: staff_user_id -> list of staff WebSockets
         self.staff_connections: dict[int, list[WebSocket]] = {}
 
+    @property
+    def active_connections(self) -> dict[str, list[WebSocket]]:
+        return self.client_connections
+
     async def connect_client(self, session_code: str, websocket: WebSocket):
         await websocket.accept()
         if session_code not in self.client_connections:

@@ -32,7 +32,7 @@ from decimal import Decimal
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -111,10 +111,10 @@ class EvidencePayload(BaseModel):
 
 
 class ItemInspectionItem(BaseModel):
-    return_item_id: int
-    received_quantity: int = Field(ge=0)
-    accepted_quantity: int = Field(ge=0)
-    rejected_quantity: Optional[int] = Field(default=0, ge=0)
+    return_item_id: int = Field(..., description="ID sản phẩm đổi/trả bắt buộc")
+    received_quantity: int = Field(..., ge=0, description="Số lượng nhận bắt buộc")
+    accepted_quantity: int = Field(..., ge=0, description="Số lượng chấp nhận bắt buộc")
+    rejected_quantity: int = Field(..., ge=0, description="Số lượng từ chối bắt buộc (không mặc định)")
     package_condition: str = Field(..., min_length=1, description="Trạng thái bao bì bắt buộc")
     seal_intact: bool = Field(..., description="Tem niêm phong nguyên vẹn bắt buộc (True/False)")
     batch_matched: bool = Field(..., description="Khớp số lô đã xuất bắt buộc (True/False)")
@@ -123,6 +123,30 @@ class ItemInspectionItem(BaseModel):
     damage_description: Optional[str] = None
     suggested_action: str = Field(..., min_length=1, description="Đề xuất xử lý bắt buộc (RESTOCK/QUARANTINE/DISPOSE)")
     inspection_note: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_inspection_safety(self):
+        # 1. Tổng nhận phải bằng tổng chấp nhận + từ chối
+        if self.accepted_quantity + self.rejected_quantity != self.received_quantity:
+            raise ValueError(
+                f"Tổng số lượng chấp nhận ({self.accepted_quantity}) và từ chối ({self.rejected_quantity}) "
+                f"phải bằng số lượng nhận ({self.received_quantity})."
+            )
+
+        # 2. Kiểm định an toàn khi đề xuất nhập lại kho bán (RESTOCK)
+        if self.suggested_action.upper() in ["RESTOCK", "SELLABLE_STOCK"]:
+            if not self.seal_intact:
+                raise ValueError("Không thể đề xuất nhập lại kho bán (RESTOCK) khi tem niêm phong không nguyên vẹn.")
+            if not self.batch_matched:
+                raise ValueError("Không thể đề xuất nhập lại kho bán (RESTOCK) khi số lô không khớp với lô đã xuất.")
+            if not self.expiry_matched:
+                raise ValueError("Không thể đề xuất nhập lại kho bán (RESTOCK) khi hạn sử dụng không khớp hoặc đã hết hạn.")
+            if not self.storage_condition_ok:
+                raise ValueError("Không thể đề xuất nhập lại kho bán (RESTOCK) khi điều kiện bảo quản không đạt chuẩn GSP.")
+            pkg_lower = self.package_condition.lower()
+            if any(bad in pkg_lower for bad in ["rách", "móp", "vỡ", "hỏng", "damaged", "broken", "torn"]):
+                raise ValueError(f"Bao bì '{self.package_condition}' bị hư hại, không đạt chuẩn nhập lại kho bán.")
+        return self
 
 
 class SaveInspectionPayload(BaseModel):
@@ -139,15 +163,20 @@ class ReinspectionPayload(BaseModel):
 
 
 class ItemApprovalItem(BaseModel):
-    return_item_id: int
-    approved_quantity: int = Field(ge=0)
-    rejected_quantity: Optional[int] = Field(default=None, ge=0)
-    rejection_reason: Optional[str] = None
+    return_item_id: int = Field(..., description="ID sản phẩm đổi/trả")
+    approved_quantity: int = Field(..., ge=0, description="Số lượng được quản lý duyệt hoàn tiền")
+    rejected_quantity: int = Field(..., ge=0, description="Số lượng từ chối hoàn tiền")
+    rejection_reason: Optional[str] = Field(default=None, description="Lý do từ chối (bắt buộc nếu rejected_quantity > 0)")
+
+    @model_validator(mode="after")
+    def validate_rejection_reason(self):
+        if self.rejected_quantity > 0 and (not self.rejection_reason or not str(self.rejection_reason).strip()):
+            raise ValueError(f"Sản phẩm #{self.return_item_id} có {self.rejected_quantity} đơn vị bị từ chối, bắt buộc phải nêu rõ lý do từ chối (rejection_reason).")
+        return self
 
 
 class ApproveReturnPayload(BaseModel):
-    items: Optional[List[ItemApprovalItem]] = None
-    accepted_items: Optional[List[ItemApprovalItem]] = None
+    items: List[ItemApprovalItem] = Field(..., min_length=1, description="Danh sách phê duyệt chi tiết từng sản phẩm bắt buộc do Quản lý kho duyệt")
     manager_note: Optional[str] = None
 
 

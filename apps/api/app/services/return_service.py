@@ -52,6 +52,7 @@ from app.services.alert_notifier import dispatch_alert
 from app.services.audit import write_audit
 from app.services.refund_calculation_service import RefundCalculationService
 from app.services.return_policy_service import ReturnPolicyService
+from app.services.return_restock_service import ReturnRestockService
 
 logger = logging.getLogger("pharmatrust.returns")
 
@@ -666,8 +667,19 @@ class ReturnService:
             seen_item_ids.add(item_id)
 
             item = ret_items_map[item_id]
-            condition = insp.get("condition") or ItemCondition.GOOD_CONDITION.value
-            destination = insp.get("restock_destination") or RestockDestination.SELLABLE_STOCK.value
+            condition = insp.get("condition")
+            if not condition:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Vui lòng chỉ định tình trạng sản phẩm (condition) cho sản phẩm '{item.product_name}'.",
+                )
+
+            destination = insp.get("restock_destination")
+            if not destination:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Vui lòng chỉ định phân luồng kho (restock_destination) cho sản phẩm '{item.product_name}'.",
+                )
 
             valid_dests = [
                 RestockDestination.SELLABLE_STOCK.value,
@@ -687,7 +699,14 @@ class ReturnService:
                     detail=f"Vui lòng chỉ định số lượng chấp nhận (accepted_quantity) cho sản phẩm '{item.product_name}'.",
                 )
             accepted_qty = int(raw_accepted)
-            rejected_qty = int(insp.get("rejected_quantity", 0))
+
+            raw_rejected = insp.get("rejected_quantity")
+            if raw_rejected is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Vui lòng chỉ định số lượng loại bỏ (rejected_quantity) cho sản phẩm '{item.product_name}'.",
+                )
+            rejected_qty = int(raw_rejected)
 
             if accepted_qty < 0 or rejected_qty < 0:
                 raise HTTPException(
@@ -702,11 +721,20 @@ class ReturnService:
                 )
 
             raw_restock = insp.get("restock_quantity")
-            restock_qty = (
-                int(raw_restock)
-                if raw_restock is not None
-                else (accepted_qty if destination == RestockDestination.SELLABLE_STOCK.value else 0)
-            )
+            if destination == RestockDestination.SELLABLE_STOCK.value:
+                if raw_restock is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Bắt buộc phải chỉ định số lượng nhập lại kho bán (restock_quantity) khi phân luồng vào kho bán (SELLABLE_STOCK) cho sản phẩm '{item.product_name}'.",
+                    )
+                restock_qty = int(raw_restock)
+                if restock_qty <= 0:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Số lượng nhập lại kho bán (restock_quantity) phải lớn hơn 0 khi phân luồng vào kho bán cho sản phẩm '{item.product_name}'.",
+                    )
+            else:
+                restock_qty = int(raw_restock) if raw_restock is not None else 0
 
             if restock_qty < 0:
                 raise HTTPException(
@@ -832,16 +860,22 @@ class ReturnService:
 
             # Xử lý cập nhật tồn kho nếu có số lượng nhập lại (Restock)
             if destination == RestockDestination.SELLABLE_STOCK.value and restock_qty > 0:
-                cls._process_restock_movement(
+                prod_id = item.order_item.product_id if item.order_item else (getattr(item, 'product_id', None))
+                ReturnRestockService.execute_return_restock(
                     db=db,
-                    order_item_id=item.order_item_id,
+                    source_type="RETURN_REQUEST",
+                    source_code=ret.return_code,
                     warehouse_id=item_wh_id,
-                    quantity=restock_qty,
-                    return_code=ret.return_code,
-                    actor=inspector_user,
-                    movement_type="RETURN_RESTOCK",
-                    note=f"Nhập lại kho bán từ phiếu hoàn {ret.return_code} (Tình trạng: {condition})",
-                    grouped_allocations=grouped_allocations,
+                    items_to_restock=[{
+                        "order_item_id": item.order_item_id,
+                        "product_id": prod_id,
+                        "product_name": item.product_name,
+                        "qty_to_restock": restock_qty,
+                        "return_item_id": item.id,
+                    }],
+                    actor_user_id=inspector_user.id,
+                    audit_note=f"Nhập lại kho bán từ phiếu hoàn {ret.return_code} (Tình trạng: {condition})",
+                    linked_reference_codes=linked_case_codes,
                 )
             elif destination == RestockDestination.QUARANTINE.value and accepted_qty > 0:
                 cls._process_restock_movement(
@@ -982,6 +1016,21 @@ class ReturnService:
         Hỗ trợ phân bổ đơn hàng nhiều lô (multi-batch) và gộp lô.
         """
         if quantity <= 0:
+            return
+
+        if movement_type == "RETURN_RESTOCK":
+            ReturnRestockService.execute_return_restock(
+                db=db,
+                source_type="RETURN_REQUEST",
+                source_code=return_code,
+                warehouse_id=warehouse_id,
+                items_to_restock=[{
+                    "order_item_id": order_item_id,
+                    "qty_to_restock": quantity,
+                }],
+                actor_user_id=actor.id,
+                audit_note=note,
+            )
             return
 
         if not grouped_allocations:

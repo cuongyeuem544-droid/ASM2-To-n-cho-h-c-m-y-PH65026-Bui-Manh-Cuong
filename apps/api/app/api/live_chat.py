@@ -994,15 +994,18 @@ ALLOWED_MIME_TYPES = {
     "image/png": ".png",
     "image/webp": ".webp",
     "image/gif": ".gif",
+    "application/pdf": ".pdf",
 }
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
 
 
 @router.post("/upload")
+@router.post("/attachments/upload")
 async def upload_chat_attachment(
     file: UploadFile = File(...),
     session_code: Optional[str] = Form(None),
     guest_token: Optional[str] = Form(None),
+    guest_session_token: Optional[str] = Form(None),
     x_chat_guest_token: Optional[str] = Header(None),
     current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
@@ -1043,7 +1046,7 @@ async def upload_chat_attachment(
         )
 
     # 2. Xác minh quyền sở hữu TRƯỚC KHI đọc nội dung tệp
-    eff_guest_token = guest_token or x_chat_guest_token
+    eff_guest_token = guest_token or guest_session_token or x_chat_guest_token
     is_staff = (
         current_user is not None
         and current_user.role in [UserRole.ADMIN, UserRole.PHARMACIST, UserRole.WAREHOUSE_MANAGER, UserRole.WAREHOUSE_STAFF]
@@ -1126,6 +1129,7 @@ async def upload_chat_attachment(
 def serve_chat_attachment(
     identifier: str,
     token: Optional[str] = Query(None),
+    guest_token: Optional[str] = Query(None),
     x_chat_guest_token: Optional[str] = Header(None),
     current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
@@ -1176,10 +1180,17 @@ def serve_chat_attachment(
     # Xác thực quyền truy cập
     authorized = False
     effective_token = str(token).strip() if token else ""
-    effective_guest_token = str(x_chat_guest_token).strip() if x_chat_guest_token else ""
+    effective_guest_token = str(x_chat_guest_token or guest_token).strip() if (x_chat_guest_token or guest_token) else ""
 
-    # 1. Thử xác thực với tài khoản người dùng
+    # 1. Kiểm tra có thông tin xác thực không
     actor = current_user
+    if not actor and not effective_token and not effective_guest_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Vui lòng cung cấp thông tin xác thực để xem tệp đính kèm",
+        )
+
+    # 2. Thử xác thực với tài khoản người dùng
     if not actor and effective_token:
         actor = authenticate_user_token(effective_token, db)
 
@@ -1275,6 +1286,7 @@ async def client_websocket(
 
     # Đăng ký kết nối an toàn vào connection manager
     await chat_manager.connect_client(session_code, websocket)
+    await websocket.send_text(json.dumps({"type": "CONNECTED", "session_code": session_code}))
     try:
         while True:
             data = await websocket.receive_text()
