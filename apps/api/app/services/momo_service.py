@@ -179,8 +179,11 @@ class MomoPaymentService:
 
         # Cập nhật phương thức thanh toán của đơn hàng
         order.payment_method = "MOMO"
+        order.payment_status = "PENDING"
+        order.fulfillment_status = "WAITING_PAYMENT"
         db.commit()
         db.refresh(trans)
+        db.refresh(order)
 
         return {
             "status": "SUCCESS",
@@ -318,10 +321,42 @@ class MomoPaymentService:
             trans.status = "SUCCESS"
             trans.provider_trans_id = trans_id
             order.payment_status = "PAID"
-            if order.order_status == "PENDING":
+            if order.order_status in ["PENDING", "DRAFT"]:
                 order.order_status = "CONFIRMED"
 
+            # ĐƠN CHÍNH THỨC XUẤT HIỆN TRONG DANH SÁCH XỬ LÝ CỦA KHO & ADMIN
+            order.fulfillment_status = "ALLOCATED"
+
+            # Phát thông báo tới Kho phụ trách
+            if order.assigned_warehouse_id:
+                try:
+                    from app.services.warehouse_notification_service import WarehouseNotificationService
+                    WarehouseNotificationService.notify_order_new(db, order, order.assigned_warehouse_id)
+                except Exception as n_err:
+                    logger.warning(f"Không thể gửi thông báo kho cho đơn {order.order_code}: {n_err}")
+
             webhook_log.processed = True
+
+            # Ghi Audit Log
+            try:
+                from app.services.audit import write_audit
+                write_audit(
+                    db,
+                    action="MOMO_IPN_PAYMENT_SUCCESS",
+                    entity_type="Order",
+                    entity_id=order.id,
+                    user=None,
+                    request=None,
+                    before={"payment_status": "PENDING", "fulfillment_status": "WAITING_PAYMENT"},
+                    after={
+                        "payment_status": "PAID",
+                        "fulfillment_status": "ALLOCATED",
+                        "trans_id": trans_id,
+                        "amount": paid_amount,
+                    },
+                )
+            except Exception as a_err:
+                logger.warning(f"Failed to write audit log for MoMo: {a_err}")
 
             # Gửi thông báo tức thì tới Telegram Quản trị viên
             dispatch_alert(

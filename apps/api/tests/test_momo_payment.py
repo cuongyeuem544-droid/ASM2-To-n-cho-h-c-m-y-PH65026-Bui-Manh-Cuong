@@ -288,10 +288,11 @@ class TestMomoPaymentSuite(unittest.TestCase):
         data = resp.json()
         self.assertEqual(data["resultCode"], 0)
 
-        # Kiểm tra đơn hàng trong CSDL được chuyển sang PAID và CONFIRMED
+        # Kiểm tra đơn hàng trong CSDL được chuyển sang PAID, CONFIRMED và ALLOCATED (kho tiếp nhận)
         self.db.refresh(self.order)
         self.assertEqual(self.order.payment_status, "PAID")
         self.assertEqual(self.order.order_status, "CONFIRMED")
+        self.assertEqual(self.order.fulfillment_status, "ALLOCATED")
 
         # Kiểm tra Thẻ thanh toán (PaymentTransaction) chuyển sang SUCCESS
         txn = self.db.query(PaymentTransaction).filter_by(order_id=self.order.id).first()
