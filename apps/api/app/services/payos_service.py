@@ -1,5 +1,7 @@
 import json
 import logging
+import threading
+import time
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Optional
@@ -8,13 +10,18 @@ from fastapi import HTTPException
 from payos import PayOS
 from payos.types.v2.payment_requests import CreatePaymentLinkRequest, ItemData
 from sqlalchemy import desc, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models import Order, PaymentTransaction
+from app.models import Order, PaymentTransaction, PaymentWebhookEvent, PayosOrderCode
+from app.services.alert_notifier import dispatch_alert
 from app.services.audit import write_audit
 
 logger = logging.getLogger("pharmatrust.payos")
+
+_order_code_lock = threading.Lock()
+_counter = 0
 
 
 def utcnow() -> datetime:
@@ -48,6 +55,42 @@ class PayOSPaymentService:
         )
 
     @classmethod
+    def generate_unique_order_code(cls, db: Session, order_id: int) -> int:
+        """
+        Sinh mã số đơn hàng payos_order_code dạng số nguyên duy nhất (BUG-04):
+        - Giới hạn JS Safe Integer (< 9,007,199,254,740,991, 15 chữ số).
+        - Kết hợp Unix timestamp mili-giây (13 chữ số) + Counter nguyên tử (2 chữ số).
+        - Ràng buộc UNIQUE được bảo đảm 100% bằng Database Constraint (bảng payos_order_codes).
+        - Hỗ trợ retry loop tự động khi có xung đột nhiều request song song.
+        """
+        global _counter
+        max_retries = 10
+        for _ in range(max_retries):
+            with _order_code_lock:
+                _counter = (_counter + 1) % 100
+                cnt = _counter
+
+            now_ms = int(datetime.now(UTC).timestamp() * 1000)
+            candidate_code = now_ms * 100 + cnt
+
+            try:
+                record = PayosOrderCode(
+                    order_id=order_id,
+                    order_code_num=candidate_code,
+                )
+                db.add(record)
+                db.flush()
+                return candidate_code
+            except IntegrityError:
+                db.rollback()
+                time.sleep(0.002)
+
+        raise HTTPException(
+            status_code=500,
+            detail="Không thể tạo mã số đơn hàng duy nhất cho cổng payOS. Vui lòng thử lại.",
+        )
+
+    @classmethod
     def create_payment_request(
         cls,
         db: Session,
@@ -57,7 +100,7 @@ class PayOSPaymentService:
         """
         Khởi tạo yêu cầu thanh toán qua payOS:
         1. Kiểm tra tính hợp lệ của đơn hàng (chưa hủy, chưa thanh toán).
-        2. Sinh mã số đơn hàng dạng số nguyên duy nhất (payos_order_code) cho payOS.
+        2. Sinh mã số đơn hàng dạng số nguyên duy nhất (payos_order_code) có ràng buộc UNIQUE.
         3. Tạo link thanh toán qua payOS SDK.
         4. Ghi nhận PaymentTransaction ở trạng thái PENDING.
         5. Đặt fulfillment_status = WAITING_PAYMENT (kho chưa xử lý khi chưa thanh toán).
@@ -76,12 +119,8 @@ class PayOSPaymentService:
 
         client = cls.get_client()
 
-        # Sinh mã số nguyên duy nhất cho payOS (phù hợp giới hạn JS safe integer: < 9007199254740991)
-        # Định dạng: YYMMDDHHMMSS + 2 chữ số từ order.id -> 14 chữ số
-        now = datetime.now()
-        numeric_time = now.strftime("%y%m%d%H%M%S")
-        suffix = f"{order.id % 100:02d}"
-        payos_order_code = int(f"{numeric_time}{suffix}")
+        # BUG-04: Sinh mã số nguyên duy nhất có ràng buộc UNIQUE trong Database
+        payos_order_code = cls.generate_unique_order_code(db=db, order_id=order.id)
 
         amount = int(order.total_amount)
         if amount <= 0:
@@ -204,12 +243,13 @@ class PayOSPaymentService:
     def process_webhook(cls, db: Session, payload: dict[str, Any]) -> dict[str, Any]:
         """
         Tiếp nhận và xử lý Webhook biến động thanh toán từ payOS:
-        1. Xác thực tính toàn vẹn (checksum / signature) bằng checksum_key.
-        2. Tìm giao dịch và đơn hàng tương ứng.
-        3. Kiểm tra Idempotency chống cộng tiền / đổi trạng thái nhiều lần.
-        4. Cập nhật Order sang PAID, OrderStatus sang CONFIRMED.
-        5. ĐỔI fulfillment_status sang ALLOCATED -> Đơn hàng CHÍNH THỨC xuất hiện trong danh sách cần xử lý của Kho & Admin.
-        6. Phát thông báo nội bộ cho nhân viên kho nhận đơn mới.
+        1. Xác thực tính toàn vẹn (checksum / signature) bằng checksum_key qua SDK chính thức.
+        2. Tìm PaymentTransaction chính xác bằng provider_trans_id == str(order_code_num) (BUG-03).
+        3. Kiểm tra số tiền nhận được bằng đúng tổng tiền đơn hàng (BUG-01).
+        4. Kiểm tra đơn đã hủy: KHÔNG tự động kích hoạt lại đơn đã CANCELLED (BUG-02).
+        5. Kiểm tra Idempotency chống xử lý lặp lại nhiều lần.
+        6. Cập nhật Order sang PAID, OrderStatus sang CONFIRMED, fulfillment_status sang ALLOCATED.
+        7. Phát thông báo nội bộ cho kho nhận đơn đúng một lần duy nhất.
         """
         client = cls.get_client()
 
@@ -232,20 +272,34 @@ class PayOSPaymentService:
         desc_text = getattr(verified_data, "description", "") or ""
         ref_code = getattr(verified_data, "reference", "") or ""
 
+        # Ghi nhận webhook event log
+        webhook_log = PaymentWebhookEvent(
+            provider="PAYOS",
+            event_id=str(ref_code or order_code_num or f"EVT-{int(datetime.now().timestamp())}"),
+            signature=payload.get("signature"),
+            payload_raw=json.dumps(payload, ensure_ascii=False),
+            processed=False,
+        )
+        db.add(webhook_log)
+        db.flush()
+
         logger.info(
-            f"[PAYOS WEBHOOK] Nhận thanh toán cho mã số payOS {order_code_num}, "
+            f"[PAYOS WEBHOOK] Nhận webhook payOS #{order_code_num}, "
             f"code={code}, amount={amount}, ref={ref_code}"
         )
 
-        # 2. Xử lý webhook kiểm thử từ payOS dashboard (khi bấm Test Webhook trên payOS)
+        # 2. Xử lý webhook kiểm thử từ payOS dashboard
         if order_code_num in [123, 123456, 0] or "demo" in desc_text.lower():
             logger.info("[PAYOS WEBHOOK] Webhook thử nghiệm kết nối từ dashboard payOS thành công.")
+            webhook_log.processed = True
+            db.commit()
             return {
                 "success": True,
                 "message": "Webhook thử nghiệm kết nối payOS đã được xác thực an toàn.",
             }
 
-        # 3. Tìm giao dịch theo provider_trans_id hoặc mã đơn hàng
+        # 3. BUG-03: Tìm giao dịch CHÍNH XÁC theo provider_trans_id.
+        # Tuyệt đối không dùng regex parse order_code từ description làm bằng chứng xác thực duy nhất.
         trans = None
         if order_code_num:
             trans = db.scalar(
@@ -255,36 +309,109 @@ class PayOSPaymentService:
                 )
             )
 
-        order = None
-        if trans and trans.order_id:
-            order = db.get(Order, trans.order_id)
+        if not trans:
+            err_msg = f"Không tìm thấy PaymentTransaction đã khởi tạo cho payOS orderCode={order_code_num}."
+            logger.warning(f"[PAYOS WEBHOOK] {err_msg}")
+            webhook_log.process_error = err_msg
+            db.commit()
+            raise HTTPException(status_code=400, detail=err_msg)
 
-        if not order and desc_text:
-            # Fallback tìm đơn qua chuỗi mã đơn PT- trong description
-            import re
-            match = re.search(r"PT-\d{6}-\w+", desc_text)
-            if match:
-                extracted_code = match.group(0)
-                order = db.scalar(select(Order).where(Order.order_code == extracted_code))
-                if order and not trans:
-                    trans = db.scalar(
-                        select(PaymentTransaction).where(
-                            PaymentTransaction.order_id == order.id,
-                            PaymentTransaction.provider == "PAYOS",
-                        ).order_by(desc(PaymentTransaction.id))
-                    )
-
+        order = db.get(Order, trans.order_id)
         if not order:
-            logger.warning(f"[PAYOS WEBHOOK] Không tìm thấy đơn hàng cho payos_order_code={order_code_num}, desc={desc_text}")
-            return {
-                "success": False,
-                "message": f"Không tìm thấy đơn hàng tương ứng với mã {order_code_num}.",
-            }
+            err_msg = f"Không tìm thấy đơn hàng liên kết với giao dịch {trans.transaction_code}."
+            webhook_log.process_error = err_msg
+            db.commit()
+            raise HTTPException(status_code=404, detail=err_msg)
 
         # 4. Kiểm tra mã phản hồi (code '00' là giao dịch thành công trong payOS)
         if str(code) == "00":
-            # Chống trùng lặp (Idempotency check)
-            if order.payment_status == "PAID":
+            # BUG-01: Kiểm tra số tiền thanh toán nghiêm ngặt
+            # Bắt buộc số tiền payOS nhận được phải khớp chính xác với số tiền Backend đã lưu
+            order_total = int(order.total_amount)
+            paid_amount = int(amount) if amount is not None else 0
+
+            raw_info = {
+                "reference": ref_code,
+                "amount": paid_amount,
+                "expected_amount": order_total,
+                "counter_bank": getattr(verified_data, "counter_account_bank_id", None),
+                "counter_acc": getattr(verified_data, "counter_account_number", None),
+                "counter_name": getattr(verified_data, "counter_account_name", None),
+                "paid_at": getattr(verified_data, "transaction_date_time", None),
+            }
+
+            if paid_amount != order_total:
+                trans.status = "UNDERPAID" if paid_amount < order_total else "OVERPAID"
+                trans.provider_response_raw = json.dumps(raw_info, ensure_ascii=False)
+                trans.updated_at = utcnow()
+                err_msg = (
+                    f"Số tiền thanh toán payOS ({paid_amount:,} đ) "
+                    f"{'thiếu' if paid_amount < order_total else 'thừa'} so với tổng đơn ({order_total:,} đ)."
+                )
+                webhook_log.process_error = err_msg
+                write_audit(
+                    db,
+                    action="PAYOS_AMOUNT_MISMATCH",
+                    entity_type="Order",
+                    entity_id=order.id,
+                    user=None,
+                    request=None,
+                    before={"payment_status": order.payment_status},
+                    after={"status": trans.status, "paid_amount": paid_amount, "expected_amount": order_total},
+                )
+                dispatch_alert(
+                    title=f"CẢNH BÁO: SAI LỆCH SỐ TIỀN PAYOS ({trans.status})",
+                    message=f"Đơn: {order.order_code}, Cần thu: {order_total:,} đ, Thực nhận: {paid_amount:,} đ",
+                    severity="WARNING",
+                    alert_type="PAYMENT_MISMATCH",
+                    details={"order_code": order.order_code, "paid_amount": paid_amount, "order_total": order_total},
+                )
+                db.commit()
+                raise HTTPException(status_code=400, detail=err_msg)
+
+            # BUG-02: Kiểm tra trạng thái đơn - Đơn đã hủy tuyệt đối không được kích hoạt lại kho
+            if order.order_status == "CANCELLED" or order.fulfillment_status == "CANCELLED":
+                trans.status = "SUCCESS"
+                trans.provider_response_raw = json.dumps(raw_info, ensure_ascii=False)
+                trans.updated_at = utcnow()
+                order.payment_status = "REFUND_PENDING"
+                webhook_log.processed = True
+                webhook_log.process_error = "Đơn hàng đã hủy trước khi nhận tiền. Chuyển sang hàng đợi đối soát hoàn tiền."
+                write_audit(
+                    db,
+                    action="PAYOS_WEBHOOK_ON_CANCELLED_ORDER",
+                    entity_type="Order",
+                    entity_id=order.id,
+                    user=None,
+                    request=None,
+                    before={"order_status": order.order_status, "payment_status": order.payment_status},
+                    after={"payment_status": "REFUND_PENDING", "paid_amount": paid_amount},
+                )
+                dispatch_alert(
+                    title="THANH TOÁN ĐƠN ĐÃ HỦY - CẦN ĐỐI SOÁT HOÀN TIỀN",
+                    message=(
+                        f"Đơn hàng <b>{order.order_code}</b> đã bị HỦY trước đó nhưng nhận được thanh toán payOS thành công.\n"
+                        f"Số tiền: <b>{paid_amount:,} đ</b>\n"
+                        f"Mã tham chiếu: <code>{ref_code}</code>\n"
+                        f"<b>Hệ thống KHÔNG xuất kho đơn này. Vui lòng lập phiếu hoàn tiền cho khách.</b>"
+                    ),
+                    severity="WARNING",
+                    alert_type="REFUND_REQUIRED",
+                    details={"order_code": order.order_code, "paid_amount": paid_amount, "ref_code": ref_code},
+                )
+                db.commit()
+                return {
+                    "success": True,
+                    "message": f"Đơn hàng {order.order_code} đã bị hủy trước đó. Ghi nhận tiền thành công và đưa vào danh sách đối soát hoàn tiền.",
+                    "order_code": order.order_code,
+                    "payment_status": "REFUND_PENDING",
+                    "refund_pending": True,
+                }
+
+            # BUG-03: Chống trùng lặp (Idempotency check)
+            if order.payment_status == "PAID" and trans.status == "SUCCESS":
+                webhook_log.processed = True
+                db.commit()
                 logger.info(f"[PAYOS WEBHOOK] Đơn hàng {order.order_code} đã ở trạng thái PAID trước đó (Idempotent).")
                 return {
                     "success": True,
@@ -297,19 +424,9 @@ class PayOSPaymentService:
             before_fulfillment_status = order.fulfillment_status
 
             # Cập nhật trạng thái giao dịch
-            if trans:
-                trans.status = "SUCCESS"
-                trans.updated_at = utcnow()
-                # Ghi thêm thông tin đối soát
-                raw_info = {
-                    "reference": ref_code,
-                    "amount": amount,
-                    "counter_bank": getattr(verified_data, "counter_account_bank_id", None),
-                    "counter_acc": getattr(verified_data, "counter_account_number", None),
-                    "counter_name": getattr(verified_data, "counter_account_name", None),
-                    "paid_at": getattr(verified_data, "transaction_date_time", None),
-                }
-                trans.provider_response_raw = json.dumps(raw_info, ensure_ascii=False)
+            trans.status = "SUCCESS"
+            trans.updated_at = utcnow()
+            trans.provider_response_raw = json.dumps(raw_info, ensure_ascii=False)
 
             # CẬP NHẬT ĐƠN HÀNG THÀNH CÔNG
             order.payment_status = "PAID"
@@ -319,8 +436,9 @@ class PayOSPaymentService:
 
             # ĐƠN CHÍNH THỨC XUẤT HIỆN TRONG DANH SÁCH XỬ LÝ CỦA KHO & ADMIN
             order.fulfillment_status = "ALLOCATED"
+            webhook_log.processed = True
 
-            # Phát thông báo tới Kho phụ trách
+            # Phát thông báo tới Kho phụ trách đúng 1 lần
             if order.assigned_warehouse_id:
                 try:
                     from app.services.warehouse_notification_service import WarehouseNotificationService
@@ -341,8 +459,28 @@ class PayOSPaymentService:
                     "payment_status": "PAID",
                     "fulfillment_status": "ALLOCATED",
                     "payos_order_code": order_code_num,
-                    "amount": amount,
+                    "amount": paid_amount,
                     "reference": ref_code,
+                },
+            )
+
+            # Gửi cảnh báo Telegram
+            dispatch_alert(
+                title="THANH TOÁN PAYOS THÀNH CÔNG",
+                message=(
+                    f"Đơn hàng: <b>{order.order_code}</b>\n"
+                    f"Khách hàng: <b>{order.customer_name}</b>\n"
+                    f"Số tiền đã nhận: <b>{paid_amount:,} đ</b>\n"
+                    f"Mã tham chiếu: <code>{ref_code}</code>\n"
+                    f"Trạng thái: <b>Đã thanh toán (PAID) - Sẵn sàng xuất kho</b>"
+                ),
+                severity="INFO",
+                alert_type="PAYMENT_RECEIVED",
+                details={
+                    "Mã đơn": order.order_code,
+                    "Cổng": "payOS",
+                    "Số tiền": f"{paid_amount:,} VND",
+                    "Ref": ref_code,
                 },
             )
 
@@ -350,7 +488,7 @@ class PayOSPaymentService:
             db.refresh(order)
 
             logger.info(
-                f"[PAYOS WEBHOOK THÀNH CÔNG] Đơn {order.order_code} đã thanh toán thành công {amount:,} đ. "
+                f"[PAYOS WEBHOOK THÀNH CÔNG] Đơn {order.order_code} đã thanh toán thành công {paid_amount:,} đ. "
                 f"Fulfillment chuyển sang ALLOCATED, kho sẵn sàng chuẩn bị hàng."
             )
 
@@ -362,10 +500,11 @@ class PayOSPaymentService:
                 "fulfillment_status": "ALLOCATED",
             }
         else:
-            # Giao dịch thất bại / bị hủy
+            # Giao dịch thất bại / bị hủy từ payOS
             if trans and trans.status == "PENDING":
                 trans.status = "FAILED"
                 trans.updated_at = utcnow()
+                webhook_log.process_error = f"payOS code {code}"
                 db.commit()
 
             logger.info(f"[PAYOS WEBHOOK] Giao dịch không thành công cho đơn {order.order_code}, code={code}")
@@ -418,7 +557,18 @@ class PayOSPaymentService:
             }
 
         client = cls.get_client()
-        payos_order_code = int(trans.provider_trans_id)
+        try:
+            payos_order_code = int(trans.provider_trans_id)
+        except (ValueError, TypeError):
+            payos_order_code = 0
+
+        if not payos_order_code:
+            return {
+                "order_code": order.order_code,
+                "payment_status": order.payment_status,
+                "fulfillment_status": order.fulfillment_status,
+                "is_paid": False,
+            }
 
         try:
             info = client.payment_requests.get(payos_order_code)
@@ -436,6 +586,40 @@ class PayOSPaymentService:
         logger.info(f"[PAYOS RECONCILE] Tra cứu đơn {clean_code} (payOS #{payos_order_code}): trạng thái={payos_status}")
 
         if payos_status == "PAID":
+            # BUG-01: Kiểm tra số tiền trả về từ payOS query API
+            order_total = int(order.total_amount)
+            paid_amount = int(getattr(info, "amountPaid", 0) or getattr(info, "amount", 0))
+            if paid_amount != order_total:
+                logger.warning(
+                    f"[PAYOS RECONCILE] Lệch số tiền đơn {order.order_code}: "
+                    f"cần thu {order_total:,} đ, thực nhận {paid_amount:,} đ"
+                )
+                return {
+                    "order_code": order.order_code,
+                    "payment_status": order.payment_status,
+                    "fulfillment_status": order.fulfillment_status,
+                    "total_amount": float(order.total_amount),
+                    "is_paid": False,
+                    "amount_mismatch": True,
+                    "message": f"Số tiền thanh toán ({paid_amount:,} đ) không khớp với đơn hàng ({order_total:,} đ).",
+                }
+
+            # BUG-02: Kiểm tra đơn đã hủy
+            if order.order_status == "CANCELLED" or order.fulfillment_status == "CANCELLED":
+                trans.status = "SUCCESS"
+                trans.updated_at = utcnow()
+                order.payment_status = "REFUND_PENDING"
+                db.commit()
+                return {
+                    "order_code": order.order_code,
+                    "payment_status": "REFUND_PENDING",
+                    "fulfillment_status": order.fulfillment_status,
+                    "total_amount": float(order.total_amount),
+                    "is_paid": True,
+                    "refund_pending": True,
+                    "is_cancelled": True,
+                }
+
             trans.status = "SUCCESS"
             trans.updated_at = utcnow()
             order.payment_status = "PAID"

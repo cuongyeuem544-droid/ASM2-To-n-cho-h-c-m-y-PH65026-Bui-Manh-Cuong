@@ -115,28 +115,6 @@ function CheckoutResultContent() {
           const data = await res.json();
           setOrderData(data);
 
-          // Nếu khách hàng đã bấm hủy trên cổng thanh toán (cancel=true hoặc resultCode=1006 hoặc status=CANCELLED):
-          // Tự động gọi backend để hủy đơn và giải phóng lượng hàng giữ chỗ trong kho
-          if ((cancelParam === "true" || resultCode === "1006" || statusParam === "CANCELLED") && data.order_status !== "CANCELLED") {
-            try {
-              const cancelHeaders: Record<string, string> = { "Content-Type": "application/json" };
-              if (token) cancelHeaders["Authorization"] = `Bearer ${token}`;
-              if (orderToken) cancelHeaders["X-Order-Token"] = orderToken;
-
-              await fetch(`/api/v1/payments/orders/${cleanOrderCode}/cancel`, {
-                method: "POST",
-                headers: cancelHeaders,
-                body: JSON.stringify({
-                  reason: "Khách hàng hủy trên cổng thanh toán trực tuyến",
-                  phone_verify: phone || undefined,
-                  order_token: orderToken || undefined,
-                }),
-              });
-              setOrderData((prev) => prev ? { ...prev, order_status: "CANCELLED", payment_status: "CANCELLED" } : prev);
-            } catch (cErr) {
-              console.warn("Lỗi khi tự động hủy đơn sau khi hủy cổng thanh toán:", cErr);
-            }
-          }
         } else {
           setError("Không thể tra cứu thông tin thanh toán từ hệ thống.");
         }

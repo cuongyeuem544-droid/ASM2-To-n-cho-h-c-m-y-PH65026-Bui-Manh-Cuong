@@ -18,6 +18,7 @@ from app.models import (
     PaymentWebhookEvent,
 )
 from app.services.alert_notifier import dispatch_alert
+from app.services.audit import write_audit
 
 logger = logging.getLogger("pharmatrust.momo")
 
@@ -324,6 +325,7 @@ class MomoPaymentService:
                 trans.provider_trans_id = trans_id
                 trans.provider_response_raw = json.dumps(payload, ensure_ascii=False)
                 trans.updated_at = utcnow()
+                order.payment_status = "REFUND_PENDING"
                 webhook_log.processed = True
                 db.commit()
 
@@ -504,8 +506,84 @@ class MomoPaymentService:
                     logger.info(f"[MOMO QUERY] {order.order_code} -> resultCode={result_code}, message={res_data.get('message')}")
 
                     if result_code == 0:
-                        # MoMo xác nhận đã thanh toán thành công -> xử lý IPN callback an toàn
-                        cls.process_ipn_callback(db, res_data)
+                        amount = res_data.get("amount")
+                        trans_id = str(res_data.get("transId", ""))
+                        order_total = int(order.total_amount)
+                        paid_amount = int(amount) if amount is not None else 0
+
+                        # BUG-01 & BUG-05: Kiểm tra khớp số tiền
+                        if paid_amount != order_total:
+                            trans.status = "UNDERPAID" if paid_amount < order_total else "OVERPAID"
+                            trans.updated_at = utcnow()
+                            db.commit()
+                            logger.warning(
+                                f"[MOMO QUERY] Lệch số tiền đơn {order.order_code}: "
+                                f"cần thu {order_total:,} đ, thực nhận {paid_amount:,} đ"
+                            )
+                            return {
+                                "order_code": order.order_code,
+                                "payment_status": order.payment_status,
+                                "fulfillment_status": order.fulfillment_status,
+                                "is_paid": False,
+                                "amount_mismatch": True,
+                                "message": f"Số tiền MoMo ({paid_amount:,} đ) không khớp đơn hàng ({order_total:,} đ).",
+                            }
+
+                        # BUG-02: Đơn đã hủy không được tái kích hoạt vào luồng kho
+                        if order.order_status == "CANCELLED" or order.fulfillment_status == "CANCELLED":
+                            trans.status = "SUCCESS"
+                            trans.provider_trans_id = trans_id
+                            trans.provider_response_raw = json.dumps(res_data, ensure_ascii=False)
+                            trans.updated_at = utcnow()
+                            order.payment_status = "REFUND_PENDING"
+                            db.commit()
+                            return {
+                                "order_code": order.order_code,
+                                "payment_status": "REFUND_PENDING",
+                                "fulfillment_status": order.fulfillment_status,
+                                "total_amount": float(order.total_amount),
+                                "is_paid": True,
+                                "refund_pending": True,
+                                "is_cancelled": True,
+                            }
+
+                        trans.status = "SUCCESS"
+                        trans.provider_trans_id = trans_id
+                        trans.provider_response_raw = json.dumps(res_data, ensure_ascii=False)
+                        trans.updated_at = utcnow()
+                        order.payment_status = "PAID"
+                        order.payment_method = "MOMO"
+                        if order.order_status in ["PENDING", "DRAFT"]:
+                            order.order_status = "CONFIRMED"
+                        order.fulfillment_status = "ALLOCATED"
+
+                        if order.assigned_warehouse_id:
+                            try:
+                                from app.services.warehouse_notification_service import WarehouseNotificationService
+                                WarehouseNotificationService.notify_order_new(db, order, order.assigned_warehouse_id)
+                            except Exception as n_err:
+                                logger.warning(f"Không thể gửi thông báo kho cho đơn {order.order_code}: {n_err}")
+
+                        write_audit(
+                            db,
+                            action="MOMO_QUERY_PAYMENT_SUCCESS",
+                            entity_type="Order",
+                            entity_id=order.id,
+                            user=None,
+                            request=None,
+                            before={"payment_status": "PENDING", "fulfillment_status": "WAITING_PAYMENT"},
+                            after={"payment_status": "PAID", "fulfillment_status": "ALLOCATED", "trans_id": trans_id},
+                        )
+
+                        dispatch_alert(
+                            title="ĐỐI SOÁT MOMO THÀNH CÔNG",
+                            message=f"Đơn hàng: <b>{order.order_code}</b>\nSố tiền: <b>{paid_amount:,} đ</b>\nTransId: <code>{trans_id}</code>",
+                            severity="INFO",
+                            alert_type="PAYMENT_RECEIVED",
+                            details={"order_code": order.order_code, "trans_id": trans_id, "amount": paid_amount},
+                        )
+
+                        db.commit()
                         db.refresh(order)
                         db.refresh(trans)
                         return {

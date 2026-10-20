@@ -3,6 +3,7 @@ from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Date,
     DateTime,
@@ -407,6 +408,16 @@ class PaymentWebhookEvent(Base):
     payload_raw: Mapped[str] = mapped_column(Text)
     processed: Mapped[bool] = mapped_column(Boolean, default=False)
     process_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+
+class PayosOrderCode(Base):
+    __tablename__ = "payos_order_codes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"), index=True)
+    order_code_num: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

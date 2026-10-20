@@ -691,5 +691,115 @@ class TestMomoPaymentSuite(unittest.TestCase):
             self.assertEqual(self.order.fulfillment_status, "ALLOCATED")
 
 
+
+    def test_12_momo_ipn_amount_mismatch_rejected(self):
+        """IPN MoMo sai lệch số tiền (200k != 300k) bị từ chối 400 và không cập nhật PAID (BUG-05)."""
+        from unittest.mock import patch
+
+        ipn_data = {
+            "partnerCode": settings.momo_partner_code,
+            "orderId": self.order_code,
+            "requestId": f"REQ-{self.order_code}",
+            "amount": 200000,  # Sai lệch: Đơn hàng cần 300,000 VND
+            "orderInfo": "Thanh toan don hang " + self.order_code,
+            "orderType": "momo_wallet",
+            "transId": "MOMO-BAD-AMOUNT-123",
+            "resultCode": 0,
+            "message": "Giao dich thanh cong",
+            "payType": "qr",
+            "responseTime": int(time.time() * 1000),
+            "extraData": "",
+            "signature": "valid_signature_hash",
+        }
+
+        with patch.object(MomoPaymentService, "verify_ipn_signature", return_value=True):
+            resp = self.client.post("/api/v1/payments/momo/ipn", json=ipn_data)
+            self.assertEqual(resp.status_code, 400)
+            self.assertIn("không khớp với số tiền đơn hàng", resp.json()["detail"])
+
+        self.db.expire_all()
+        self.db.refresh(self.order)
+        self.assertNotEqual(self.order.payment_status, "PAID")
+        self.assertNotEqual(self.order.fulfillment_status, "ALLOCATED")
+
+    def test_13_momo_ipn_cancelled_order_payment_received(self):
+        """Khách thanh toán sau khi đơn đã hủy: Chuyển REFUND_PENDING, không kích hoạt kho (BUG-02)."""
+        from unittest.mock import patch
+
+        self.order.order_status = "CANCELLED"
+        self.order.fulfillment_status = "CANCELLED"
+        self.db.commit()
+
+        ipn_data = {
+            "partnerCode": settings.momo_partner_code,
+            "orderId": self.order_code,
+            "requestId": f"REQ-CANCEL-{self.order_code}",
+            "amount": 300000,
+            "orderInfo": "Thanh toan don hang " + self.order_code,
+            "orderType": "momo_wallet",
+            "transId": "MOMO-LATE-777",
+            "resultCode": 0,
+            "message": "Giao dich thanh cong",
+            "payType": "qr",
+            "responseTime": int(time.time() * 1000),
+            "extraData": "",
+            "signature": "valid_signature_hash",
+        }
+
+        with patch.object(MomoPaymentService, "verify_ipn_signature", return_value=True):
+            resp = self.client.post("/api/v1/payments/momo/ipn", json=ipn_data)
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertTrue(data.get("reconciliation_required"))
+
+        self.db.expire_all()
+        self.db.refresh(self.order)
+        self.assertEqual(self.order.order_status, "CANCELLED")
+        self.assertEqual(self.order.fulfillment_status, "CANCELLED")
+        self.assertEqual(self.order.payment_status, "REFUND_PENDING")
+
+    def test_14_momo_query_status_amount_mismatch_flagged(self):
+        """Query API MoMo trả về số tiền không khớp với đơn hàng -> Không xác nhận PAID (BUG-06)."""
+        from unittest.mock import MagicMock, patch
+        from app.core.security import create_guest_order_token
+
+        valid_token = create_guest_order_token(self.order_code, self.order.customer_phone)
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "partnerCode": settings.momo_partner_code,
+            "orderId": self.order_code,
+            "requestId": f"QUERY-{self.order_code}",
+            "amount": 150000,  # Sai lệch: Cần thu 300,000 VND
+            "transId": "MOMO-QUERY-MISMATCH",
+            "resultCode": 0,
+            "message": "Giao dịch thành công",
+            "payType": "qr",
+            "responseTime": int(time.time() * 1000),
+            "extraData": "",
+            "signature": "mock_valid_signature",
+        }
+
+        with patch("app.services.momo_service.httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client_cls.return_value.__enter__.return_value = mock_client
+            mock_client.post.return_value = mock_resp
+
+            resp = self.client.post(
+                f"/api/v1/payments/momo/check/{self.order_code}?phone_verify={self.order.customer_phone}",
+                headers={"X-Order-Token": valid_token},
+            )
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertFalse(data.get("is_paid"))
+            self.assertTrue(data.get("amount_mismatch"))
+
+        self.db.expire_all()
+        self.db.refresh(self.order)
+        self.assertNotEqual(self.order.payment_status, "PAID")
+        self.assertNotEqual(self.order.fulfillment_status, "ALLOCATED")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -32,6 +32,7 @@ from app.models.inventory import (
     OrderItemBatchAllocation,
     PaymentTransaction,
     PaymentWebhookEvent,
+    PayosOrderCode,
     ProductReview,
     ProductSku,
     SeasonalCampaign,

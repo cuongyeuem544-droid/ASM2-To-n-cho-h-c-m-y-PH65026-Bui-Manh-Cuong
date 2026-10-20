@@ -208,6 +208,7 @@ def create_momo_payment(
 
 
 @payments_router.post("/momo/webhook")
+@payments_router.post("/momo/ipn")
 async def momo_ipn_webhook(
     request: Request,
     db: Session = Depends(get_db),
@@ -800,6 +801,35 @@ def cancel_order_and_release_stock(
             "order_status": "CANCELLED",
         }
 
+    # Section V.3: Tuyệt đối không cho phép hủy thông thường một đơn đã thanh toán thành công (PAID)
+    if order.payment_status == "PAID":
+        raise HTTPException(
+            status_code=400,
+            detail="Đơn hàng này đã được thanh toán thành công (PAID). Không thể hủy thông thường tự động. Vui lòng liên hệ CSKH để xử lý hoàn tiền theo quy trình.",
+        )
+
+    # Section V.2: Kiểm tra đối soát tức thời từ cổng thanh toán trước khi quyết định hủy
+    if order.payment_method == "PAYOS":
+        try:
+            from app.services.payos_service import PayOSPaymentService
+            PayOSPaymentService.check_payment_status(db, clean_code)
+            db.refresh(order)
+        except Exception:
+            pass
+    elif order.payment_method == "MOMO":
+        try:
+            from app.services.momo_service import MomoPaymentService
+            MomoPaymentService.query_transaction_status(db, clean_code)
+            db.refresh(order)
+        except Exception:
+            pass
+
+    if order.payment_status == "PAID":
+        raise HTTPException(
+            status_code=400,
+            detail="Khoản thanh toán vừa được cổng thanh toán ghi nhận thành công (PAID). Đơn hàng không thể hủy tự động.",
+        )
+
     if order.order_status in ["SHIPPING", "COMPLETED"]:
         raise HTTPException(
             status_code=400,
@@ -828,6 +858,18 @@ def cancel_order_and_release_stock(
     )
     order.order_status = "CANCELLED"
     order.fulfillment_status = "CANCELLED"
+    order.payment_status = "CANCELLED"
+
+    # Hủy an toàn các giao dịch đang PENDING
+    pending_txs = db.scalars(
+        select(PaymentTransaction).where(
+            PaymentTransaction.order_id == order.id,
+            PaymentTransaction.status == "PENDING",
+        )
+    ).all()
+    for tx in pending_txs:
+        tx.status = "CANCELLED"
+        tx.updated_at = utcnow()
 
     write_audit(
         db,
