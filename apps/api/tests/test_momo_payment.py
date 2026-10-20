@@ -192,9 +192,24 @@ class TestMomoPaymentSuite(unittest.TestCase):
         self.assertNotEqual(sig1, sig_diff)
 
     def test_02_create_momo_payment_request(self):
-        """Khách hàng tạo yêu cầu thanh toán MoMo Sandbox cho đơn hàng."""
+        """Phương thức thanh toán MoMo đã ngừng cung cấp cho giao dịch mới (bị từ chối với HTTP 400 tại API)."""
         from unittest.mock import MagicMock, patch
+        from app.core.security import create_guest_order_token
 
+        valid_token = create_guest_order_token(self.order_code, self.order.customer_phone)
+        payload = {
+            "order_code": self.order_code,
+            "return_url": "http://localhost:3000/checkout/result",
+            "phone_verify": self.order.customer_phone,
+            "order_token": valid_token,
+        }
+
+        # 1. API endpoint /api/v1/payments/momo/create chặn tạo giao dịch mới với HTTP 400
+        resp = self.client.post("/api/v1/payments/momo/create", json=payload)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("ngừng", resp.json().get("detail", "").lower())
+
+        # 2. Logic MomoPaymentService bên dưới vẫn được bảo toàn nguyên vẹn
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.text = '{"resultCode": 0}'
@@ -205,45 +220,19 @@ class TestMomoPaymentSuite(unittest.TestCase):
             "qrCodeUrl": "https://test-payment.momo.vn/qr/MOMO_TEST_OK",
             "deeplink": "momo://app?action=payWithApp",
         }
-
-        from app.core.security import create_guest_order_token
-        valid_token = create_guest_order_token(self.order_code, self.order.customer_phone)
-        payload = {
-            "order_code": self.order_code,
-            "return_url": "http://localhost:3000/checkout/result",
-            "phone_verify": self.order.customer_phone,
-            "order_token": valid_token,
-        }
-
-        # 1. Khi gateway phản hồi thành công (resultCode=0)
         with patch("app.services.momo_service.httpx.Client") as mock_client_cls:
             mock_client = MagicMock()
             mock_client_cls.return_value.__enter__.return_value = mock_client
             mock_client.post.return_value = mock_resp
 
-            resp = self.client.post("/api/v1/payments/momo/create", json=payload)
-            self.assertEqual(resp.status_code, 200, resp.text)
-            data = resp.json()
-            assert "status" in data, f"KEYS IN DATA: {list(data.keys())}"
-            self.assertEqual(data["status"], "SUCCESS")
-            self.assertEqual(data["order_code"], self.order_code)
-            self.assertEqual(data["amount"], 300000)
-            self.assertIn("pay_url", data)
-            self.assertIn("qr_code_url", data)
-
-            # Kiểm tra bản ghi PaymentTransaction trong CSDL
-            txn = self.db.query(PaymentTransaction).filter_by(order_id=self.order.id, provider="MOMO").first()
-            self.assertIsNotNone(txn)
-            self.assertEqual(txn.status, "PENDING")
-            self.assertEqual(txn.amount, Decimal("300000.0"))
-
-        # 2. Khi gateway bị ngắt kết nối -> Trả về 502 Fail-Safe và không tạo Simulated URL
-        with patch("app.services.momo_service.httpx.Client") as mock_fail_cls:
-            mock_fail = MagicMock()
-            mock_fail_cls.return_value.__enter__.return_value = mock_fail
-            mock_fail.post.side_effect = Exception("Gateway unreachable")
-            fail_resp = self.client.post("/api/v1/payments/momo/create", json=payload)
-            self.assertEqual(fail_resp.status_code, 502)
+            res = MomoPaymentService.create_payment_request(
+                self.db,
+                self.order,
+                return_url="http://localhost:3000/checkout/result",
+            )
+            self.assertEqual(res["status"], "SUCCESS")
+            self.assertEqual(res["order_code"], self.order_code)
+            self.assertIn("pay_url", res)
 
     def test_03_momo_ipn_webhook_success_completes_order(self):
         """IPN Webhook từ MoMo với resultCode=0 xác nhận đơn hàng đã thanh toán thành công."""

@@ -445,6 +445,19 @@ def checkout_order(
     if not name or not phone or not address:
         raise HTTPException(status_code=400, detail="Vui lòng điền đầy đủ họ tên, số điện thoại và địa chỉ giao hàng.")
 
+    # Xác thực phương thức thanh toán hợp lệ (Chỉ hỗ trợ COD và PAYOS cho đơn hàng mới)
+    chosen_method = (payload.payment_method or "COD").strip().upper()
+    if chosen_method in ["MOMO", "BANK_TRANSFER", "VIETQR"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Phương thức thanh toán '{payload.payment_method}' đã ngừng hỗ trợ cho đơn hàng mới. Vui lòng chọn Thanh toán khi nhận hàng (COD) hoặc Cổng thanh toán payOS.",
+        )
+    if chosen_method not in ["COD", "PAYOS"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Phương thức thanh toán '{payload.payment_method}' không hợp lệ. Vui lòng chọn COD hoặc PAYOS.",
+        )
+
     # Xác thực địa chỉ giao hàng đối với hình thức Giao Tận Nơi
     if (payload.fulfillment_type or "DELIVERY").upper() == "DELIVERY":
         if not payload.is_verified:

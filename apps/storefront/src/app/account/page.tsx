@@ -40,7 +40,6 @@ import {
 import { CustomerAddressBook } from "@/components/account/CustomerAddressBook";
 import { CustomerReturnsSection } from "@/components/returns/CustomerReturnsSection";
 import { ReturnWizardModal } from "@/components/returns/ReturnWizardModal";
-import VietQrPaymentModal from "@/components/checkout/VietQrPaymentModal";
 import { formatDateTimeVN } from "@/lib/dateUtils";
 
 interface CustomerOrder {
@@ -74,20 +73,7 @@ export default function AccountPage() {
   const [selectedOrder, setSelectedOrder] = useState<CustomerOrder | null>(null);
   const [orderPaymentData, setOrderPaymentData] = useState<any | null>(null);
   const [loadingPaymentData, setLoadingPaymentData] = useState<boolean>(false);
-  const [vietQrModal, setVietQrModal] = useState<{
-    isOpen: boolean;
-    orderCode: string;
-    amount: number;
-    customerName: string;
-  } | null>(null);
-  const [momoModal, setMomoModal] = useState<{
-    isOpen: boolean;
-    orderCode: string;
-    amount: number;
-    payUrl?: string;
-    qrCodeUrl?: string;
-    status: string;
-  } | null>(null);
+
   const [isSwitchingCod, setIsSwitchingCod] = useState<boolean>(false);
   const [isCancellingOrder, setIsCancellingOrder] = useState<boolean>(false);
   const [returnWizardOrderCode, setReturnWizardOrderCode] = useState<string | null>(null);
@@ -327,19 +313,10 @@ export default function AccountPage() {
     }
   };
 
-  const handleOpenVietQr = (orderCode: string, amount: number) => {
-    setVietQrModal({
-      isOpen: true,
-      orderCode,
-      amount,
-      customerName: user?.fullName || "",
-    });
-  };
-
-  const handleOpenMomo = async (orderCode: string, amount: number) => {
+  const handleOpenPayOS = async (orderCode: string) => {
     try {
-      const returnUrl = typeof window !== "undefined" ? `${window.location.origin}/checkout/result` : "";
-      const res = await fetch("/api/v1/payments/momo/create", {
+      const returnUrl = typeof window !== "undefined" ? `${window.location.origin}/checkout/result?order_code=${encodeURIComponent(orderCode)}` : "";
+      const res = await fetch("/api/v1/payments/payos/create", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({
@@ -347,22 +324,14 @@ export default function AccountPage() {
           return_url: returnUrl,
         }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        setMomoModal({
-          isOpen: true,
-          orderCode,
-          amount,
-          payUrl: data.pay_url,
-          qrCodeUrl: data.qr_code_url,
-          status: "PENDING",
-        });
+      const data = await res.json();
+      if (res.ok && data?.checkout_url) {
+        window.location.href = data.checkout_url;
       } else {
-        const err = await res.json();
-        alert(err.detail || "Không thể khởi tạo thanh toán MoMo");
+        alert(data?.detail || "Không thể tạo liên kết thanh toán payOS");
       }
     } catch (e: any) {
-      alert("Lỗi kết nối MoMo: " + (e.message || "Unknown"));
+      alert("Lỗi kết nối cổng payOS: " + (e?.message || "Unknown error"));
     }
   };
 
@@ -1186,23 +1155,14 @@ export default function AccountPage() {
               {selectedOrder.payment_status !== "PAID" && selectedOrder.order_status !== "CANCELLED" && (
                 <div className="pt-2 border-t border-blue-200/60 space-y-2">
                   <span className="text-[11px] font-bold text-slate-700 block">Thanh toán hoặc đổi phương thức:</span>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div>
                     <button
                       type="button"
-                      onClick={() => handleOpenVietQr(selectedOrder.order_code, selectedOrder.total_amount)}
-                      className="py-2 px-2.5 rounded-lg bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 font-bold text-[11px] flex items-center justify-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+                      onClick={() => handleOpenPayOS(selectedOrder.order_code)}
+                      className="w-full py-2.5 px-3 rounded-xl bg-brand-blue-600 hover:bg-brand-blue-700 text-white font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-xs cursor-pointer"
                     >
-                      <QrCode className="w-3.5 h-3.5 text-brand-blue-600" />
-                      <span>Quét VietQR</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleOpenMomo(selectedOrder.order_code, selectedOrder.total_amount)}
-                      className="py-2 px-2.5 rounded-lg bg-pink-50 hover:bg-pink-100 border border-pink-200 text-pink-800 font-bold text-[11px] flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                    >
-                      <span className="w-3.5 h-3.5 rounded-full bg-[#a50064] text-white flex items-center justify-center text-[8px] font-bold">M</span>
-                      <span>Ví MoMo</span>
+                      <span className="w-4 h-4 rounded-full bg-white text-brand-blue-600 flex items-center justify-center text-[9px] font-black shrink-0">P</span>
+                      <span>Thanh toán Cổng payOS (QR Ngân hàng / Napas 247)</span>
                     </button>
                   </div>
 
@@ -1382,133 +1342,6 @@ export default function AccountPage() {
             window.location.hash = "returns";
           }}
         />
-      )}
-
-      {/* VietQR Payment Modal */}
-      {vietQrModal && (
-        <VietQrPaymentModal
-          isOpen={vietQrModal.isOpen}
-          orderCode={vietQrModal.orderCode}
-          amount={vietQrModal.amount}
-          customerName={vietQrModal.customerName}
-          onClose={() => {
-            setVietQrModal(null);
-            reloadOrders();
-          }}
-          onConfirmPaid={() => {
-            setVietQrModal(null);
-            reloadOrders();
-            if (selectedOrder) {
-              setSelectedOrder({ ...selectedOrder, payment_status: "PAID" });
-            }
-          }}
-        />
-      )}
-
-      {/* MoMo Sandbox Modal */}
-      {momoModal?.isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl max-w-md w-full overflow-hidden shadow-2xl border border-slate-200">
-            <div className="bg-gradient-to-r from-[#a50064] to-[#d82d8b] text-white p-5 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-full bg-white text-[#a50064] flex items-center justify-center font-black text-sm">
-                  M
-                </div>
-                <div>
-                  <h3 className="font-bold text-base leading-tight">Cổng thanh toán MoMo Sandbox</h3>
-                  <p className="text-[11px] text-pink-100 font-mono">Đơn hàng: {momoModal.orderCode}</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setMomoModal(null)}
-                className="text-white/80 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-6 text-center space-y-4">
-              <div className="space-y-1">
-                <span className="text-xs text-slate-500">Số tiền cần thanh toán</span>
-                <p className="text-2xl font-black text-slate-900 font-mono">
-                  {momoModal.amount.toLocaleString("vi-VN")} đ
-                </p>
-              </div>
-
-              {momoModal.status === "PAID" ? (
-                <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-200 text-emerald-800 space-y-2">
-                  <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
-                    <CheckCircle2 className="w-7 h-7" />
-                  </div>
-                  <p className="font-bold text-sm">Thanh toán MoMo thành công!</p>
-                  <p className="text-xs text-emerald-600">Đơn hàng đã được chuyển sang trạng thái ĐÃ THANH TOÁN.</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <div className="w-48 h-48 mx-auto p-2 bg-white rounded-2xl border-2 border-dashed border-pink-300 flex items-center justify-center shadow-xs">
-                    {momoModal.qrCodeUrl ? (
-                      <img src={momoModal.qrCodeUrl} alt="MoMo QR" className="w-full h-full object-contain" />
-                    ) : (
-                      <div className="text-center p-3 text-slate-400 text-xs">Đang nạp mã MoMo...</div>
-                    )}
-                  </div>
-                  <p className="text-xs text-slate-500">Mở ứng dụng MoMo và quét mã để thanh toán thử nghiệm</p>
-                </div>
-              )}
-
-              <div className="pt-2 flex flex-col gap-2">
-                {momoModal.payUrl && momoModal.status === "PENDING" && (
-                  <a
-                    href={momoModal.payUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="w-full py-2.5 px-4 rounded-xl bg-[#a50064] hover:bg-[#850050] text-white font-bold text-xs shadow-xs transition-colors flex items-center justify-center gap-1.5"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    <span>Mở cổng MoMo Sandbox Web</span>
-                  </a>
-                )}
-
-                {momoModal.status === "PENDING" && (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      try {
-                        const sRes = await fetch("/api/v1/payments/momo/simulate", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ order_code: momoModal.orderCode, success: true }),
-                        });
-                        if (sRes.ok) {
-                          setMomoModal((prev) => prev ? { ...prev, status: "PAID" } : null);
-                          reloadOrders();
-                          if (selectedOrder) {
-                            setSelectedOrder({ ...selectedOrder, payment_status: "PAID" });
-                          }
-                        }
-                      } catch (e) {
-                        console.error(e);
-                      }
-                    }}
-                    className="w-full py-2.5 px-4 rounded-xl border-2 border-emerald-500 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-                  >
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    <span>[TEST] Giả lập quét MoMo thành công</span>
-                  </button>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => setMomoModal(null)}
-                  className="w-full py-2.5 px-4 rounded-xl border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50 transition-colors cursor-pointer"
-                >
-                  Đóng
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
       )}
 
       <Footer />

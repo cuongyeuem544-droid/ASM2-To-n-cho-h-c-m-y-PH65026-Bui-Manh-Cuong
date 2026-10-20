@@ -791,7 +791,7 @@ export default function ProductDetailPage() {
                       </div>
                       <div className="flex items-center gap-2">
                         <QrCode className="w-4 h-4 text-brand-blue-600 shrink-0" />
-                        <span>Thanh toán VietQR Napas 247 & MoMo</span>
+                        <span>Cổng thanh toán payOS (VietQR 24/7) & COD</span>
                       </div>
                     </div>
                   </div>

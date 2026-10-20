@@ -440,5 +440,90 @@ class TestPaymentGatewaysE2EFlow(unittest.TestCase):
         self.assertIn("PAID", cancel_res.json()["detail"])
 
 
+    def test_03_checkout_rejects_discontinued_payment_methods(self):
+        """Khách hàng cố tình sửa request gửi MOMO hoặc BANK_TRANSFER/VIETQR: Bị chặn ngay lập tức với HTTP 400."""
+        payload_base = {
+            "customer_name": "Nguyen Van Test",
+            "customer_phone": "0912345678",
+            "shipping_address": "Số 123 Đường Cầu Giấy, Hà Nội",
+            "shipping_city": "Hà Nội",
+            "fulfillment_type": "DELIVERY",
+            "is_verified": True,
+            "province_code": "01",
+            "district_code": "009",
+            "ward_code": "00142",
+            "lat": 21.0362,
+            "lng": 105.7906,
+            "items": [
+                {
+                    "product_id": self.prod.id,
+                    "sku_id": self.sku.id,
+                    "quantity": 1,
+                    "client_unit_price": 120000,
+                }
+            ],
+        }
+
+        # 1. Thử gửi MOMO
+        payload_momo = {**payload_base, "payment_method": "MOMO"}
+        res_momo = self.client.post("/api/v1/store/orders/checkout", json=payload_momo)
+        self.assertEqual(res_momo.status_code, 400)
+        self.assertIn("ngừng hỗ trợ", res_momo.json()["detail"].lower())
+
+        # 2. Thử gửi BANK_TRANSFER
+        payload_bt = {**payload_base, "payment_method": "BANK_TRANSFER"}
+        res_bt = self.client.post("/api/v1/store/orders/checkout", json=payload_bt)
+        self.assertEqual(res_bt.status_code, 400)
+        self.assertIn("ngừng hỗ trợ", res_bt.json()["detail"].lower())
+
+        # 3. Thử gửi VIETQR
+        payload_vqr = {**payload_base, "payment_method": "VIETQR"}
+        res_vqr = self.client.post("/api/v1/store/orders/checkout", json=payload_vqr)
+        self.assertEqual(res_vqr.status_code, 400)
+        self.assertIn("ngừng hỗ trợ", res_vqr.json()["detail"].lower())
+
+        # 4. Thử gọi API tạo link MoMo trực tiếp
+        res_momo_create = self.client.post("/api/v1/payments/momo/create", json={"order_code": "FAKE-ORD-01"})
+        self.assertIn(res_momo_create.status_code, [400, 404])
+
+    def test_04_checkout_allows_supported_payment_methods(self):
+        """Khách hàng chọn COD hoặc PAYOS: Được chấp thuận và tạo đơn hàng hợp lệ."""
+        payload_base = {
+            "customer_name": "Nguyen Van Success",
+            "customer_phone": "0912345679",
+            "shipping_address": "Số 123 Đường Cầu Giấy, Hà Nội",
+            "shipping_city": "Hà Nội",
+            "fulfillment_type": "DELIVERY",
+            "is_verified": True,
+            "province_code": "01",
+            "district_code": "009",
+            "ward_code": "00142",
+            "lat": 21.0362,
+            "lng": 105.7906,
+            "items": [
+                {
+                    "product_id": self.prod.id,
+                    "sku_id": self.sku.id,
+                    "quantity": 1,
+                    "client_unit_price": 120000,
+                }
+            ],
+        }
+
+        # 1. Đặt đơn với COD -> Thành công
+        payload_cod = {**payload_base, "payment_method": "COD", "idempotency_key": f"IDEM-COD-{time.time()}"}
+        res_cod = self.client.post("/api/v1/store/orders/checkout", json=payload_cod)
+        self.assertEqual(res_cod.status_code, 200, res_cod.text)
+        data_cod = res_cod.json()
+        self.assertEqual(data_cod["status"], "SUCCESS")
+
+        # 2. Đặt đơn với PAYOS -> Thành công
+        payload_payos = {**payload_base, "payment_method": "PAYOS", "idempotency_key": f"IDEM-PAYOS-{time.time()}"}
+        res_payos = self.client.post("/api/v1/store/orders/checkout", json=payload_payos)
+        self.assertEqual(res_payos.status_code, 200, res_payos.text)
+        data_payos = res_payos.json()
+        self.assertEqual(data_payos["status"], "SUCCESS")
+
+
 if __name__ == "__main__":
     unittest.main()

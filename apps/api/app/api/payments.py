@@ -199,12 +199,11 @@ def create_momo_payment(
     if order.payment_status == "PAID":
         raise HTTPException(status_code=400, detail="Đơn hàng này đã được thanh toán thành công trước đó.")
 
-    res = MomoPaymentService.create_payment_request(
-        db=db,
-        order=order,
-        return_url=payload.return_url,
+    # Chặn tạo mới giao dịch MoMo: Phương thức này đã ngừng cung cấp cho giao dịch mới
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Phương thức thanh toán MoMo đã ngừng cung cấp cho giao dịch mới. Vui lòng chọn Cổng thanh toán payOS hoặc COD.",
     )
-    return res
 
 
 @payments_router.post("/momo/webhook")
