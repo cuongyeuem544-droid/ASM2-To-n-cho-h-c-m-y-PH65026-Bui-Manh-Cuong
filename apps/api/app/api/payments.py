@@ -306,10 +306,13 @@ def create_vietqr_payment(
         action_name="tạo mã VietQR",
     )
 
-    return VietQrService.create_payment_request(
-        db=db,
-        order=order,
-        return_url=payload.return_url,
+    if order.payment_status == "PAID":
+        raise HTTPException(status_code=400, detail="Đơn hàng này đã được thanh toán thành công trước đó.")
+
+    # Chặn tạo mới giao dịch VietQR: Phương thức này đã ngừng cung cấp cho giao dịch mới
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Phương thức chuyển khoản VietQR thủ công đã ngừng cung cấp cho đơn hàng mới. Vui lòng chọn Cổng thanh toán payOS hoặc COD.",
     )
 
 

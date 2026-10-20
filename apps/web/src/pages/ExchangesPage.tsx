@@ -634,8 +634,8 @@ export function ExchangesPage() {
                   style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontWeight: 600 }}
                 >
                   <option value="COD">Thu tiền khi bưu tá giao (COD)</option>
-                  <option value="BANK_TRANSFER">Khách chuyển khoản ngân hàng</option>
-                  <option value="MOMO">Thanh toán qua Ví MoMo</option>
+                  <option value="PAYOS">Cổng thanh toán payOS</option>
+                  <option value="BANK_TRANSFER">Chuyển khoản đối soát</option>
                 </select>
               </div>
 

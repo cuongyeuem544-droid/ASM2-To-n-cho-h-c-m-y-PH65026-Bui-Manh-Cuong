@@ -58,10 +58,11 @@ class PaymentIntentService:
             raise HTTPException(status_code=400, detail="Đơn hàng này đã bị hủy, không thể khởi tạo thanh toán.")
 
         method = payment_method.strip().upper()
-        if method in ["BANK_TRANSFER", "VIETQR"]:
-            provider = "VIETQR"
-        elif method == "MOMO":
-            provider = "MOMO"
+        if method in ["BANK_TRANSFER", "VIETQR", "MOMO"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Phương thức thanh toán '{payment_method}' đã ngừng hỗ trợ cho đơn hàng mới. Vui lòng chọn COD hoặc Cổng thanh toán payOS.",
+            )
         elif method == "PAYOS":
             provider = "PAYOS"
         elif method == "COD":
@@ -69,7 +70,7 @@ class PaymentIntentService:
         else:
             raise HTTPException(
                 status_code=400,
-                detail=f"Phương thức thanh toán '{payment_method}' không được hỗ trợ. Chọn COD, VIETQR, MOMO hoặc PAYOS.",
+                detail=f"Phương thức thanh toán '{payment_method}' không được hỗ trợ. Vui lòng chọn COD hoặc payOS.",
             )
 
         amount = int(order.total_amount)
@@ -208,6 +209,19 @@ class PaymentIntentService:
         if order.order_status == "CANCELLED":
             raise HTTPException(status_code=400, detail="Đơn hàng này đã bị hủy, không thể tiếp tục thanh toán.")
 
+        # Xác thực phương thức thanh toán mới trước khi thao tác
+        method = new_payment_method.strip().upper()
+        if method in ["BANK_TRANSFER", "VIETQR", "MOMO"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Phương thức thanh toán '{new_payment_method}' đã ngừng hỗ trợ cho giao dịch mới. Vui lòng chọn COD hoặc Cổng thanh toán payOS.",
+            )
+        if method not in ["COD", "PAYOS"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Phương thức thanh toán '{new_payment_method}' không được hỗ trợ. Vui lòng chọn COD hoặc payOS.",
+            )
+
         # Hủy các giao dịch đang PENDING của đơn hàng này
         pending_transactions = db.scalars(
             select(PaymentTransaction).where(
@@ -256,14 +270,15 @@ class PaymentIntentService:
             raise HTTPException(status_code=400, detail="Đơn đổi hàng này không có phụ phí phát sinh.")
 
         method = payment_method.strip().upper()
-        if method in ["BANK_TRANSFER", "VIETQR"]:
-            provider = "VIETQR"
-        elif method == "MOMO":
-            provider = "MOMO"
+        if method in ["BANK_TRANSFER", "VIETQR", "MOMO"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Phương thức thanh toán '{payment_method}' đã ngừng hỗ trợ cho phụ phí đổi hàng mới. Vui lòng chọn COD.",
+            )
         elif method == "COD":
             provider = "COD"
         else:
-            raise HTTPException(status_code=400, detail=f"Phương thức '{payment_method}' không hỗ trợ.")
+            raise HTTPException(status_code=400, detail=f"Phương thức '{payment_method}' không hỗ trợ. Vui lòng chọn COD.")
 
         intent_id = f"PI-EXC-{exchange.exchange_code}-{int(datetime.now().timestamp() * 1000) % 1000000}"
         expires_at = datetime.now(UTC) + timedelta(minutes=settings.payment_expiry_minutes)
