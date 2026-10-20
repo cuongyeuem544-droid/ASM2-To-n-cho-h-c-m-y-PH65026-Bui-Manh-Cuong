@@ -1,6 +1,4 @@
 import {
-  ArrowDownToLine,
-  ArrowLeftRight,
   Boxes,
   CheckSquare,
   ClipboardList,
@@ -31,12 +29,10 @@ interface WarehouseInfo {
 const staffNavItems = [
   { to: '/staff/today', label: '1. Việc hôm nay', icon: CheckSquare },
   { to: '/staff/picking-packing', label: '2. Soạn & Đóng gói', icon: PackageCheck },
-  { to: '/staff/receipts', label: '3. Nhập kho được giao', icon: ArrowDownToLine },
-  { to: '/staff/inventory-checks', label: '4. Kiểm kê được giao', icon: ClipboardList },
-  { to: '/staff/transfers', label: '5. Điều chuyển nhận', icon: ArrowLeftRight },
-  { to: '/staff/stock', label: '6. Tra cứu tồn kho (Xem)', icon: Boxes },
-  { to: '/staff/history', label: '7. Lịch sử của tôi', icon: History },
-  { to: '/staff/returns', label: '8. Hàng đổi trả (Kiểm hàng)', icon: RotateCcw },
+  { to: '/staff/inventory-checks', label: '3. Kiểm kê được giao', icon: ClipboardList },
+  { to: '/staff/stock', label: '4. Tra cứu tồn kho (Xem)', icon: Boxes },
+  { to: '/staff/history', label: '5. Lịch sử của tôi', icon: History },
+  { to: '/staff/returns', label: '6. Hàng đổi trả (Kiểm hàng)', icon: RotateCcw },
 ]
 
 export function WarehouseStaffLayout() {
@@ -155,7 +151,7 @@ export function WarehouseStaffLayout() {
           <NotificationBell viewAllUrl="/staff/history" bellColor="white" />
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontSize: '12px', fontWeight: 800 }}>{user?.full_name}</div>
-            <div style={{ fontSize: '10px', opacity: 0.85 }}>Nhân viên đóng gói</div>
+            <div style={{ fontSize: '10px', opacity: 0.85 }}>{user?.role === "ADMIN" ? "Quản trị viên (Admin) • Kho HCM" : "Nhân viên đóng gói"}</div>
           </div>
           <button
             onClick={handleLogout}

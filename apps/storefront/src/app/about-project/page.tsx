@@ -114,7 +114,7 @@ export default function AboutProjectPage() {
                   Phase Medical Design System Redesign (10 Khu Vực Trải Nghiệm) - Hoàn Thành Xuất Sắc
                 </h3>
                 <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                  Thiết lập chuẩn thiết kế y tế tinh giản và đáng tin cậy: Bảng màu Medical Blue `#0052cc` vững chãi, loại bỏ các dải gradient AI phi y tế, chuẩn hóa hệ thống bo góc (`rounded-2xl` cho card và modal, `rounded-xl` cho controls), hoàn thiện 100% trải nghiệm từ Header, MegaMenu, Footer, Trang chủ, Bộ lọc danh mục, Chi tiết thuốc, Giỏ hàng, Toa thuốc điện tử, Đơn hàng tài khoản cho đến Cổng Quản trị Admin.
+                  Thiết lập chuẩn thiết kế y tế tinh giản và đáng tin cậy: Bảng màu Medical Blue `#0052cc` vững chãi, loại bỏ các dải gradient AI phi y tế, đồng bộ hệ thống bo góc (`rounded-2xl` cho card và modal, `rounded-xl` cho controls), hoàn thiện 100% trải nghiệm từ Header, MegaMenu, Footer, Trang chủ, Bộ lọc danh mục, Chi tiết thuốc, Giỏ hàng, Toa thuốc điện tử, Đơn hàng tài khoản cho đến Cổng Quản trị Admin.
                 </p>
               </div>
             </div>
@@ -138,7 +138,7 @@ export default function AboutProjectPage() {
                   Phase Product Commerce & Healthcare Trust - Hoàn Thành
                 </h3>
                 <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                  Nâng cấp toàn diện Product Card với cấu trúc phân tầng trực quan (Brand ➔ Tên thuốc ➔ Quy cách ➔ Đánh giá ➔ Giá nổi bật ➔ CTA), chuẩn hóa vùng ảnh ProductImageStage theo dạng bào chế, hệ thống badge tinh gọn tối đa 1-2 badge, bắt buộc CTA "Tư vấn Dược sĩ" đối với thuốc kê đơn Rx, và kiểm định an toàn tất cả claim dữ liệu demo.
+                  Nâng cấp toàn diện Product Card với cấu trúc phân tầng trực quan (Brand ➔ Tên thuốc ➔ Quy cách ➔ Đánh giá ➔ Giá nổi bật ➔ CTA), đồng bộ vùng ảnh ProductImageStage theo dạng bào chế, hệ thống badge tinh gọn tối đa 1-2 badge, bắt buộc CTA "Tư vấn Dược sĩ" đối với thuốc kê đơn Rx, và kiểm định an toàn tất cả claim dữ liệu demo.
                 </p>
               </div>
             </div>

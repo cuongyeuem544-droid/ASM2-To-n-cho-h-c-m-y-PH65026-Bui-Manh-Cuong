@@ -133,7 +133,7 @@ export function CategoriesPage() {
   return (
     <div className="page">
       <AdminPageHeader
-        title="Cây danh mục dược phẩm chuẩn"
+        title="Cây danh mục dược phẩm"
         eyebrow="HỒ SƠ & BÁN HÀNG • Danh mục phân cấp 6 nhóm"
         subtitle="Quản trị cấu trúc cây danh mục bán hàng Storefront, đồng bộ phân loại y tế pháp lý và số lượng sản phẩm thực tế."
         badge={<span className="stat-card-badge">{tree.length} nhóm lớn</span>}

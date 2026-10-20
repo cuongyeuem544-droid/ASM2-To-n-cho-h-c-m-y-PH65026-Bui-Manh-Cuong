@@ -1,3 +1,14 @@
+from __future__ import annotations
+def mask_account_number(acc: str | None) -> str:
+    if not acc:
+        return ""
+    acc = acc.strip()
+    if len(acc) <= 4:
+        return "****"
+    return f"{acc[:2]}****{acc[-3:]}" if len(acc) >= 6 else f"****{acc[-3:]}"
+
+
+import re
 """
 apps/api/app/services/return_service.py
 
@@ -11,7 +22,6 @@ Dịch vụ Quản lý Vòng đời Yêu cầu Đổi / Trả Hàng (Return Life
 6. Thông báo tự động qua Email & Alert Notification.
 """
 
-from __future__ import annotations
 
 import logging
 import uuid
@@ -97,6 +107,10 @@ class ReturnService:
         current_user: User | None = None,
         customer_phone_verify: str | None = None,
         customer_email_verify: str | None = None,
+        refund_bank_code: str | None = None,
+        refund_bank_name: str | None = None,
+        refund_account_number: str | None = None,
+        refund_account_name: str | None = None,
     ) -> ReturnRequest:
         """
         Khởi tạo yêu cầu đổi/trả hàng mới từ khách hàng.
@@ -188,6 +202,19 @@ class ReturnService:
 
         # 5. Khởi tạo mã phiếu và ReturnRequest
         return_code = cls.generate_return_code(db)
+        # Validate required beneficiary bank info for prepaid orders
+        is_prepaid = order.payment_method in ["PAYOS", "BANK_TRANSFER", "MOMO"] or (order.payment_method != "COD" and order.payment_status == "PAID")
+        if request_type == ReturnRequestType.RETURN.value and is_prepaid:
+            if not refund_bank_name or not str(refund_bank_name).strip():
+                raise HTTPException(status_code=400, detail="Vui lòng cung cấp tên ngân hàng nhận tiền hoàn.")
+            if not refund_account_number or not str(refund_account_number).strip():
+                raise HTTPException(status_code=400, detail="Vui lòng cung cấp số tài khoản nhận tiền hoàn.")
+            clean_acc = str(refund_account_number).strip()
+            if not re.match(r"^\d{6,20}$", clean_acc):
+                raise HTTPException(status_code=400, detail="Số tài khoản ngân hàng không hợp lệ (yêu cầu từ 6 đến 20 chữ số).")
+            if not refund_account_name or not str(refund_account_name).strip():
+                raise HTTPException(status_code=400, detail="Vui lòng cung cấp họ và tên chủ tài khoản thụ hưởng.")
+
         ret_request = ReturnRequest(
             return_code=return_code,
             order_id=order.id,
@@ -202,6 +229,11 @@ class ReturnService:
             customer_note=customer_note,
             return_method=return_method,
             return_address_snapshot=order.shipping_address,
+            refund_bank_code=refund_bank_code,
+            refund_bank_name=refund_bank_name,
+            refund_account_number=refund_account_number,
+            refund_account_name=refund_account_name,
+            refund_beneficiary_submitted_at=utcnow() if refund_account_number else None,
             requested_at=utcnow(),
         )
         db.add(ret_request)

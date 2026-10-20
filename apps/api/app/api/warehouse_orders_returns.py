@@ -32,7 +32,7 @@ from decimal import Decimal
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -112,7 +112,7 @@ class EvidencePayload(BaseModel):
 
 class ItemInspectionItem(BaseModel):
     return_item_id: int = Field(..., description="ID sản phẩm đổi/trả bắt buộc")
-    condition: str = Field(..., min_length=1, description="Tình trạng thực tế bắt buộc")
+    condition: Optional[str] = Field(default=None, description="Tình trạng thực tế")
     package_condition: str = Field(..., min_length=1, description="Trạng thái bao bì bắt buộc")
     seal_intact: bool = Field(..., description="Tem niêm phong nguyên vẹn bắt buộc (True/False)")
     batch_matched: bool = Field(..., description="Khớp số lô đã xuất bắt buộc (True/False)")
@@ -128,18 +128,36 @@ class ItemInspectionItem(BaseModel):
     damage_description: Optional[str] = None
     inspection_note: Optional[str] = None
 
+    @field_validator("seal_intact", "batch_matched", "expiry_matched", "storage_condition_ok", mode="before")
+    @classmethod
+    def validate_strict_bool(cls, v, info):
+        if v is None:
+            raise ValueError(f"Trường '{info.field_name}' không được để trống (null).")
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)) and v in (0, 1):
+            return bool(v)
+        if isinstance(v, str):
+            clean = v.strip().lower()
+            if clean in ("true", "1", "yes", "t"):
+                return True
+            if clean in ("false", "0", "no", "f"):
+                return False
+        raise ValueError(f"Trường '{info.field_name}' phải là giá trị boolean hợp lệ (True/False), nhận: {v!r}")
+
     @model_validator(mode="after")
     def validate_inspection_safety(self):
-        # 1. Bắt buộc có condition và package_condition
-        if not self.condition or not str(self.condition).strip():
-            raise ValueError("Thiếu trường kiểm định bắt buộc: condition")
+        # 1. Bắt buộc có package_condition; loại bỏ toàn bộ fallback giả định như 'SEALED'
         if not self.package_condition or not str(self.package_condition).strip():
             raise ValueError("Thiếu trường kiểm định bắt buộc: package_condition")
+        if not self.condition or not str(self.condition).strip():
+            self.condition = self.package_condition.strip()
 
-        # 2. Bắt buộc có restock_destination hoặc suggested_action
-        action = (self.restock_destination or self.suggested_action or "").strip().upper()
-        if not action:
-            raise ValueError("Thiếu trường kiểm định bắt buộc: restock_destination / suggested_action")
+        # 2. Bắt buộc có suggested_action thuộc danh mục hợp lệ
+        action = (self.suggested_action or self.restock_destination or "").strip().upper()
+        if not action or action not in ["RESTOCK", "QUARANTINE", "DISPOSE", "SELLABLE_STOCK"]:
+            raise ValueError("Trường 'suggested_action' không hợp lệ. Phải là một trong: RESTOCK, QUARANTINE, DISPOSE.")
+        self.suggested_action = action
 
         # 3. Tổng nhận phải bằng tổng chấp nhận + từ chối
         if self.accepted_quantity + self.rejected_quantity != self.received_quantity:
@@ -174,7 +192,7 @@ class ItemInspectionItem(BaseModel):
                 )
 
             pkg_lower = self.package_condition.lower()
-            if any(bad in pkg_lower for bad in ["rách", "móp", "vỡ", "hỏng", "damaged", "broken", "torn"]):
+            if any(bad in pkg_lower for bad in ["rách", "móp", "vỡ", "hỏng", "damaged", "broken", "torn", "dập", "hở"]):
                 raise ValueError(f"Bao bì '{self.package_condition}' bị hư hại, không đạt chuẩn nhập lại kho bán.")
         return self
 
@@ -631,28 +649,34 @@ def get_manager_return_case_detail(
     max_possible = max(Decimal("0.0"), order_total - already_refunded)
     final_proposed = min(items_refund_proposed, max_possible)
 
-    # Lấy thông tin tài khoản thụ hưởng hoàn tiền an toàn (từ bản ghi Refund nếu đã có)
+    # Lấy thông tin tài khoản thụ hưởng hoàn tiền an toàn (từ ReturnRequest hoặc Refund)
+    ret_req = case.return_request
     last_refund = (
         case.refunds[-1]
         if case.refunds
         else (
-            case.return_request.refunds[-1]
-            if (case.return_request and case.return_request.refunds)
+            ret_req.refunds[-1]
+            if (ret_req and ret_req.refunds)
             else None
         )
     )
     bank_name = (
-        getattr(last_refund, "beneficiary_bank", None)
+        getattr(ret_req, "refund_bank_name", None)
+        or getattr(last_refund, "beneficiary_bank", None)
         or getattr(last_refund, "beneficiary_bank_name", None)
         or "Mặc định"
     )
     account_name = (
-        getattr(last_refund, "beneficiary_account_name", None)
-        or (case.return_request.customer_name if case.return_request else "Khách hàng")
+        getattr(ret_req, "refund_account_name", None)
+        or getattr(last_refund, "beneficiary_account_name", None)
+        or (ret_req.customer_name if ret_req else "Khách hàng")
     )
-    acc_no = getattr(last_refund, "beneficiary_account_number", None)
+    acc_no = (
+        getattr(ret_req, "refund_account_number", None)
+        or getattr(last_refund, "beneficiary_account_number", None)
+    )
     account_number_masked = (
-        f"***{acc_no[-4:]}" if (acc_no and len(acc_no) >= 4) else (acc_no or "—")
+        f"****{acc_no[-4:]}" if (acc_no and len(acc_no) >= 4) else (acc_no or "—")
     )
 
     return {
@@ -741,6 +765,7 @@ def get_manager_return_case_detail(
             "refund_status": "COMPLETED" if (already_refunded > Decimal("0.0") and final_proposed == Decimal("0.0")) else "PENDING",
             "beneficiary_bank": bank_name,
             "beneficiary_account_name": account_name,
+            "beneficiary_account_number": acc_no,
             "beneficiary_account_number_masked": account_number_masked,
         },
         "active_evidence_request": (
@@ -839,6 +864,36 @@ def accept_customer_evidence_endpoint(
         "message": "Đã chấp nhận bằng chứng của khách hàng. Ca hoàn chuyển sang trạng thái Chờ Quản lý duyệt hoàn.",
         "case_code": case.case_code,
         "case_status": case.status,
+    }
+
+
+@manager_router.post("/returns/{return_code}/receive")
+@compat_portal_router.post("/me/returns/{return_code}/receive")
+def manager_receive_return(
+    return_code: str,
+    payload: ReceiveReturnPayload,
+    db: Session = Depends(get_db),
+    auth: tuple[User, int | None] = Depends(require_warehouse_manager),
+):
+    """
+    Quản lý kho xác nhận tiếp nhận gói hàng từ bưu tá.
+    """
+    manager, warehouse_id = auth
+    wcase = WarehouseReturnService.staff_receive_package(
+        db=db,
+        case_code=return_code,
+        user=manager,
+        warehouse_id=warehouse_id,
+        carrier_name=payload.carrier_name,
+        tracking_code=payload.tracking_code,
+        package_condition=payload.package_condition,
+        note=payload.note,
+    )
+    return {
+        "status": wcase.status,
+        "case_status": wcase.status,
+        "success": True,
+        "case_code": wcase.case_code,
     }
 
 

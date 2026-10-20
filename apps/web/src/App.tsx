@@ -7,8 +7,6 @@ import { useAuth } from './services/auth'
 
 // Admin Pages
 const AuditPage = lazy(() => import('./pages/AuditPage').then(module => ({ default: module.AuditPage })))
-const CandidatesPage = lazy(() => import('./pages/CandidatesPage').then(module => ({ default: module.CandidatesPage })))
-const ConflictsPage = lazy(() => import('./pages/ConflictsPage').then(module => ({ default: module.ConflictsPage })))
 const DashboardPage = lazy(() => import('./pages/DashboardPage').then(module => ({ default: module.DashboardPage })))
 const ImportsPage = lazy(() => import('./pages/ImportsPage').then(module => ({ default: module.ImportsPage })))
 const LoginPage = lazy(() => import('./pages/LoginPage').then(module => ({ default: module.LoginPage })))
@@ -16,10 +14,8 @@ const NotFoundPage = lazy(() => import('./pages/NotFoundPage').then(module => ({
 const OrdersPage = lazy(() => import('./pages/OrdersPage').then(module => ({ default: module.OrdersPage })))
 const ProductDetailPage = lazy(() => import('./pages/ProductDetailPage').then(module => ({ default: module.ProductDetailPage })))
 const ProductsPage = lazy(() => import('./pages/ProductsPage').then(module => ({ default: module.ProductsPage })))
-const ReceiptsPage = lazy(() => import('./pages/ReceiptsPage').then(module => ({ default: module.ReceiptsPage })))
 const RunsPage = lazy(() => import('./pages/RunsPage').then(module => ({ default: module.RunsPage })))
 const SourcesPage = lazy(() => import('./pages/SourcesPage').then(module => ({ default: module.SourcesPage })))
-const TransfersPage = lazy(() => import('./pages/TransfersPage').then(module => ({ default: module.TransfersPage })))
 const UsersPage = lazy(() => import('./pages/UsersPage').then(module => ({ default: module.UsersPage })))
 const WarehousesPage = lazy(() => import('./pages/WarehousesPage').then(module => ({ default: module.WarehousesPage })))
 const BatchesPage = lazy(() => import('./pages/BatchesPage').then(module => ({ default: module.BatchesPage })))
@@ -29,7 +25,6 @@ const CampaignsPage = lazy(() => import('./pages/CampaignsPage').then(module => 
 const CategoriesPage = lazy(() => import('./pages/CategoriesPage').then(module => ({ default: module.CategoriesPage })))
 const ReturnsPage = lazy(() => import('./pages/ReturnsPage').then(module => ({ default: module.ReturnsPage })))
 const RefundsPage = lazy(() => import('./pages/RefundsPage').then(module => ({ default: module.RefundsPage })))
-const ExchangesPage = lazy(() => import('./pages/ExchangesPage').then(module => ({ default: module.ExchangesPage })))
 const LiveChatPage = lazy(() => import('./pages/LiveChatPage').then(module => ({ default: module.LiveChatPage })))
 const ChatbotAdminPage = lazy(() => import('./pages/admin/ChatbotAdminPage').then(module => ({ default: module.ChatbotAdminPage })))
 
@@ -55,9 +50,6 @@ const WarehouseOrdersPage = lazy(() =>
 const WarehouseReturnsPage = lazy(() =>
   import('./pages/warehouse/WarehouseReturnsPage').then(module => ({ default: module.WarehouseReturnsPage }))
 )
-const WarehouseReceiptsPage = lazy(() =>
-  import('./pages/warehouse/WarehouseReceiptsPage').then(module => ({ default: module.WarehouseReceiptsPage }))
-)
 const WarehouseBatchesPage = lazy(() =>
   import('./pages/warehouse/WarehouseBatchesPage').then(module => ({ default: module.WarehouseBatchesPage }))
 )
@@ -66,9 +58,6 @@ const WarehouseStockPage = lazy(() =>
 )
 const WarehouseAdjustmentsPage = lazy(() =>
   import('./pages/warehouse/WarehouseAdjustmentsPage').then(module => ({ default: module.WarehouseAdjustmentsPage }))
-)
-const WarehouseTransfersPage = lazy(() =>
-  import('./pages/warehouse/WarehouseTransfersPage').then(module => ({ default: module.WarehouseTransfersPage }))
 )
 const WarehouseStaffPage = lazy(() =>
   import('./pages/warehouse/WarehouseStaffPage').then(module => ({ default: module.WarehouseStaffPage }))
@@ -90,14 +79,8 @@ const StaffTodayPage = lazy(() =>
 const StaffPickingPackingPage = lazy(() =>
   import('./pages/staff/StaffPickingPackingPage').then(module => ({ default: module.StaffPickingPackingPage }))
 )
-const StaffReceiptsPage = lazy(() =>
-  import('./pages/staff/StaffReceiptsPage').then(module => ({ default: module.StaffReceiptsPage }))
-)
 const StaffInventoryChecksPage = lazy(() =>
   import('./pages/staff/StaffInventoryChecksPage').then(module => ({ default: module.StaffInventoryChecksPage }))
-)
-const StaffTransfersPage = lazy(() =>
-  import('./pages/staff/StaffTransfersPage').then(module => ({ default: module.StaffTransfersPage }))
 )
 const StaffStockPage = lazy(() =>
   import('./pages/staff/StaffStockPage').then(module => ({ default: module.StaffStockPage }))
@@ -168,15 +151,10 @@ export default function App() {
             <Route path="orders" element={<OrdersPage />} />
             <Route path="returns" element={<ReturnsPage />} />
             <Route path="refunds" element={<RefundsPage />} />
-            <Route path="exchanges" element={<ExchangesPage />} />
             <Route path="reviews" element={<ReviewsPage />} />
             <Route path="campaigns" element={<CampaignsPage />} />
             <Route path="warehouses" element={<WarehousesPage />} />
             <Route path="inventory/batches" element={<BatchesPage />} />
-            <Route path="inventory/receipts" element={<ReceiptsPage />} />
-            <Route path="inventory/transfers" element={<TransfersPage />} />
-            <Route path="candidates" element={<CandidatesPage />} />
-            <Route path="conflicts" element={<ConflictsPage />} />
             <Route path="sources" element={<SourcesPage />} />
             <Route path="imports" element={<ImportsPage />} />
             <Route path="runs" element={<RunsPage />} />
@@ -197,11 +175,9 @@ export default function App() {
             <Route path="orders" element={<WarehouseOrdersPage />} />
             <Route path="returns" element={<WarehouseReturnsPage />} />
             <Route path="imports" element={<WarehouseImportsPage />} />
-            <Route path="receipts" element={<WarehouseReceiptsPage />} />
             <Route path="batches" element={<WarehouseBatchesPage />} />
             <Route path="stock" element={<WarehouseStockPage />} />
             <Route path="inventory-check" element={<WarehouseAdjustmentsPage />} />
-            <Route path="transfers" element={<WarehouseTransfersPage />} />
             <Route path="alerts" element={<WarehouseAlertsPage />} />
             <Route path="staff" element={<WarehouseStaffPage />} />
             <Route path="audit" element={<WarehouseAuditPage />} />
@@ -213,9 +189,7 @@ export default function App() {
             <Route index element={<Navigate to="/staff/today" replace />} />
             <Route path="today" element={<StaffTodayPage />} />
             <Route path="picking-packing" element={<StaffPickingPackingPage />} />
-            <Route path="receipts" element={<StaffReceiptsPage />} />
             <Route path="inventory-checks" element={<StaffInventoryChecksPage />} />
-            <Route path="transfers" element={<StaffTransfersPage />} />
             <Route path="stock" element={<StaffStockPage />} />
             <Route path="history" element={<StaffHistoryPage />} />
             <Route path="returns" element={<StaffReturnsPage />} />

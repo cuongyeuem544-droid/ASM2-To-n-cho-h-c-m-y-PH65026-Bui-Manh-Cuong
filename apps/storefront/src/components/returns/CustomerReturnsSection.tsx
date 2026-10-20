@@ -36,57 +36,93 @@ interface ReturnItemSummary {
 interface CustomerReturnsSectionProps {
   userPhone?: string;
   userName?: string;
+  refreshKey?: number;
+  initialSelectedReturnCode?: string | null;
+  onSelectedReturnCodeChange?: (code: string | null) => void;
 }
 
 const STATUS_MAP: Record<string, { label: string; badge: string; step: number }> = {
-  REQUESTED: { label: "Chờ xem xét", badge: "bg-amber-50 text-amber-800 border-amber-200", step: 1 },
+  REQUESTED: { label: "Chờ tiếp nhận", badge: "bg-amber-50 text-amber-800 border-amber-200", step: 1 },
   REVIEWING: { label: "Dược sĩ đang xem xét", badge: "bg-blue-50 text-blue-800 border-blue-200", step: 1 },
   NEEDS_CUSTOMER_INFO: { label: "Cần bổ sung thông tin", badge: "bg-purple-50 text-purple-800 border-purple-200", step: 1 },
+  WAITING_CUSTOMER_EVIDENCE: { label: "Chờ bổ sung hình ảnh", badge: "bg-amber-50 text-amber-800 border-amber-200", step: 1 },
+  WAITING_MANAGER_REVIEW: { label: "Đã nộp ảnh, chờ xem xét", badge: "bg-blue-50 text-blue-800 border-blue-200", step: 1 },
   APPROVED: { label: "Đã phê duyệt", badge: "bg-emerald-50 text-emerald-800 border-emerald-200", step: 2 },
-  WAITING_CUSTOMER_RETURN: { label: "Cần gửi hàng về kho", badge: "bg-orange-100 text-orange-900 border-orange-300 font-bold", step: 2 },
+  WAITING_CUSTOMER_RETURN: { label: "Chờ gửi hàng về kho", badge: "bg-orange-100 text-orange-900 border-orange-300 font-bold", step: 2 },
+  WAITING_CUSTOMER_SHIPMENT: { label: "Chờ bàn giao vận chuyển", badge: "bg-orange-100 text-orange-900 border-orange-300 font-bold", step: 2 },
+  ASSIGNED_TO_WAREHOUSE: { label: "Đã phân bổ về kho xử lý", badge: "bg-sky-50 text-sky-800 border-sky-200", step: 2 },
+  IN_TRANSIT: { label: "Đang giao tới kho", badge: "bg-sky-50 text-sky-800 border-sky-200", step: 3 },
   RETURN_IN_TRANSIT: { label: "Đang chuyển về kho", badge: "bg-sky-50 text-sky-800 border-sky-200", step: 3 },
+  RECEIVED: { label: "Kho đã nhận kiện hàng", badge: "bg-indigo-50 text-indigo-800 border-indigo-200", step: 3 },
   RECEIVED_AT_WAREHOUSE: { label: "Đã tới kho H4Care", badge: "bg-indigo-50 text-indigo-800 border-indigo-200", step: 3 },
   INSPECTING: { label: "Dược sĩ đang thẩm định", badge: "bg-purple-50 text-purple-800 border-purple-200", step: 3 },
+  WAITING_MANAGER_APPROVAL: { label: "Chờ Quản lý duyệt hoàn tiền", badge: "bg-amber-50 text-amber-800 border-amber-200", step: 3 },
   REFUND_PENDING: { label: "Đang thực hiện hoàn tiền", badge: "bg-cyan-50 text-cyan-800 border-cyan-200", step: 4 },
+  REFUND_PROCESSING: { label: "Đang xử lý hoàn tiền", badge: "bg-cyan-50 text-cyan-800 border-cyan-200", step: 4 },
   REFUNDED: { label: "Đã hoàn tiền", badge: "bg-emerald-100 text-emerald-900 border-emerald-300 font-bold", step: 4 },
   REPLACING: { label: "Đang đóng gói hàng đổi", badge: "bg-indigo-50 text-indigo-800 border-indigo-200", step: 4 },
   REPLACEMENT_SHIPPED: { label: "Đơn đổi đang giao", badge: "bg-blue-50 text-blue-800 border-blue-200", step: 4 },
   COMPLETED: { label: "Hoàn tất thành công", badge: "bg-emerald-100 text-emerald-900 border-emerald-300 font-bold", step: 4 },
-  REJECTED: { label: "Đã từ chối", badge: "bg-rose-50 text-rose-800 border-rose-200", step: 0 },
+  CLOSED: { label: "Hồ sơ đã đóng", badge: "bg-slate-100 text-slate-700 border-slate-200", step: 4 },
   CANCELLED: { label: "Đã hủy", badge: "bg-slate-100 text-slate-700 border-slate-200", step: 0 },
+  CANCELLED_EVIDENCE_TIMEOUT: { label: "Hết hạn nộp hình ảnh", badge: "bg-slate-100 text-slate-700 border-slate-200", step: 0 },
+  REJECTED: { label: "Đã từ chối", badge: "bg-rose-50 text-rose-800 border-rose-200", step: 0 },
 };
 
-export function CustomerReturnsSection({ userPhone, userName }: CustomerReturnsSectionProps) {
+export function CustomerReturnsSection({
+  userPhone,
+  userName,
+  refreshKey,
+  initialSelectedReturnCode,
+  onSelectedReturnCodeChange,
+}: CustomerReturnsSectionProps) {
   const [returnsList, setReturnsList] = useState<ReturnItemSummary[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [filterTab, setFilterTab] = useState<"ALL" | "ACTIVE" | "WAITING_SHIP" | "DONE">("ALL");
-  const [selectedReturnCode, setSelectedReturnCode] = useState<string | null>(null);
+  const [selectedReturnCode, setSelectedReturnCode] = useState<string | null>(initialSelectedReturnCode || null);
+
+  useEffect(() => {
+    if (initialSelectedReturnCode) {
+      setSelectedReturnCode(initialSelectedReturnCode);
+    }
+  }, [initialSelectedReturnCode]);
   const [wizardOrderCode, setWizardOrderCode] = useState<string | null>(null);
   const [manualOrderInput, setManualOrderInput] = useState<string>("");
   const [errorMsg, setErrorMsg] = useState<string>("");
 
   const fetchReturns = useCallback(async () => {
-    if (!userPhone) {
+    const token = typeof window !== "undefined"
+      ? (localStorage.getItem("pharmatrust_access_token") ||
+         localStorage.getItem("pharmatrust_token") ||
+         localStorage.getItem("h4care_auth_token") ||
+         localStorage.getItem("access_token"))
+      : null;
+
+    if (!token && !userPhone) {
       setLoading(false);
       return;
     }
+
     setLoading(true);
+    setErrorMsg("");
     try {
-      const token = typeof window !== "undefined"
-        ? (localStorage.getItem("pharmatrust_access_token") || localStorage.getItem("pharmatrust_token") || localStorage.getItem("access_token"))
-        : null;
       const headers: Record<string, string> = {};
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
-      const res = await fetch(`/api/v1/returns/my-requests?customer_phone=${encodeURIComponent(userPhone)}`, { headers });
-      if (res.ok) {
-        const data = await res.json();
-        setReturnsList(data.returns || []);
-      } else {
-        setReturnsList([]);
+      // Backend identifies user by current_user.id from JWT; only fallback to customer_phone for unauthenticated guests
+      const url = token
+        ? "/api/v1/returns/my-requests"
+        : `/api/v1/returns/my-requests?customer_phone=${encodeURIComponent(userPhone || "")}`;
+
+      const res = await fetch(url, { headers });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || `Không thể tải danh sách đổi trả (Mã lỗi ${res.status})`);
       }
-    } catch {
-      setReturnsList([]);
+      const data = await res.json();
+      setReturnsList(data.returns || []);
+    } catch (err: any) {
+      setErrorMsg(err.message || "Lỗi khi kết nối máy chủ để tải yêu cầu đổi trả.");
     } finally {
       setLoading(false);
     }
@@ -94,16 +130,17 @@ export function CustomerReturnsSection({ userPhone, userName }: CustomerReturnsS
 
   useEffect(() => {
     fetchReturns();
-  }, [fetchReturns]);
+  }, [fetchReturns, refreshKey]);
 
   const filteredReturns = returnsList.filter((item) => {
     if (filterTab === "ALL") return true;
     if (filterTab === "WAITING_SHIP") return item.status === "WAITING_CUSTOMER_RETURN";
+    const terminalStatuses = ["COMPLETED", "REFUNDED", "REJECTED", "CANCELLED", "CANCELLED_EVIDENCE_TIMEOUT", "CLOSED"];
     if (filterTab === "ACTIVE") {
-      return !["COMPLETED", "REFUNDED", "REJECTED", "CANCELLED"].includes(item.status);
+      return !terminalStatuses.includes(item.status);
     }
     if (filterTab === "DONE") {
-      return ["COMPLETED", "REFUNDED", "REJECTED", "CANCELLED"].includes(item.status);
+      return terminalStatuses.includes(item.status);
     }
     return true;
   });
@@ -121,6 +158,23 @@ export function CustomerReturnsSection({ userPhone, userName }: CustomerReturnsS
 
   return (
     <div className="space-y-6">
+      {/* Error State Banner */}
+      {errorMsg && (
+        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center justify-between gap-3 animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+            <span className="font-semibold">{errorMsg}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => fetchReturns()}
+            className="px-3 py-1.5 rounded-xl bg-rose-600 text-white font-bold hover:bg-rose-700 transition-colors shadow-xs shrink-0 cursor-pointer"
+          >
+            Thử lại
+          </button>
+        </div>
+      )}
+
       {/* Section Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 gap-3">
         <div>
@@ -331,7 +385,10 @@ export function CustomerReturnsSection({ userPhone, userName }: CustomerReturnsS
         <ReturnDetailModal
           returnCode={selectedReturnCode}
           phoneVerify={userPhone}
-          onClose={() => setSelectedReturnCode(null)}
+          onClose={() => {
+          setSelectedReturnCode(null);
+          if (onSelectedReturnCodeChange) onSelectedReturnCodeChange(null);
+        }}
           onRefreshNeeded={() => {
             fetchReturns();
           }}

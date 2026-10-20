@@ -150,22 +150,36 @@ class WarehouseNotificationService:
     def notify_return_new(
         cls,
         db: Session,
-        return_req: ReturnRequest,
-        warehouse_id: int,
+        return_req: Optional[ReturnRequest] = None,
+        warehouse_id: Optional[int] = None,
+        case: Optional[Any] = None,
     ) -> WarehouseNotification:
-        """RETURN_NEW: Dispatched to warehouse manager when a return request is assigned."""
+        """RETURN_NEW: Dispatched to warehouse manager when a return case is assigned to warehouse."""
+        if case is not None:
+            if warehouse_id is None:
+                warehouse_id = case.warehouse_id
+            if return_req is None:
+                return_req = getattr(case, "return_request", None)
+        if warehouse_id is None:
+            raise ValueError("warehouse_id or case is required")
+        case_code = getattr(case, "case_code", None) if case else (return_req.return_code if return_req else None)
+        entity_id = str(case.id) if case else (str(return_req.id) if return_req else str(warehouse_id))
+        action_url = f"/warehouse/returns?case_code={case_code}" if case_code else "/warehouse/returns"
+        dedup_key = f"RETURN_NEW_{entity_id}_{warehouse_id}"
+        req_code = return_req.return_code if return_req else (case_code or "")
+
         return cls.create_notification(
             db,
             warehouse_id=warehouse_id,
             notification_type="RETURN_NEW",
-            title=f"Yêu cầu hoàn trả mới: {return_req.return_code}",
-            message=f"Yêu cầu hoàn trả {return_req.return_code} cần quản lý chi nhánh tiếp nhận và thẩm định.",
+            title=f"Yêu cầu hoàn trả mới: {case_code or req_code}",
+            message=f"Ca hoàn {case_code or req_code} (từ yêu cầu {req_code}) cần quản lý chi nhánh tiếp nhận và thẩm định.",
             severity="WARNING",
             recipient_user_id=None,
-            entity_type="ReturnRequest",
-            entity_id=str(return_req.id),
-            action_url="/warehouse/returns",
-            deduplication_key=f"RETURN_NEW_{return_req.id}_{warehouse_id}",
+            entity_type="WarehouseReturnCase" if case else "ReturnRequest",
+            entity_id=entity_id,
+            action_url=action_url,
+            deduplication_key=dedup_key,
         )
 
     @classmethod

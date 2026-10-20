@@ -818,7 +818,7 @@ export function StaffReturnsPage() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                   {selectedCase.items.map((item) => {
                     const draft = inspectionDrafts[item.id] || {
-                      received_quantity: item.requested_quantity,
+                      received_quantity: '',
                       accepted_quantity: 0,
                       rejected_quantity: 0,
                       package_condition: '',

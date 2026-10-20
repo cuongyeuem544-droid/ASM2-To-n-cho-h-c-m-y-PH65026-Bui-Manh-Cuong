@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
+  PackageCheck,
   RotateCcw,
   Search,
   Filter,
@@ -86,6 +87,8 @@ interface WarehouseReturnCaseDetail {
   manager_note?: string
   rejection_reason?: string
   disposition?: string
+  carrier_name?: string
+  tracking_code?: string
   items: ReturnCaseItem[]
   inspections: InspectionRecord[]
   evidences: ReturnEvidenceItem[]
@@ -96,6 +99,7 @@ interface WarehouseReturnCaseDetail {
     refund_status?: string
     beneficiary_bank?: string
     beneficiary_account_name?: string
+    beneficiary_account_number?: string
     beneficiary_account_number_masked?: string
   }
   proposed_refund?: {
@@ -186,6 +190,15 @@ export function WarehouseReturnsPage() {
   const [actionLoading, setActionLoading] = useState(false)
   const [actionError, setActionError] = useState('')
   const [actionSuccess, setActionSuccess] = useState('')
+
+  // Courier Receive Modal
+  const [showReceiveModal, setShowReceiveModal] = useState(false)
+  const [receiveCarrier, setReceiveCarrier] = useState('')
+  const [receiveTracking, setReceiveTracking] = useState('')
+  const [receiveCondition, setReceiveCondition] = useState('')
+  const [receiveNote, setReceiveNote] = useState('')
+  const [receiveError, setReceiveError] = useState('')
+  const [staffError, setStaffError] = useState('')
 
   // Assign Modal
   const [showAssignModal, setShowAssignModal] = useState(false)
@@ -295,10 +308,13 @@ export function WarehouseReturnsPage() {
 
   const fetchStaffList = async () => {
     try {
-      const res = await api<{ staff: WarehouseStaffOption[] }>('/warehouse-portal/staff')
-      setStaffList(res.staff || [])
-    } catch {
-      // Fallback
+      setStaffError('')
+      const res = await api<WarehouseStaffOption[] | { staff: WarehouseStaffOption[] }>('/warehouse-portal/staff')
+      const list = Array.isArray(res) ? res : (res?.staff || [])
+      setStaffList(list)
+    } catch (err: any) {
+      setStaffError(err?.message || 'Không thể tải danh sách nhân viên kho.')
+      setStaffList([])
     }
   }
 
@@ -306,6 +322,14 @@ export function WarehouseReturnsPage() {
     fetchCases()
     fetchStaffList()
   }, [statusFilter])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const code = params.get('case_code')
+    if (code) {
+      openCaseDetail(code)
+    }
+  }, [])
 
   const openCaseDetail = async (caseCode: string) => {
     setLoadingDetail(true)
@@ -318,6 +342,36 @@ export function WarehouseReturnsPage() {
       alert('Không thể mở chi tiết ca hoàn: ' + (err?.message || 'Lỗi mạng'))
     } finally {
       setLoadingDetail(false)
+    }
+  }
+
+  // Xác nhận đã nhận hàng từ bưu tá
+  const handleConfirmReceive = async () => {
+    if (!selectedCase) return
+    if (!receiveCondition || !receiveCondition.trim()) {
+      setReceiveError('Vui lòng chọn tình trạng bao bì khi tiếp nhận kiện hàng (bắt buộc).')
+      return
+    }
+    setActionLoading(true)
+    setReceiveError('')
+    try {
+      await api(`/warehouse/me/returns/${selectedCase.case_code}/receive`, {
+        method: 'POST',
+        body: JSON.stringify({
+          carrier_name: receiveCarrier.trim() || undefined,
+          tracking_code: receiveTracking.trim() || undefined,
+          package_condition: receiveCondition,
+          note: receiveNote.trim() || undefined,
+        }),
+      })
+      setActionSuccess('Đã xác nhận tiếp nhận kiện hàng từ bưu tá thành công!')
+      setShowReceiveModal(false)
+      await openCaseDetail(selectedCase.case_code)
+      await fetchCases()
+    } catch (err: any) {
+      setReceiveError(err?.message || 'Lỗi khi xác nhận tiếp nhận kiện hàng.')
+    } finally {
+      setActionLoading(false)
     }
   }
 
@@ -1159,6 +1213,38 @@ export function WarehouseReturnsPage() {
               }}
             >
               <div style={{ display: 'flex', gap: 8 }}>
+                {/* Nút Xác nhận đã nhận hàng từ bưu tá */}
+                {['ASSIGNED_TO_WAREHOUSE', 'WAITING_CUSTOMER_SHIPMENT', 'IN_TRANSIT', 'RETURN_IN_TRANSIT'].includes(selectedCase.status) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReceiveCarrier(selectedCase.carrier_name || '')
+                      setReceiveTracking(selectedCase.tracking_code || '')
+                      setReceiveCondition('')
+                      setReceiveNote('')
+                      setReceiveError('')
+                      setShowReceiveModal(true)
+                    }}
+                    disabled={actionLoading}
+                    style={{
+                      padding: '8px 14px',
+                      borderRadius: 8,
+                      background: '#047857',
+                      color: '#fff',
+                      border: 'none',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    <PackageCheck size={14} />
+                    <span>Xác nhận đã nhận hàng từ bưu tá</span>
+                  </button>
+                )}
+
                 {/* 1. Nút Phân công */}
                 <button
                   type="button"
@@ -1355,6 +1441,128 @@ export function WarehouseReturnsPage() {
         </div>
       )}
 
+      {/* MODAL TIẾP NHẬN HÀNG TỪ BƯU TÁ */}
+      {showReceiveModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.5)',
+            zIndex: 1100,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+          }}
+        >
+          <div style={{ background: '#fff', borderRadius: 12, width: '100%', maxWidth: 460, padding: 24 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+              <PackageCheck size={20} style={{ color: '#047857' }} />
+              <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Xác Nhận Nhận Hàng Từ Bưu Tá</h3>
+            </div>
+            <p style={{ fontSize: 13, color: '#64748b', margin: '0 0 16px 0' }}>
+              Kiểm tra bưu phẩm thực tế từ đơn vị vận chuyển trước khi bàn giao cho nhân viên kho thẩm định số lô/HSD:
+            </p>
+
+            {receiveError && (
+              <div style={{ padding: '10px 12px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, color: '#dc2626', fontSize: 13, marginBottom: 14 }}>
+                {receiveError}
+              </div>
+            )}
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
+                Đơn vị vận chuyển:
+              </label>
+              <input
+                type="text"
+                value={receiveCarrier}
+                onChange={(e) => setReceiveCarrier(e.target.value)}
+                placeholder="VD: Viettel Post, VNPost, GHTK..."
+                style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13 }}
+              />
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
+                Mã vận đơn (Nếu có):
+              </label>
+              <input
+                type="text"
+                value={receiveTracking}
+                onChange={(e) => setReceiveTracking(e.target.value)}
+                placeholder="VD: VP123456789..."
+                style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13 }}
+              />
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>
+                Tình trạng bao bì khi nhận <span style={{ color: '#dc2626' }}>*</span>:
+              </label>
+              <select
+                value={receiveCondition}
+                onChange={(e) => {
+                  setReceiveCondition(e.target.value)
+                  if (receiveError) setReceiveError('')
+                }}
+                style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, fontWeight: 600 }}
+                required
+              >
+                <option value="">-- Chọn tình trạng bao bì (Bắt buộc) --</option>
+                <option value="SEALED">Nguyên vẹn niêm phong (SEALED)</option>
+                <option value="TORN">Rách bao bì / thủng hộp (TORN)</option>
+                <option value="CRUSHED">Móp méo / biến dạng kiện (CRUSHED)</option>
+                <option value="WET">Ẩm ướt / dính nước (WET)</option>
+                <option value="DAMAGED">Hư hại bao bì bên ngoài (DAMAGED)</option>
+                <option value="OTHER">Tình trạng khác (OTHER)</option>
+              </select>
+            </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
+                Ghi chú tiếp nhận (Tùy chọn):
+              </label>
+              <textarea
+                value={receiveNote}
+                onChange={(e) => setReceiveNote(e.target.value)}
+                placeholder="Ghi nhận hiện trạng gói bưu phẩm khi bưu tá bàn giao..."
+                rows={2}
+                style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13 }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setShowReceiveModal(false)}
+                className="admin-button button-secondary"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmReceive}
+                disabled={actionLoading || !receiveCondition}
+                style={{
+                  padding: '9px 18px',
+                  background: '#047857',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 8,
+                  fontWeight: 700,
+                  fontSize: 13,
+                  cursor: 'pointer',
+                  opacity: (!receiveCondition || actionLoading) ? 0.6 : 1,
+                }}
+              >
+                {actionLoading ? 'Đang lưu...' : 'Xác nhận tiếp nhận'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MODAL PHÂN CÔNG NHÂN VIÊN */}
       {showAssignModal && (
         <div
@@ -1374,25 +1582,35 @@ export function WarehouseReturnsPage() {
             <p style={{ fontSize: 13, color: '#64748b', margin: '0 0 16px 0' }}>
               Chọn nhân viên kho chịu trách nhiệm tiếp nhận gói hàng và thẩm định số lô, HSD thực tế:
             </p>
-            <select
-              value={assignStaffId}
-              onChange={(e) => setAssignStaffId(e.target.value ? Number(e.target.value) : '')}
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                borderRadius: 8,
-                border: '1px solid #cbd5e1',
-                fontSize: 14,
-                marginBottom: 20,
-              }}
-            >
-              <option value="">-- Chọn nhân viên thuộc kho --</option>
-              {staffList.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.full_name} ({s.phone})
-                </option>
-              ))}
-            </select>
+            {staffError ? (
+              <div style={{ padding: '10px 12px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, color: '#dc2626', fontSize: 13, marginBottom: 16 }}>
+                {staffError}
+              </div>
+            ) : staffList.length === 0 ? (
+              <div style={{ padding: '10px 12px', background: '#fffbeb', border: '1px solid #fef3c7', borderRadius: 8, color: '#d97706', fontSize: 13, marginBottom: 16 }}>
+                Kho chưa có nhân viên đang hoạt động
+              </div>
+            ) : (
+              <select
+                value={assignStaffId}
+                onChange={(e) => setAssignStaffId(e.target.value ? Number(e.target.value) : '')}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: 8,
+                  border: '1px solid #cbd5e1',
+                  fontSize: 14,
+                  marginBottom: 20,
+                }}
+              >
+                <option value="">-- Chọn nhân viên thuộc kho --</option>
+                {staffList.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.full_name} ({s.phone})
+                  </option>
+                ))}
+              </select>
+            )}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
               <button
                 type="button"
@@ -1847,6 +2065,20 @@ export function WarehouseReturnsPage() {
                 * Số tiền được tính toán tự động dựa trên đơn giá ròng sau chiết khấu của các mặt hàng được duyệt. Quản lý kho không được tự ý sửa số tiền này.
               </div>
             </div>
+
+            {/* THÔNG TIN TÀI KHOẢN THỤ HƯỞNG (CHỈ ĐỌC) */}
+            <div style={{ padding: 12, background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0', marginBottom: 16 }}>
+              <div style={{ fontSize: 12, color: '#334155', fontWeight: 700, marginBottom: 6 }}>
+                THÔNG TIN TÀI KHOẢN THỤ HƯỞNG (CHỈ ĐỌC):
+              </div>
+              <div style={{ fontSize: 12, color: '#475569', display: 'grid', gridTemplateColumns: '1fr', gap: 4 }}>
+                <div>Ngân hàng: <strong>{selectedCase?.refund_info?.beneficiary_bank || '—'}</strong></div>
+                <div>Chủ tài khoản: <strong>{selectedCase?.refund_info?.beneficiary_account_name || selectedCase?.customer_name || '—'}</strong></div>
+                <div>Số tài khoản: <strong style={{ color: '#047857', fontFamily: 'monospace' }}>{selectedCase?.refund_info?.beneficiary_account_number || selectedCase?.refund_info?.beneficiary_account_number_masked || '—'}</strong></div>
+              </div>
+            </div>
+
+
 
             <div style={{ marginBottom: 14 }}>
               <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 6 }}>

@@ -43,7 +43,7 @@ class CreateRefundPayload(BaseModel):
     order_code: str
     refund_amount: Decimal = Field(..., gt=0)
     refund_method: str = Field(default=RefundMethod.BANK_TRANSFER.value)
-    return_code: Optional[str] = None
+    return_code: str = Field(..., min_length=1, description="Mã yêu cầu đổi/trả đã được Quản lý kho phê duyệt")
     reason: Optional[str] = None
     beneficiary_bank: Optional[str] = None
     beneficiary_account_number: Optional[str] = None
@@ -201,12 +201,17 @@ def create_manual_refund(
     if not order:
         raise HTTPException(status_code=404, detail=f"Không tìm thấy đơn hàng '{payload.order_code}'.")
 
-    return_request_id = None
-    if payload.return_code:
-        ret = db.scalar(select(ReturnRequest).where(ReturnRequest.return_code == payload.return_code))
-        if not ret:
-            raise HTTPException(status_code=404, detail=f"Không tìm thấy yêu cầu đổi/trả '{payload.return_code}'.")
-        return_request_id = ret.id
+    if not payload.return_code or not str(payload.return_code).strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Bắt buộc phải cung cấp mã yêu cầu đổi/trả (return_code) đã được Quản lý kho phê duyệt để tạo phiếu hoàn tiền.",
+        )
+    ret = db.scalar(select(ReturnRequest).where(ReturnRequest.return_code == payload.return_code.strip()))
+    if not ret:
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy yêu cầu đổi/trả '{payload.return_code}'.")
+    if ret.order_id != order.id:
+        raise HTTPException(status_code=400, detail=f"Yêu cầu đổi/trả '{payload.return_code}' không thuộc về đơn hàng '{order.order_code}'.")
+    return_request_id = ret.id
 
     refund = RefundService.create_refund_request(
         db=db,

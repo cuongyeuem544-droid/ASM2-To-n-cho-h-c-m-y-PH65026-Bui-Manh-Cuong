@@ -372,16 +372,16 @@ export function WarehouseOverviewPage() {
         </div>
 
         <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '14px 18px' }}>
-          <div style={{ fontSize: '11px', fontWeight: 700, color: '#64748b' }}>PHIẾU NHẬP CHỜ XỬ LÝ</div>
+          <div style={{ fontSize: '11px', fontWeight: 700, color: '#64748b' }}>TỔNG SỐ LÔ THUỐC</div>
           <div style={{ fontSize: '20px', fontWeight: 900, color: '#0f172a', marginTop: '2px' }}>
-            {kpi?.pending_receipts_count ?? 0} <span style={{ fontSize: '11px', color: '#94a3b8' }}>phiếu GSP</span>
+            {kpi?.total_batches ?? 0} <span style={{ fontSize: '11px', color: '#94a3b8' }}>lô thuốc</span>
           </div>
         </div>
 
         <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '14px 18px' }}>
-          <div style={{ fontSize: '11px', fontWeight: 700, color: '#64748b' }}>ĐIỀU CHUYỂN ĐẾN KHO</div>
+          <div style={{ fontSize: '11px', fontWeight: 700, color: '#64748b' }}>ĐƠN CHỜ SOẠN & ĐÓNG GÓI</div>
           <div style={{ fontSize: '20px', fontWeight: 900, color: '#0f172a', marginTop: '2px' }}>
-            {kpi?.inbound_transfers ?? 0} <span style={{ fontSize: '11px', color: '#94a3b8' }}>chuyến hàng</span>
+            {kpi?.pending_fulfillment_count ?? 0} <span style={{ fontSize: '11px', color: '#94a3b8' }}>đơn hàng</span>
           </div>
         </div>
 

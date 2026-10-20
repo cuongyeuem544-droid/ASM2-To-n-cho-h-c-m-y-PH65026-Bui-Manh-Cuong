@@ -1,15 +1,11 @@
 import {
   Activity,
-  AlertTriangle,
-  ArrowDownToLine,
-  ArrowLeftRight,
   Boxes,
   Building2,
   Bot,
   Database,
   ExternalLink,
   FileInput,
-  FlaskConical,
   FolderTree,
   Globe,
   History,
@@ -20,7 +16,6 @@ import {
   Menu,
   MessageSquare,
   RefreshCw,
-  Repeat,
   RotateCcw,
   ShieldCheck,
   ShoppingBag,
@@ -75,8 +70,6 @@ const navGroups: NavGroup[] = [
       { to: '/live-chat', label: 'Tư vấn trực tiếp (Live Chat)', icon: Headphones },
       { to: '/reviews', label: 'Đánh giá & Nhận xét', icon: MessageSquare },
       { to: '/campaigns', label: 'Chiến dịch mùa bệnh', icon: ThermometerSnowflake },
-      { to: '/candidates', label: 'Thuốc mới chờ duyệt', icon: FlaskConical },
-      { to: '/conflicts', label: 'Mâu thuẫn dữ liệu', icon: AlertTriangle },
     ],
   },
   {
@@ -84,7 +77,6 @@ const navGroups: NavGroup[] = [
     items: [
       { to: '/returns', label: 'Quản lý Đổi/Trả hàng', icon: RotateCcw },
       { to: '/refunds', label: 'Hoàn tiền & Đối soát', icon: Banknote },
-      { to: '/exchanges', label: 'Đơn đổi hàng (Exchanges)', icon: Repeat },
     ],
   },
   {
@@ -92,10 +84,8 @@ const navGroups: NavGroup[] = [
     items: [
       { to: '/warehouses', label: 'Kho & Chi nhánh', icon: Building2 },
       { to: '/warehouse/orders', label: 'Đơn hàng kho', icon: ShoppingBag },
-      { to: '/staff/picking-packing', label: 'Soạn & Đóng gói hàng', icon: PackageCheck },
+      { to: '/staff/picking-packing?warehouse_code=KHO-HCM-01', label: 'Soạn & Đóng gói hàng (Kho HCM)', icon: PackageCheck },
       { to: '/inventory/batches', label: 'Lô thuốc & Hạn dùng', icon: Layers },
-      { to: '/inventory/receipts', label: 'Nhập kho (GSP)', icon: ArrowDownToLine },
-      { to: '/inventory/transfers', label: 'Điều chuyển kho', icon: ArrowLeftRight },
     ],
   },
   {

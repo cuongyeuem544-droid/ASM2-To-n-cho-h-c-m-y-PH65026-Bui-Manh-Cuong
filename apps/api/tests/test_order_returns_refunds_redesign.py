@@ -79,12 +79,12 @@ from app.services.warehouse_return_service import WarehouseReturnService
 def staff_hcm_headers(client):
     response = client.post(
         "/api/v1/auth/login",
-        json={"email": "staff_hcm@pharmatrust.vn", "password": "Staff@2026"},
+        json={"email": "staff.hcm@pharmatrust.vn", "password": "Staff@2026"},
     )
     if response.status_code != 200:
         response = client.post(
             "/api/v1/auth/login",
-            json={"email": "staff.hcm@pharmatrust.vn", "password": "Staff@2026"},
+            json={"email": "staff_hcm@pharmatrust.vn", "password": "Staff@2026"},
         )
     assert response.status_code == 200
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
@@ -281,6 +281,11 @@ def _get_or_create_test_case(wh_code="KHO-HCM-01") -> str:
             status=ReturnStatus.REQUESTED.value,
             reason_code="WRONG_ITEM",
             reason_text="Seed return",
+            refund_bank_code="VCB",
+            refund_bank_name="Vietcombank",
+            refund_account_number="0123456789",
+            refund_account_name="BUYER SEED",
+            refund_beneficiary_submitted_at=datetime.now(UTC),
             requested_at=datetime.now(UTC),
         )
         db.add(ret)
@@ -496,7 +501,7 @@ def test_10_manager_assigns_case_to_staff(client, manager_hcm_headers):
     _get_or_create_test_case("KHO-HCM-01")
     with SessionLocal() as db:
         wh_hcm = db.scalar(select(Warehouse).where(Warehouse.code == "KHO-HCM-01"))
-        staff_hcm = db.scalar(select(User).where(User.email.in_(["staff_hcm@pharmatrust.vn", "staff.hcm@pharmatrust.vn"])))
+        staff_hcm = db.scalar(select(User).where(User.email.in_(["staff.hcm@pharmatrust.vn", "staff_hcm@pharmatrust.vn"])))
         case = db.scalar(select(WarehouseReturnCase).where(WarehouseReturnCase.warehouse_id == wh_hcm.id))
         assert case is not None
         assert staff_hcm is not None
@@ -525,7 +530,7 @@ def test_11_staff_views_assigned_return_cases(client, staff_hcm_headers):
     data = res.json()
     assert "items" in data
     with SessionLocal() as db:
-        staff_hcm = db.scalar(select(User).where(User.email.in_(["staff_hcm@pharmatrust.vn", "staff.hcm@pharmatrust.vn"])))
+        staff_hcm = db.scalar(select(User).where(User.email.in_(["staff.hcm@pharmatrust.vn", "staff_hcm@pharmatrust.vn"])))
         for item in data["items"]:
             case = db.scalar(select(WarehouseReturnCase).where(WarehouseReturnCase.case_code == item["case_code"]))
             assert case.assigned_staff_id == staff_hcm.id
@@ -536,7 +541,7 @@ def test_11_staff_views_assigned_return_cases(client, staff_hcm_headers):
 # --------------------------------------------------------------------------
 def test_12_staff_confirms_receipt(client, staff_hcm_headers):
     with SessionLocal() as db:
-        staff_hcm = db.scalar(select(User).where(User.email.in_(["staff_hcm@pharmatrust.vn", "staff.hcm@pharmatrust.vn"])))
+        staff_hcm = db.scalar(select(User).where(User.email.in_(["staff.hcm@pharmatrust.vn", "staff_hcm@pharmatrust.vn"])))
         case = db.scalar(
             select(WarehouseReturnCase).where(
                 WarehouseReturnCase.assigned_staff_id == staff_hcm.id,
@@ -545,8 +550,15 @@ def test_12_staff_confirms_receipt(client, staff_hcm_headers):
         )
         if not case:
             case = db.scalar(select(WarehouseReturnCase).where(WarehouseReturnCase.assigned_staff_id == staff_hcm.id))
-            case.status = ReturnStatus.IN_TRANSIT.value
-            db.commit()
+        if not case:
+            wh_hcm = db.scalar(select(Warehouse).where(Warehouse.code == "KHO-HCM-01"))
+            case = db.scalar(select(WarehouseReturnCase).where(WarehouseReturnCase.warehouse_id == wh_hcm.id))
+        if not case:
+            cc = _get_or_create_test_case("KHO-HCM-01")
+            case = db.scalar(select(WarehouseReturnCase).where(WarehouseReturnCase.case_code == cc))
+        case.assigned_staff_id = staff_hcm.id
+        case.status = ReturnStatus.IN_TRANSIT.value
+        db.commit()
         case_code = case.case_code
 
     res = client.post(
@@ -565,7 +577,7 @@ def test_12_staff_confirms_receipt(client, staff_hcm_headers):
 # --------------------------------------------------------------------------
 def test_13_staff_uploads_evidence(client, staff_hcm_headers):
     with SessionLocal() as db:
-        staff_hcm = db.scalar(select(User).where(User.email.in_(["staff_hcm@pharmatrust.vn", "staff.hcm@pharmatrust.vn"])))
+        staff_hcm = db.scalar(select(User).where(User.email.in_(["staff.hcm@pharmatrust.vn", "staff_hcm@pharmatrust.vn"])))
         case = db.scalar(select(WarehouseReturnCase).where(WarehouseReturnCase.assigned_staff_id == staff_hcm.id))
         case_code = case.case_code
 
@@ -589,7 +601,7 @@ def test_13_staff_uploads_evidence(client, staff_hcm_headers):
 # --------------------------------------------------------------------------
 def test_14_staff_inspects_and_submits(client, staff_hcm_headers):
     with SessionLocal() as db:
-        staff_hcm = db.scalar(select(User).where(User.email.in_(["staff_hcm@pharmatrust.vn", "staff.hcm@pharmatrust.vn"])))
+        staff_hcm = db.scalar(select(User).where(User.email.in_(["staff.hcm@pharmatrust.vn", "staff_hcm@pharmatrust.vn"])))
         case = db.scalar(select(WarehouseReturnCase).where(WarehouseReturnCase.assigned_staff_id == staff_hcm.id))
         case.status = ReturnStatus.INSPECTING.value
         db.commit()
@@ -638,7 +650,7 @@ def test_14_staff_inspects_and_submits(client, staff_hcm_headers):
 # --------------------------------------------------------------------------
 def test_15_16_17_staff_forbidden_actions(client, staff_hcm_headers):
     with SessionLocal() as db:
-        staff_hcm = db.scalar(select(User).where(User.email.in_(["staff_hcm@pharmatrust.vn", "staff.hcm@pharmatrust.vn"])))
+        staff_hcm = db.scalar(select(User).where(User.email.in_(["staff.hcm@pharmatrust.vn", "staff_hcm@pharmatrust.vn"])))
         case = db.scalar(select(WarehouseReturnCase).where(WarehouseReturnCase.assigned_staff_id == staff_hcm.id))
         case_code = case.case_code
 
@@ -754,6 +766,12 @@ def test_21_manager_refund_requires_password(client, manager_hcm_headers):
         case.status = ReturnStatus.APPROVED.value
         for it in case.items:
             it.approved_quantity = it.requested_quantity
+        if case.return_request:
+            case.return_request.refund_bank_code = "VCB"
+            case.return_request.refund_bank_name = "Vietcombank"
+            case.return_request.refund_account_number = "0123456789"
+            case.return_request.refund_account_name = "BUYER SEED"
+            case.return_request.refund_beneficiary_submitted_at = datetime.now(UTC)
         db.commit()
         case_code = case.case_code
 
@@ -1354,3 +1372,373 @@ def test_37_get_return_case_detail_safe_refund_info(client, manager_hcm_headers)
     assert data["refund_info"]["beneficiary_bank"] is not None
     assert data["refund_info"]["beneficiary_account_name"] is not None
     assert "active_evidence_request" in data
+
+
+# --------------------------------------------------------------------------
+# Scenario 38: Customer Creates Return and Sees It Immediately in my-requests
+# --------------------------------------------------------------------------
+def test_38_customer_creates_return_and_visible_immediately_in_my_requests(client, buyer_headers):
+    """
+    Khách tạo return xong GET /api/v1/returns/my-requests thấy ngay yêu cầu mới
+    bằng current_user.id (không cần customer_phone).
+    """
+    order_id, order_code, item_id, _ = _create_test_order_with_fulfillment("KHO-HCM-01")
+
+    res_create = client.post(
+        "/api/v1/returns",
+        headers=buyer_headers,
+        json={
+            "order_code": order_code,
+            "request_type": "RETURN",
+            "reason_code": "DEFECTIVE",
+            "reason_text": "Sản phẩm hỏng hóc khi nhận",
+            "customer_note": "Hàng lỗi bao bì khi nhận",
+            "items": [{"order_item_id": item_id, "requested_quantity": 1}],
+            "refund_bank_code": "VCB",
+            "refund_bank_name": "Vietcombank",
+            "refund_account_number": "0123456789",
+            "refund_account_name": "NGUYEN VAN BUYER",
+        },
+    )
+    assert res_create.status_code == 200, res_create.text
+    created_return_code = res_create.json()["return_code"]
+
+    # Khách gọi GET /my-requests chỉ bằng JWT Bearer (không cần SĐT)
+    res_my = client.get("/api/v1/returns/my-requests", headers=buyer_headers)
+    assert res_my.status_code == 200
+    my_returns = res_my.json().get("returns", [])
+    found = any(r["return_code"] == created_return_code for r in my_returns)
+    assert found, f"Yêu cầu {created_return_code} phải xuất hiện ngay trong my-requests của khách"
+
+
+# --------------------------------------------------------------------------
+# Scenario 39: Anti-IDOR for Return Requests and Masked Bank Info
+# --------------------------------------------------------------------------
+def test_39_user_cannot_view_other_users_return_or_bank_info(client, buyer_headers):
+    """
+    User khác không xem được return và thông tin tài khoản ngân hàng của người khác.
+    """
+    with SessionLocal() as db:
+        buyer = db.scalar(select(User).where(User.email == "buyer@pharmatrust.vn"))
+        ret_req = db.scalar(
+            select(ReturnRequest).where(
+                ReturnRequest.user_id == buyer.id,
+                ReturnRequest.refund_account_number.isnot(None),
+            )
+        )
+        assert ret_req is not None
+        return_code = ret_req.return_code
+
+    # Login một customer khác
+    res_cust2 = client.post(
+        "/api/v1/auth/login",
+        json={"email": "customer@pharmatrust.vn", "password": "Customer@123456"},
+    )
+    if res_cust2.status_code == 200:
+        cust2_headers = {"Authorization": f"Bearer {res_cust2.json()['access_token']}"}
+        # Customer 2 xem my-requests không có đơn của buyer
+        res_list = client.get("/api/v1/returns/my-requests", headers=cust2_headers)
+        assert res_list.status_code == 200
+        codes = [r["return_code"] for r in res_list.json().get("returns", [])]
+        assert return_code not in codes
+
+        # Customer 2 gọi thẳng chi tiết đơn của buyer -> Bị từ chối (403 hoặc 404)
+        res_detail = client.get(f"/api/v1/returns/{return_code}", headers=cust2_headers)
+        assert res_detail.status_code in [403, 404]
+
+
+# --------------------------------------------------------------------------
+# Scenario 40: RETURN_NEW Notification Scoped to Owning Warehouse and Idempotent
+# --------------------------------------------------------------------------
+def test_40_return_new_notification_scoped_to_owning_warehouse_and_idempotent(client):
+    """
+    Mỗi WarehouseReturnCase được tạo phải có đúng một notification RETURN_NEW
+    thuộc đúng warehouse_id, action_url mở đúng ca hoàn, và chống tạo trùng khi retry.
+    """
+    from app.services.warehouse_notification_service import WarehouseNotificationService
+    from app.models.inventory import WarehouseNotification
+
+    case_code = _get_or_create_test_case("KHO-HCM-01")
+    with SessionLocal() as db:
+        wh_hcm = db.scalar(select(Warehouse).where(Warehouse.code == "KHO-HCM-01"))
+        case = db.scalar(select(WarehouseReturnCase).where(WarehouseReturnCase.case_code == case_code))
+        assert case is not None
+
+        # Gửi thông báo lần 1
+        notif1 = WarehouseNotificationService.notify_return_new(db, case=case)
+        assert notif1.warehouse_id == wh_hcm.id
+        assert notif1.notification_type == "RETURN_NEW"
+        assert f"case_code={case.case_code}" in notif1.action_url
+
+        # Gửi lại lần 2 (retry) -> Trả lại bản ghi cũ hoặc không tạo trùng
+        notif2 = WarehouseNotificationService.notify_return_new(db, case=case)
+        assert notif2.id == notif1.id
+
+        # Kiểm tra Quản lý kho Hà Nội không thấy thông báo của HCM
+        wh_hn = db.scalar(select(Warehouse).where(Warehouse.code == "KHO-HN-01"))
+        hn_notifs = db.scalars(
+            select(WarehouseNotification).where(
+                WarehouseNotification.warehouse_id == wh_hn.id,
+                WarehouseNotification.deduplication_key == notif1.deduplication_key,
+            )
+        ).all()
+        assert len(hn_notifs) == 0
+
+
+# --------------------------------------------------------------------------
+# Scenario 41: Cross-Warehouse Manager Forbidden to View or Receive Case
+# --------------------------------------------------------------------------
+def test_41_cross_warehouse_manager_forbidden_to_view_or_receive(client, manager_hn_headers):
+    """
+    Quản lý kho khác không xem hoặc tiếp nhận ca hoàn của kho không thuộc phạm vi mình.
+    """
+    hcm_case_code = _get_or_create_test_case("KHO-HCM-01")
+
+    # Manager HN mở ca của HCM -> 404 (IDOR guard)
+    res_get = client.get(f"/api/v1/warehouse/me/returns/{hcm_case_code}", headers=manager_hn_headers)
+    assert res_get.status_code == 404
+
+    # Manager HN tiếp nhận kiện hàng ca của HCM -> 404 (IDOR guard)
+    res_recv = client.post(
+        f"/api/v1/warehouse/me/returns/{hcm_case_code}/receive",
+        headers=manager_hn_headers,
+        json={"carrier_name": "VNPost", "package_condition": "SEALED"},
+    )
+    assert res_recv.status_code == 404
+
+
+# --------------------------------------------------------------------------
+# Scenario 42: Staff List Contract and Role/Warehouse Filtering
+# --------------------------------------------------------------------------
+def test_42_staff_list_only_contains_active_warehouse_staff_of_manager_warehouse(client, manager_hcm_headers):
+    """
+    GET /warehouse-portal/staff trả về array; chỉ chứa WAREHOUSE_STAFF đang hoạt động tại kho của Quản lý.
+    """
+    res = client.get("/api/v1/warehouse-portal/staff", headers=manager_hcm_headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert isinstance(data, list), "Contract phải là một array"
+
+    with SessionLocal() as db:
+        wh_hcm = db.scalar(select(Warehouse).where(Warehouse.code == "KHO-HCM-01"))
+        for s in data:
+            u = db.get(User, s["id"])
+            assert u.role.value == "WAREHOUSE_STAFF"
+            assert u.is_active is True
+            # Kiểm tra membership thuộc HCM
+            m = db.scalar(
+                select(UserWarehouseMembership).where(
+                    UserWarehouseMembership.user_id == u.id,
+                    UserWarehouseMembership.warehouse_id == wh_hcm.id,
+                    UserWarehouseMembership.is_active.is_(True),
+                )
+            )
+            assert m is not None, f"Nhân viên {u.email} không thuộc kho HCM"
+
+
+# --------------------------------------------------------------------------
+# Scenario 43: Staff Assignment Backend Validation Guards
+# --------------------------------------------------------------------------
+def test_43_assign_staff_rejects_admin_manager_inactive_or_cross_warehouse(client, manager_hcm_headers):
+    """
+    Khi phân công, backend kiểm tra lại role, trạng thái tài khoản và membership;
+    không tin staff_id từ frontend.
+    """
+    case_code = _get_or_create_test_case("KHO-HCM-01")
+
+    with SessionLocal() as db:
+        admin_user = db.scalar(select(User).where(User.role == UserRole.ADMIN))
+        manager_hn = db.scalar(select(User).where(User.email == "manager.hn@pharmatrust.vn"))
+        staff_hn = db.scalar(select(User).where(User.email.in_(["staff.hn@pharmatrust.vn", "staff_hn@pharmatrust.vn"])))
+
+    # Phân công Admin -> Bị từ chối (400)
+    res_admin = client.post(
+        f"/api/v1/warehouse/me/returns/{case_code}/assign",
+        headers=manager_hcm_headers,
+        json={"staff_id": admin_user.id},
+    )
+    assert res_admin.status_code == 400
+
+    # Phân công Quản lý kho -> Bị từ chối (400)
+    res_mgr = client.post(
+        f"/api/v1/warehouse/me/returns/{case_code}/assign",
+        headers=manager_hcm_headers,
+        json={"staff_id": manager_hn.id},
+    )
+    assert res_mgr.status_code == 400
+
+    # Phân công nhân viên kho khác -> Bị từ chối (400)
+    res_hn = client.post(
+        f"/api/v1/warehouse/me/returns/{case_code}/assign",
+        headers=manager_hcm_headers,
+        json={"staff_id": staff_hn.id},
+    )
+    assert res_hn.status_code == 400
+
+
+# --------------------------------------------------------------------------
+# Scenario 44: Courier Delivery Confirmation, Idempotency and Missing Condition
+# --------------------------------------------------------------------------
+def test_44_courier_receiving_validation_and_idempotency(client, manager_hcm_headers):
+    """
+    Quản lý kho tiếp nhận gói hàng từ bưu tá; yêu cầu package_condition;
+    chuyển sang RECEIVED; lặp lại lần 2 bị từ chối (400).
+    """
+    case_code = _get_or_create_test_case("KHO-HCM-01")
+
+    with SessionLocal() as db:
+        case = db.scalar(select(WarehouseReturnCase).where(WarehouseReturnCase.case_code == case_code))
+        case.status = ReturnStatus.IN_TRANSIT.value
+        db.commit()
+
+    # 1. Thiếu package_condition -> Bị từ chối (400 hoặc 422)
+    res_empty_cond = client.post(
+        f"/api/v1/warehouse/me/returns/{case_code}/receive",
+        headers=manager_hcm_headers,
+        json={"carrier_name": "Viettel Post", "package_condition": ""},
+    )
+    assert res_empty_cond.status_code in [400, 422]
+
+    # 2. Hợp lệ -> Thành công sang RECEIVED
+    res_ok = client.post(
+        f"/api/v1/warehouse/me/returns/{case_code}/receive",
+        headers=manager_hcm_headers,
+        json={"carrier_name": "Viettel Post", "tracking_code": "VT9999", "package_condition": "SEALED"},
+    )
+    assert res_ok.status_code == 200
+    assert res_ok.json()["status"] == ReturnStatus.RECEIVED.value
+
+    # 3. Nhận lại lần 2 khi đã ở RECEIVED -> Bị từ chối (400)
+    res_dup = client.post(
+        f"/api/v1/warehouse/me/returns/{case_code}/receive",
+        headers=manager_hcm_headers,
+        json={"carrier_name": "Viettel Post", "package_condition": "SEALED"},
+    )
+    assert res_dup.status_code == 400
+
+
+# --------------------------------------------------------------------------
+# Scenario 45: Prepaid Return Requires Beneficiary Account Details
+# --------------------------------------------------------------------------
+def test_45_prepaid_return_requires_beneficiary_account_details(client, buyer_headers):
+    """
+    Đơn hàng trả tiền trước (PAYOS/chuyển khoản) bắt buộc nhập đầy đủ số tài khoản,
+    ngân hàng và tên chủ tài khoản; định dạng STK an toàn (6-20 số).
+    """
+    order_id, order_code, item_id, _ = _create_test_order_with_fulfillment("KHO-HCM-01")
+    with SessionLocal() as db:
+        order = db.get(Order, order_id)
+        order.payment_method = "PAYOS"
+        order.payment_status = "PAID"
+        db.commit()
+
+    # 1. Thiếu thông tin ngân hàng -> 400
+    res_no_bank = client.post(
+        "/api/v1/returns",
+        headers=buyer_headers,
+        json={
+            "order_code": order_code,
+            "request_type": "RETURN",
+            "reason_code": "DEFECTIVE",
+            "reason_text": "Hàng lỗi",
+            "items": [{"order_item_id": item_id, "requested_quantity": 1}],
+        },
+    )
+    assert res_no_bank.status_code == 400
+
+    # 2. Số tài khoản không hợp lệ (ít hơn 6 số hoặc có chữ) -> 400
+    res_bad_acc = client.post(
+        "/api/v1/returns",
+        headers=buyer_headers,
+        json={
+            "order_code": order_code,
+            "request_type": "RETURN",
+            "reason_code": "DEFECTIVE",
+            "reason_text": "Hàng lỗi",
+            "items": [{"order_item_id": item_id, "requested_quantity": 1}],
+            "refund_bank_name": "Vietcombank",
+            "refund_account_number": "123",
+            "refund_account_name": "NGUYEN VAN A",
+        },
+    )
+    assert res_bad_acc.status_code == 400
+
+
+# --------------------------------------------------------------------------
+# Scenario 46: Beneficiary Information Cloning and Client Override Protection
+# --------------------------------------------------------------------------
+def test_46_beneficiary_cloned_to_refund_and_rejects_client_override(client, manager_hcm_headers):
+    """
+    Thông tin tài khoản thụ hưởng hiển thị trong chi tiết ca hoàn trước khi tạo Refund.
+    Khi manager_process_refund được gọi, thông tin được sao chép an toàn từ ReturnRequest,
+    tuyệt đối không chấp nhận client override số tài khoản khác.
+    """
+    order_id, order_code, item_id, _ = _create_test_order_with_fulfillment("KHO-HCM-01")
+    with SessionLocal() as db:
+        order = db.get(Order, order_id)
+        order.payment_method = "PAYOS"
+        order.payment_status = "PAID"
+        db.commit()
+
+    buyer_login = client.post("/api/v1/auth/login", json={"email": "buyer@pharmatrust.vn", "password": "Buyer@123456"}).json()
+    b_headers = {"Authorization": f"Bearer {buyer_login['access_token']}"}
+
+    # Tạo return request có tài khoản
+    res_create = client.post(
+        "/api/v1/returns",
+        headers=b_headers,
+        json={
+            "order_code": order_code,
+            "request_type": "RETURN",
+            "reason_code": "WRONG_ITEM",
+            "reason_text": "Giao nhầm sản phẩm",
+            "items": [{"order_item_id": item_id, "requested_quantity": 1}],
+            "refund_bank_name": "MB Bank",
+            "refund_account_number": "999988887777",
+            "refund_account_name": "CHỦ TÀI KHOẢN CHÍNH THỨC",
+        },
+    )
+    assert res_create.status_code == 200, res_create.text
+    ret_code = res_create.json()["return_code"]
+
+    with SessionLocal() as db:
+        ret_req = db.scalar(select(ReturnRequest).where(ReturnRequest.return_code == ret_code))
+        from app.services.warehouse_return_service import WarehouseReturnService
+        cases = WarehouseReturnService.split_return_request_into_cases(db, ret_req)
+        case_code = cases[0].case_code
+        # Chuyển trạng thái để sẵn sàng hoàn tiền
+        mgr = db.scalar(select(User).where(User.email == "manager.hcm@pharmatrust.vn"))
+        cases[0].status = ReturnStatus.APPROVED.value
+        cases[0].approved_by_user_id = mgr.id
+        cases[0].items[0].approved_quantity = 1
+        cases[0].items[0].received_quantity = 1
+        cases[0].items[0].accepted_quantity = 1
+        cases[0].items[0].approved_refund_amount = Decimal("50000.0")
+        db.commit()
+
+    # Quản lý xem chi tiết ca hoàn trước khi Refund tồn tại
+    res_detail = client.get(f"/api/v1/warehouse/me/returns/{case_code}", headers=manager_hcm_headers)
+    assert res_detail.status_code == 200
+    rf_info = res_detail.json()["refund_info"]
+    assert rf_info["beneficiary_bank"] == "MB Bank"
+    assert rf_info["beneficiary_account_name"] == "CHỦ TÀI KHOẢN CHÍNH THỨC"
+    assert "999988887777" in rf_info["beneficiary_account_number"]
+
+    # Quản lý hoàn tiền, client cố tình gửi beneficiary_account_number giả mạo
+    res_refund = client.post(
+        f"/api/v1/warehouse/me/returns/{case_code}/refund",
+        headers=manager_hcm_headers,
+        json={
+            "password": "Warehouse@2026",
+            "refund_method": "BANK_TRANSFER",
+            "beneficiary_account_number": "HACKED_ACCOUNT_999",
+        },
+    )
+    assert res_refund.status_code == 200
+
+    # Kiểm tra bản ghi Refund trong database phải giữ đúng tài khoản từ ReturnRequest
+    with SessionLocal() as db:
+        case = db.scalar(select(WarehouseReturnCase).where(WarehouseReturnCase.case_code == case_code))
+        refund = case.refunds[0]
+        assert refund.beneficiary_account_number == "999988887777"
+        assert refund.beneficiary_account_number != "HACKED_ACCOUNT_999"

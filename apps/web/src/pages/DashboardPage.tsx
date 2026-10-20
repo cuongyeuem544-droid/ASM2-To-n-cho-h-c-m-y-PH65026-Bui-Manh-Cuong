@@ -79,7 +79,7 @@ export function DashboardPage() {
 
   const chartData = data
     ? [
-        { name: 'Khớp chuẩn', value: data.high_match },
+        { name: 'Khớp chính thức', value: data.high_match },
         { name: 'Cần kiểm tra', value: data.review_required },
         { name: 'Thiếu chứng cứ', value: data.insufficient },
         { name: 'Đã tạm khóa', value: data.blocked },
@@ -132,7 +132,7 @@ export function DashboardPage() {
           loading={loading}
         />
         <StatCard
-          label="Thuốc khớp chuẩn"
+          label="Thuốc khớp chính thức"
           value={data?.high_match?.toLocaleString('vi-VN') || 0}
           icon={CheckCircle2}
           tone="emerald"

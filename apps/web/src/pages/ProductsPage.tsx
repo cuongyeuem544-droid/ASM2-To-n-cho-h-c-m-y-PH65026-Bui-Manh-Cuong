@@ -118,7 +118,7 @@ export function ProductsPage() {
             <button className="admin-button button-secondary" onClick={downloadCsv} title="Xuất toàn bộ danh mục dạng CSV">
               <Download size={14} /> Xuất CSV
             </button>
-            <button className="admin-button button-primary" onClick={downloadXlsx} title="Xuất báo cáo dược chuẩn Excel">
+            <button className="admin-button button-primary" onClick={downloadXlsx} title="Xuất báo cáo danh mục thuốc Excel">
               <FileSpreadsheet size={14} /> Xuất Excel (.xlsx)
             </button>
           </div>

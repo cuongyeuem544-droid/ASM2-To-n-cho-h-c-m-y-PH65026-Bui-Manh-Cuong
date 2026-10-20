@@ -92,14 +92,6 @@ export default function AdminPortalPage() {
       tag: "Đơn mua sắm",
     },
     {
-      id: "/conflicts",
-      title: "Xử Lý Mâu Thuẫn Dữ Liệu",
-      description: "Thuật toán phát hiện sai khác về nồng độ, hàm lượng và giá bán giữa các nhà thuốc để Dược sĩ đối chiếu.",
-      icon: Sliders,
-      color: "bg-rose-50 text-rose-600 border-rose-100",
-      tag: "Đối chiếu",
-    },
-    {
       id: "/",
       title: "Dashboard & Chỉ Số Tin Cậy",
       description: "Bảng tổng quan số lượng hồ sơ, biểu đồ phân bố độ tin cậy dữ liệu và lịch sử các phiên thu thập.",
