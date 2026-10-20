@@ -112,8 +112,8 @@ class EvidencePayload(BaseModel):
 
 class ItemInspectionItem(BaseModel):
     return_item_id: int = Field(..., description="ID sản phẩm đổi/trả bắt buộc")
-    condition: Optional[str] = Field(default=None, description="Tình trạng thực tế")
-    package_condition: str = Field(..., min_length=1, description="Trạng thái bao bì bắt buộc")
+    condition: str = Field(..., min_length=1, description="Tình trạng thực tế bắt buộc (không mặc định)")
+    package_condition: str = Field(..., min_length=1, description="Trạng thái bao bì bắt buộc (không mặc định)")
     seal_intact: bool = Field(..., description="Tem niêm phong nguyên vẹn bắt buộc (True/False)")
     batch_matched: bool = Field(..., description="Khớp số lô đã xuất bắt buộc (True/False)")
     expiry_matched: bool = Field(..., description="Khớp hạn sử dụng bắt buộc (True/False)")
@@ -147,11 +147,11 @@ class ItemInspectionItem(BaseModel):
 
     @model_validator(mode="after")
     def validate_inspection_safety(self):
-        # 1. Bắt buộc có package_condition; loại bỏ toàn bộ fallback giả định như 'SEALED'
+        # 1. Bắt buộc có package_condition và condition; loại bỏ toàn bộ logic fallback tự gán
+        if not self.condition or not str(self.condition).strip():
+            raise ValueError("Thiếu trường kiểm định bắt buộc: condition")
         if not self.package_condition or not str(self.package_condition).strip():
             raise ValueError("Thiếu trường kiểm định bắt buộc: package_condition")
-        if not self.condition or not str(self.condition).strip():
-            self.condition = self.package_condition.strip()
 
         # 2. Bắt buộc có suggested_action thuộc danh mục hợp lệ
         action = (self.suggested_action or self.restock_destination or "").strip().upper()
@@ -188,7 +188,7 @@ class ItemInspectionItem(BaseModel):
             if failed:
                 raise ValueError(
                     f"Sản phẩm không đạt chuẩn an toàn dược phẩm ({', '.join(failed)}). "
-                    "Tuyệt đối không được đề xuất hoặc nhập lại kho bán (RESTOCK/SELLABLE_STOCK). Bắt buộc chuyển sang QUARANTINE hoặc DISPOSE."
+                    "Tuyệt đối không được đề xuất hoặc nhập lại kho bán (RESTOCK) (hoặc SELLABLE_STOCK). Bắt buộc chuyển sang QUARANTINE hoặc DISPOSE."
                 )
 
             pkg_lower = self.package_condition.lower()
@@ -213,19 +213,28 @@ class ReinspectionPayload(BaseModel):
 class ItemApprovalItem(BaseModel):
     return_item_id: int = Field(..., description="ID sản phẩm đổi/trả")
     approved_quantity: int = Field(..., ge=0, description="Số lượng được quản lý duyệt hoàn tiền")
-    rejected_quantity: int = Field(..., ge=0, description="Số lượng từ chối hoàn tiền")
+    rejected_quantity: Optional[int] = Field(default=None, ge=0, description="Số lượng từ chối hoàn tiền")
     rejection_reason: Optional[str] = Field(default=None, description="Lý do từ chối (bắt buộc nếu rejected_quantity > 0)")
 
     @model_validator(mode="after")
     def validate_rejection_reason(self):
-        if self.rejected_quantity > 0 and (not self.rejection_reason or not str(self.rejection_reason).strip()):
+        if self.rejected_quantity is not None and self.rejected_quantity > 0 and (not self.rejection_reason or not str(self.rejection_reason).strip()):
             raise ValueError(f"Sản phẩm #{self.return_item_id} có {self.rejected_quantity} đơn vị bị từ chối, bắt buộc phải nêu rõ lý do từ chối (rejection_reason).")
         return self
 
 
 class ApproveReturnPayload(BaseModel):
-    items: List[ItemApprovalItem] = Field(..., min_length=1, description="Danh sách phê duyệt chi tiết từng sản phẩm bắt buộc do Quản lý kho duyệt")
+    items: Optional[List[ItemApprovalItem]] = Field(default=None, description="Danh sách phê duyệt chi tiết từng sản phẩm bắt buộc do Quản lý kho duyệt")
+    accepted_items: Optional[List[ItemApprovalItem]] = Field(default=None, description="Alias cho items")
     manager_note: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_items(self):
+        final_items = self.items or self.accepted_items
+        if not final_items:
+            raise ValueError("Vui lòng cung cấp danh sách phê duyệt chi tiết (items) cho từng sản phẩm do Quản lý kho duyệt.")
+        self.items = final_items
+        return self
 
 
 class RejectReturnPayload(BaseModel):
@@ -243,9 +252,17 @@ class ProcessRefundPayload(BaseModel):
     idempotency_key: Optional[str] = None
 
 
+class BatchRestockAllocationItem(BaseModel):
+    return_item_id: Optional[int] = None
+    order_item_id: Optional[int] = None
+    batch_id: int = Field(..., description="ID của lô xuất gốc thực tế nhận lại")
+    quantity: int = Field(..., gt=0, description="Số lượng nhập lại cho lô này")
+
+
 class StockDispositionPayload(BaseModel):
     disposition: str = Field(..., description="RESTOCK, QUARANTINE, DISPOSE")
     note: Optional[str] = None
+    batch_allocations: Optional[List[BatchRestockAllocationItem]] = None
 
 
 class RequestEvidencePayload(BaseModel):
@@ -626,6 +643,21 @@ def get_manager_return_case_detail(
         line_proposed = net_unit * Decimal(str(it.accepted_quantity or 0))
         items_refund_proposed += line_proposed
 
+        # Lấy thông tin các lô xuất gốc để hỗ trợ nhân viên kho chọn đúng lô thực tế nhận lại
+        allocs = db.scalars(
+            select(OrderItemBatchAllocation)
+            .where(OrderItemBatchAllocation.order_item_id == it.order_item_id)
+            .order_by(OrderItemBatchAllocation.id.asc())
+        ).all()
+        item_batches = []
+        for a in allocs:
+            item_batches.append({
+                "batch_id": a.batch_id,
+                "batch_number": a.batch.batch_number if a.batch else None,
+                "expiry_date": a.batch.expiry_date.isoformat() if (a.batch and a.batch.expiry_date) else None,
+                "allocated_quantity": a.allocated_quantity,
+            })
+
         items_data.append({
             "id": it.id,
             "order_item_id": it.order_item_id,
@@ -641,6 +673,7 @@ def get_manager_return_case_detail(
             "approved_refund_amount": float(it.approved_refund_amount or 0),
             "condition": it.condition,
             "inspection_note": it.inspection_note,
+            "batch_allocations": item_batches,
         })
 
     # Giới hạn trần hoàn tiền còn lại
@@ -1038,6 +1071,7 @@ def stock_disposition_case(
         warehouse_id=warehouse_id,
         disposition=payload.disposition,
         note=payload.note,
+        batch_allocations=[b.model_dump() for b in payload.batch_allocations] if payload.batch_allocations else None,
     )
     return {"success": True, "case_code": wcase.case_code, "disposition": wcase.disposition, "status": wcase.status}
 

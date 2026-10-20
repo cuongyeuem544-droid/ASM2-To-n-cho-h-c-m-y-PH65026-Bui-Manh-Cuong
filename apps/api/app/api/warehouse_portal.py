@@ -671,12 +671,12 @@ def update_order_fulfillment_status(
         if not target_ff:
             raise HTTPException(status_code=404, detail=f"Không tìm thấy kiện hàng #{payload.fulfillment_id} trong đơn hàng.")
         if target_ff.warehouse_id != wh.id:
-            raise HTTPException(status_code=403, detail=f"Kiện hàng #{payload.fulfillment_id} không thuộc phạm vi xử lý của kho {wh.name} ({wh.code}).")
+            raise HTTPException(status_code=403, detail=f"Kiện hàng #{payload.fulfillment_id} không thuộc phạm vi xử lý của kho bạn ({wh.name} - {wh.code}).")
         target_ffs = [target_ff]
     else:
         single_ff = fulfillments[0]
         if single_ff.warehouse_id != wh.id:
-            raise HTTPException(status_code=403, detail=f"Đơn hàng này không có kiện hàng thuộc phạm vi xử lý của kho {wh.name} ({wh.code}).")
+            raise HTTPException(status_code=403, detail=f"Đơn hàng này không có kiện hàng thuộc phạm vi xử lý của kho bạn ({wh.name} - {wh.code}).")
         target_ffs = [single_ff]
 
     before_status = order.fulfillment_status

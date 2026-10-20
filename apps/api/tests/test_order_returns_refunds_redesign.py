@@ -620,6 +620,7 @@ def test_14_staff_inspects_and_submits(client, staff_hcm_headers):
                     "received_quantity": 2,
                     "accepted_quantity": 2,
                     "rejected_quantity": 0,
+                    "condition": "GOOD_CONDITION",
                     "package_condition": "SEALED",
                     "seal_intact": True,
                     "batch_matched": True,

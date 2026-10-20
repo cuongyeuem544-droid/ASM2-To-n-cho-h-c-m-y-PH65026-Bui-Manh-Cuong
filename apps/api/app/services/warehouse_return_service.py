@@ -874,12 +874,18 @@ class WarehouseReturnService:
                 )
             acc_q = int(app_in["approved_quantity"])
             raw_rej = app_in.get("rejected_quantity")
+
+            rec_q = ret_item.received_quantity
+            insp_match = next((ins for ins in case.inspections if ins.return_item_id == ret_item.id), None)
+            if insp_match and insp_match.received_quantity is not None:
+                rec_q = insp_match.received_quantity
+            if rec_q is None or (rec_q == 0 and not case.inspections):
+                rec_q = getattr(ret_item, "accepted_quantity", None) or ret_item.requested_quantity or 0
+
             if raw_rej is None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Vui lòng chỉ định rõ số lượng từ chối (rejected_quantity) cho sản phẩm '{ret_item.product_name}'.",
-                )
-            rej_q = int(raw_rej)
+                rej_q = max(0, rec_q - acc_q)
+            else:
+                rej_q = int(raw_rej)
 
             if acc_q < 0 or rej_q < 0:
                 raise HTTPException(
@@ -887,18 +893,17 @@ class WarehouseReturnService:
                     detail=f"Số lượng duyệt ({acc_q}) và từ chối ({rej_q}) của '{ret_item.product_name}' không được âm.",
                 )
 
-            rec_q = ret_item.received_quantity
-            insp_match = next((ins for ins in case.inspections if ins.return_item_id == ret_item.id), None)
-            if insp_match and insp_match.received_quantity is not None:
-                rec_q = insp_match.received_quantity
-            if rec_q is None:
-                rec_q = 0
+            if acc_q > ret_item.requested_quantity:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Số lượng duyệt ({acc_q}) vượt quá số lượng yêu cầu hoàn ({ret_item.requested_quantity}) cho sản phẩm '{ret_item.product_name}' (không hợp lệ).",
+                )
 
             # Ràng buộc: Nếu received_quantity == 0 thì approved_quantity bắt buộc = 0
             if rec_q == 0 and acc_q > 0:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Sản phẩm '{ret_item.product_name}' có số lượng thực nhận là 0, số lượng duyệt (approved_quantity) bắt buộc phải bằng 0.",
+                    detail=f"Sản phẩm '{ret_item.product_name}' có số lượng thực nhận là 0, số lượng duyệt (approved_quantity) bắt buộc phải bằng 0 (không hợp lệ).",
                 )
 
             # Ràng buộc: approved_quantity <= received_quantity
@@ -1302,6 +1307,7 @@ class WarehouseReturnService:
         warehouse_id: int | None,
         disposition: str,  # RESTOCK | QUARANTINE | DISPOSE
         note: str | None = None,
+        batch_allocations: list[dict[str, Any]] | None = None,
     ) -> WarehouseReturnCase:
         """
         Quản lý kho phân luồng xử lý hàng sau khi hoàn tất hoàn tiền:
@@ -1337,6 +1343,26 @@ class WarehouseReturnService:
             case_items = list(case.return_request.items)
 
         if disposition == "RESTOCK":
+            # 1. Kiểm tra 100% tiêu chí kiểm định an toàn dược phẩm
+            for insp in case.inspections:
+                failed = []
+                if insp.seal_intact is not True:
+                    failed.append("tem niêm phong không nguyên vẹn (seal_intact=False)")
+                if insp.batch_matched is not True:
+                    failed.append("số lô không khớp đã xuất (batch_matched=False)")
+                if insp.expiry_matched is not True:
+                    failed.append("hạn sử dụng không khớp hoặc đã hết hạn (expiry_matched=False)")
+                if insp.storage_condition_ok is not True:
+                    failed.append("điều kiện bảo quản không đạt chuẩn GSP (storage_condition_ok=False)")
+                pkg = (insp.package_condition or "").lower()
+                if any(bad in pkg for bad in ["rách", "móp", "vỡ", "hỏng", "damaged", "broken", "torn", "dập", "hở"]):
+                    failed.append(f"bao bì bị hư hại ({insp.package_condition})")
+                if failed:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Sản phẩm #{insp.return_item_id} không đạt chuẩn an toàn dược phẩm ({', '.join(failed)}). Tuyệt đối không thể phân luồng nhập lại kho bán (RESTOCK).",
+                    )
+
             linked_codes = [case.case_code]
             if case.return_request:
                 linked_codes.append(case.return_request.return_code)
@@ -1392,6 +1418,7 @@ class WarehouseReturnService:
                 actor_user_id=manager_user.id,
                 audit_note=note or f"Nhập lại kho từ ca hoàn {case.case_code}",
                 linked_reference_codes=linked_codes,
+                batch_allocations=batch_allocations,
             )
 
             for ret_item in case_items:

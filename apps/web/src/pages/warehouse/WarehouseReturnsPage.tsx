@@ -42,6 +42,12 @@ interface ReturnCaseItem {
   net_unit_price?: number
   subtotal?: number
   approved_refund_amount?: number
+  batch_allocations?: {
+    batch_id: number
+    batch_number: string | null
+    expiry_date: string | null
+    allocated_quantity: number
+  }[]
 }
 
 interface ReturnEvidenceItem {
@@ -63,6 +69,7 @@ interface InspectionRecord {
   seal_intact: boolean
   batch_matched: boolean
   expiry_matched: boolean
+  storage_condition_ok?: boolean
   damage_description?: string
   suggested_action: string
   inspection_note?: string
@@ -226,8 +233,9 @@ export function WarehouseReturnsPage() {
 
   // Stock Disposition Modal
   const [showDispositionModal, setShowDispositionModal] = useState(false)
-  const [dispositionChoice, setDispositionChoice] = useState<'RESTOCK' | 'QUARANTINE' | 'DISPOSE'>('RESTOCK')
+  const [dispositionChoice, setDispositionChoice] = useState<'RESTOCK' | 'QUARANTINE' | 'DISPOSE' | ''>('')
   const [dispositionNote, setDispositionNote] = useState('')
+  const [batchAllocationsState, setBatchAllocationsState] = useState<Record<string, number>>({})
 
   // Request Evidence Modal
   const [showRequestEvidenceModal, setShowRequestEvidenceModal] = useState(false)
@@ -578,6 +586,71 @@ export function WarehouseReturnsPage() {
   // 6. Xử lý tồn kho (Restock / Quarantine / Dispose)
   const handleStockDisposition = async () => {
     if (!selectedCase) return
+    if (!dispositionChoice) {
+      setActionError('Vui lòng chọn hướng phân luồng xử lý kho.')
+      return
+    }
+
+    if (dispositionChoice === 'RESTOCK') {
+      const failedSafety = selectedCase.inspections?.some((insp) => {
+        const pkg = (insp.package_condition || '').toLowerCase()
+        const isDamaged = ['rách', 'móp', 'vỡ', 'hỏng', 'damaged', 'broken', 'torn', 'dập', 'hở'].some((w) => pkg.includes(w))
+        return insp.seal_intact === false || insp.batch_matched === false || insp.expiry_matched === false || insp.storage_condition_ok === false || isDamaged
+      })
+      if (failedSafety) {
+        setActionError('Không thể nhập lại kho bán (RESTOCK) vì sản phẩm không đạt 100% tiêu chuẩn an toàn kiểm định.')
+        return
+      }
+
+      // Thu thập và kiểm tra phân bổ lô cho các mặt hàng có nhiều lô
+      const payloadAllocations: { return_item_id?: number; order_item_id?: number; batch_id: number; quantity: number }[] = []
+      for (const item of (selectedCase.items || [])) {
+        const approvedQty = item.accepted_quantity || 0
+        if (approvedQty > 0 && item.batch_allocations && item.batch_allocations.length > 1) {
+          let sumAllocated = 0
+          for (const ba of item.batch_allocations) {
+            const key = `${item.id}_${ba.batch_id}`
+            const qty = Number(batchAllocationsState[key] || 0)
+            if (qty > 0) {
+              sumAllocated += qty
+              payloadAllocations.push({
+                return_item_id: item.id,
+                order_item_id: item.order_item_id,
+                batch_id: ba.batch_id,
+                quantity: qty,
+              })
+            }
+          }
+          if (sumAllocated !== approvedQty) {
+            setActionError(`Mặt hàng '${item.product_name}' được xuất từ nhiều lô: tổng số lượng phân bổ cho các lô (${sumAllocated}) phải đúng bằng số lượng nhận lại (${approvedQty}).`)
+            return
+          }
+        }
+      }
+
+      setActionLoading(true)
+      setActionError('')
+      try {
+        await api(`/warehouse/me/returns/${selectedCase.case_code}/stock-disposition`, {
+          method: 'POST',
+          body: JSON.stringify({
+            disposition: dispositionChoice,
+            note: dispositionNote.trim() || undefined,
+            batch_allocations: payloadAllocations.length > 0 ? payloadAllocations : undefined,
+          }),
+        })
+        setActionSuccess('Đã nhập lại thuốc vào kho thành công (Số lượng khả dụng đã tăng)!')
+        setShowDispositionModal(false)
+        await openCaseDetail(selectedCase.case_code)
+        await fetchCases()
+      } catch (err: any) {
+        setActionError(err?.message || 'Lỗi khi phân luồng kho.')
+      } finally {
+        setActionLoading(false)
+      }
+      return
+    }
+
     setActionLoading(true)
     setActionError('')
     try {
@@ -589,9 +662,7 @@ export function WarehouseReturnsPage() {
         }),
       })
       setActionSuccess(
-        dispositionChoice === 'RESTOCK'
-          ? 'Đã nhập lại thuốc vào kho thành công (Số lượng khả dụng đã tăng)!'
-          : dispositionChoice === 'QUARANTINE'
+        dispositionChoice === 'QUARANTINE'
           ? 'Đã chuyển thuốc vào khu vực cách ly thành công!'
           : 'Đã hoàn tất thủ tục hủy thuốc theo biên bản!'
       )
@@ -1415,7 +1486,12 @@ export function WarehouseReturnsPage() {
                 {['REFUNDED', 'APPROVED'].includes(selectedCase.status) && (
                   <button
                     type="button"
-                    onClick={() => setShowDispositionModal(true)}
+                    onClick={() => {
+                      setDispositionChoice('')
+                      setDispositionNote('')
+                      setBatchAllocationsState({})
+                      setShowDispositionModal(true)
+                    }}
                     disabled={actionLoading}
                     style={{
                       padding: '8px 18px',
@@ -2185,102 +2261,173 @@ export function WarehouseReturnsPage() {
             padding: 20,
           }}
         >
-          <div style={{ background: '#fff', borderRadius: 12, width: '100%', maxWidth: 480, padding: 24 }}>
+          <div style={{ background: '#fff', borderRadius: 12, width: '100%', maxWidth: 560, maxHeight: '90vh', overflowY: 'auto', padding: 24 }}>
             <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 12px 0' }}>Xử Lý Phân Luồng Tồn Kho Thuốc</h3>
             <p style={{ fontSize: 13, color: '#64748b', margin: '0 0 16px 0' }}>
               Quyết định trạng thái lưu kho sau khi hoàn tất kiểm tra và hoàn tiền:
             </p>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
-              {[
-                {
-                  id: 'RESTOCK',
-                  label: 'Nhập lại kho khả dụng (RESTOCK)',
-                  desc: 'Thuốc còn nguyên tem mác, đạt chuẩn GSP, tăng tồn kho khả dụng để bán tiếp.',
-                },
-                {
-                  id: 'QUARANTINE',
-                  label: 'Chuyển vào khu cách ly (QUARANTINE)',
-                  desc: 'Thuốc cần theo dõi thêm hoặc chờ nhà sản xuất thẩm định.',
-                },
-                {
-                  id: 'DISPOSE',
-                  label: 'Tiêu hủy thuốc (DISPOSE)',
-                  desc: 'Thuốc bị rách niêm phong, nhiễm bẩn hoặc cận hạn, xuất hủy theo biên bản.',
-                },
-              ].map((opt) => (
-                <label
-                  key={opt.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: 10,
-                    padding: 12,
-                    borderRadius: 8,
-                    border: dispositionChoice === opt.id ? '2px solid #4338ca' : '1px solid #e2e8f0',
-                    background: dispositionChoice === opt.id ? '#eef2ff' : '#fff',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <input
-                    type="radio"
-                    name="disposition"
-                    checked={dispositionChoice === opt.id}
-                    onChange={() => setDispositionChoice(opt.id as any)}
-                    style={{ marginTop: 3 }}
-                  />
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>{opt.label}</div>
-                    <div style={{ fontSize: 11, color: '#64748b' }}>{opt.desc}</div>
+            {(() => {
+              const isInspectionFullyPassed = Boolean(
+                selectedCase?.inspections &&
+                selectedCase.inspections.length > 0 &&
+                selectedCase.inspections.every((insp) => {
+                  const pkg = (insp.package_condition || '').toLowerCase()
+                  const isDamaged = ['rách', 'móp', 'vỡ', 'hỏng', 'damaged', 'broken', 'torn', 'dập', 'hở'].some((w) => pkg.includes(w))
+                  return insp.seal_intact === true && insp.batch_matched === true && insp.expiry_matched === true && insp.storage_condition_ok === true && !isDamaged
+                })
+              )
+
+              return (
+                <>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
+                    {[
+                      {
+                        id: 'RESTOCK',
+                        label: 'Nhập lại kho khả dụng (RESTOCK)',
+                        desc: 'Thuốc còn nguyên tem mác, đạt chuẩn GSP, tăng tồn kho khả dụng để bán tiếp.',
+                        disabled: !isInspectionFullyPassed,
+                        disabledReason: 'Không khả dụng: Ca hoàn chưa đạt 100% tiêu chí kiểm định an toàn dược phẩm.',
+                      },
+                      {
+                        id: 'QUARANTINE',
+                        label: 'Chuyển vào khu cách ly (QUARANTINE)',
+                        desc: 'Thuốc cần theo dõi thêm hoặc chờ nhà sản xuất thẩm định.',
+                        disabled: false,
+                      },
+                      {
+                        id: 'DISPOSE',
+                        label: 'Tiêu hủy thuốc (DISPOSE)',
+                        desc: 'Thuốc bị rách niêm phong, nhiễm bẩn hoặc cận hạn, xuất hủy theo biên bản.',
+                        disabled: false,
+                      },
+                    ].map((opt) => (
+                      <label
+                        key={opt.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: 10,
+                          padding: 12,
+                          borderRadius: 8,
+                          border: dispositionChoice === opt.id ? '2px solid #4338ca' : '1px solid #e2e8f0',
+                          background: opt.disabled ? '#f8fafc' : dispositionChoice === opt.id ? '#eef2ff' : '#fff',
+                          cursor: opt.disabled ? 'not-allowed' : 'pointer',
+                          opacity: opt.disabled ? 0.6 : 1,
+                        }}
+                      >
+                        <input
+                          type="radio"
+                          name="disposition"
+                          disabled={opt.disabled}
+                          checked={dispositionChoice === opt.id}
+                          onChange={() => !opt.disabled && setDispositionChoice(opt.id as any)}
+                          style={{ marginTop: 3 }}
+                        />
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: opt.disabled ? '#64748b' : '#1e293b' }}>{opt.label}</div>
+                          <div style={{ fontSize: 11, color: '#64748b' }}>{opt.desc}</div>
+                          {opt.disabled && opt.disabledReason && (
+                            <div style={{ fontSize: 11, color: '#dc2626', fontWeight: 600, marginTop: 4 }}>
+                              {opt.disabledReason}
+                            </div>
+                          )}
+                        </div>
+                      </label>
+                    ))}
                   </div>
-                </label>
-              ))}
-            </div>
 
-            <div style={{ marginBottom: 20 }}>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
-                Ghi chú phân luồng (Tùy chọn):
-              </label>
-              <textarea
-                rows={3}
-                value={dispositionNote}
-                onChange={(e) => setDispositionNote(e.target.value)}
-                placeholder="Ghi chú vị trí kệ hoặc biên bản hủy..."
-                style={{
-                  width: '100%',
-                  padding: '9px 12px',
-                  borderRadius: 8,
-                  border: '1px solid #cbd5e1',
-                  fontSize: 13,
-                }}
-              />
-            </div>
+                  {dispositionChoice === 'RESTOCK' && (
+                    <div style={{ marginBottom: 16 }}>
+                      {(selectedCase?.items || []).filter((it) => (it.accepted_quantity || 0) > 0 && it.batch_allocations && it.batch_allocations.length > 1).map((item) => (
+                        <div key={item.id} style={{ marginBottom: 12, padding: 12, background: '#f8fafc', borderRadius: 8, border: '1px solid #cbd5e1' }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b', marginBottom: 2 }}>
+                            {item.product_name}
+                          </div>
+                          <div style={{ fontSize: 11, color: '#475569', marginBottom: 8 }}>
+                            Mặt hàng xuất từ nhiều lô. Số lượng nhận lại: <strong>{item.accepted_quantity}</strong>. Chọn số lượng thực tế nhận lại cho từng lô:
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {item.batch_allocations!.map((ba) => {
+                              const key = `${item.id}_${ba.batch_id}`
+                              return (
+                                <div key={ba.batch_id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12, background: '#fff', padding: '6px 10px', borderRadius: 6, border: '1px solid #e2e8f0' }}>
+                                  <div>
+                                    <span style={{ fontWeight: 600 }}>Lô: {ba.batch_number || ('#' + ba.batch_id)}</span>
+                                    <span style={{ color: '#64748b', marginLeft: 8 }}>HSD: {ba.expiry_date ? ba.expiry_date.slice(0, 10) : '—'}</span>
+                                    <span style={{ color: '#0284c7', marginLeft: 8 }}>Đã xuất: {ba.allocated_quantity}</span>
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    <span>Số lượng nhận:</span>
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      max={ba.allocated_quantity}
+                                      value={batchAllocationsState[key] ?? ''}
+                                      onChange={(e) => {
+                                        const val = e.target.value === '' ? 0 : Math.max(0, parseInt(e.target.value, 10) || 0)
+                                        setBatchAllocationsState((prev) => ({ ...prev, [key]: val }))
+                                      }}
+                                      style={{ width: 60, padding: '4px 6px', border: '1px solid #cbd5e1', borderRadius: 4, textAlign: 'center' }}
+                                    />
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-              <button
-                type="button"
-                onClick={() => setShowDispositionModal(false)}
-                className="admin-button button-secondary"
-              >
-                Hủy
-              </button>
-              <button
-                type="button"
-                onClick={handleStockDisposition}
-                disabled={actionLoading}
-                style={{
-                  padding: '9px 20px',
-                  background: '#4338ca',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: 8,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                Xác nhận phân luồng
-              </button>
-            </div>
+                  <div style={{ marginBottom: 20 }}>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
+                      Ghi chú phân luồng (Tùy chọn):
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={dispositionNote}
+                      onChange={(e) => setDispositionNote(e.target.value)}
+                      placeholder="Ghi chú vị trí kệ hoặc biên bản hủy..."
+                      style={{
+                        width: '100%',
+                        padding: '9px 12px',
+                        borderRadius: 8,
+                        border: '1px solid #cbd5e1',
+                        fontSize: 13,
+                      }}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowDispositionModal(false)}
+                      className="admin-button button-secondary"
+                    >
+                      Hủy
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleStockDisposition}
+                      disabled={actionLoading || !dispositionChoice || (dispositionChoice === 'RESTOCK' && !isInspectionFullyPassed)}
+                      style={{
+                        padding: '9px 20px',
+                        background: '#4338ca',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 8,
+                        fontWeight: 700,
+                        cursor: (actionLoading || !dispositionChoice || (dispositionChoice === 'RESTOCK' && !isInspectionFullyPassed)) ? 'not-allowed' : 'pointer',
+                        opacity: (actionLoading || !dispositionChoice || (dispositionChoice === 'RESTOCK' && !isInspectionFullyPassed)) ? 0.5 : 1,
+                      }}
+                    >
+                      Xác nhận phân luồng
+                    </button>
+                  </div>
+                </>
+              )
+            })()}
           </div>
         </div>
       )}

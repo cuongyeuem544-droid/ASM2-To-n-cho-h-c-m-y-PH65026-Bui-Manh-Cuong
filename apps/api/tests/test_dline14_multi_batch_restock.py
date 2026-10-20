@@ -14,6 +14,7 @@ Requirements:
 
 from datetime import date, timedelta
 from decimal import Decimal
+import uuid
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -37,12 +38,11 @@ from app.services.return_restock_service import ReturnRestockService
 def test_dline14_multi_batch_return_restock_lifecycle():
     with SessionLocal() as db:
         # 1. Setup Kho, Sản phẩm, SKU và 2 Lô (A và B)
-        wh = db.scalar(select(Warehouse).where(Warehouse.code == "KHO-HCM-01"))
-        if not wh:
-            wh = Warehouse(code="KHO-HCM-01", name="Kho HCM", address="123 HCM", is_active=True)
-            db.add(wh)
-            db.commit()
-            db.refresh(wh)
+        uid = uuid.uuid4().hex[:6].upper()
+        wh = Warehouse(code=f"KHO-D14-{uid}", name=f"Kho D14 {uid}", address="123 D14", is_active=True)
+        db.add(wh)
+        db.commit()
+        db.refresh(wh)
 
         admin = db.scalar(select(User).where(User.role == UserRole.ADMIN))
         prod = db.scalar(select(CanonicalProduct).limit(1))
@@ -120,7 +120,68 @@ def test_dline14_multi_batch_return_restock_lifecycle():
         db.add_all([alloc_a, alloc_b])
         db.commit()
 
-        # 4. HOÀN LẦN MỘT: Hoàn 3 đơn vị -> Phải vào Lô A=3, Lô B=0
+        # 4. KIỂM TRA MẶT HÀNG ĐA LÔ NHƯNG KHÔNG CHỈ ĐỊNH BATCH_ALLOCATIONS -> Phải từ chối 422
+        with pytest.raises(HTTPException) as exc_unspecified:
+            ReturnRestockService.execute_return_restock(
+                db=db,
+                source_type="RETURN_REQUEST",
+                source_code="RET-D14-UNSPECIFIED",
+                warehouse_id=wh.id,
+                items_to_restock=[{
+                    "order_item_id": order_item.id,
+                    "product_id": prod.id,
+                    "product_name": prod.canonical_name,
+                    "qty_to_restock": 3,
+                }],
+                actor_user_id=admin.id,
+            )
+        assert exc_unspecified.value.status_code == 422
+        assert "từng được xuất từ nhiều lô" in exc_unspecified.value.detail
+
+        # 4b. KIỂM TRA TRÙNG LẶP LÔ TRONG CÙNG PAYLOAD -> Phải từ chối 400
+        with pytest.raises(HTTPException) as exc_dup_batch:
+            ReturnRestockService.execute_return_restock(
+                db=db,
+                source_type="RETURN_REQUEST",
+                source_code="RET-D14-DUP-BATCH",
+                warehouse_id=wh.id,
+                items_to_restock=[{
+                    "order_item_id": order_item.id,
+                    "product_id": prod.id,
+                    "product_name": prod.canonical_name,
+                    "qty_to_restock": 2,
+                    "batch_allocations": [
+                        {"batch_id": batch_a.id, "quantity": 1},
+                        {"batch_id": batch_a.id, "quantity": 1},
+                    ],
+                }],
+                actor_user_id=admin.id,
+            )
+        assert exc_dup_batch.value.status_code == 400
+        assert "Trùng lặp lô" in exc_dup_batch.value.detail
+
+        # 4c. KIỂM TRA LÔ KHÔNG THUỘC ORDER ITEM -> Phải từ chối 400
+        with pytest.raises(HTTPException) as exc_wrong_batch:
+            ReturnRestockService.execute_return_restock(
+                db=db,
+                source_type="RETURN_REQUEST",
+                source_code="RET-D14-WRONG-BATCH",
+                warehouse_id=wh.id,
+                items_to_restock=[{
+                    "order_item_id": order_item.id,
+                    "product_id": prod.id,
+                    "product_name": prod.canonical_name,
+                    "qty_to_restock": 1,
+                    "batch_allocations": [
+                        {"batch_id": 999999, "quantity": 1},
+                    ],
+                }],
+                actor_user_id=admin.id,
+            )
+        assert exc_wrong_batch.value.status_code == 400
+        assert "không thuộc danh sách lô đã xuất gốc" in exc_wrong_batch.value.detail
+
+        # 5. HOÀN LẦN MỘT: Chọn đúng Lô A=3 -> Thành công vào Lô A=3
         movements_1 = ReturnRestockService.execute_return_restock(
             db=db,
             source_type="RETURN_REQUEST",
@@ -131,6 +192,9 @@ def test_dline14_multi_batch_return_restock_lifecycle():
                 "product_id": prod.id,
                 "product_name": prod.canonical_name,
                 "qty_to_restock": 3,
+                "batch_allocations": [
+                    {"batch_id": batch_a.id, "quantity": 3},
+                ],
             }],
             actor_user_id=admin.id,
         )
@@ -140,7 +204,7 @@ def test_dline14_multi_batch_return_restock_lifecycle():
         assert movements_1[0].batch_id == batch_a.id
         assert movements_1[0].quantity == 3
 
-        # 5. HOÀN LẦN HAI: Hoàn 2 đơn vị -> Vì Lô A đã hoàn đủ 3, phải tự động chuyển sang Lô B=2
+        # 6. HOÀN LẦN HAI: Chọn đúng Lô B=2 -> Thành công vào Lô B=2
         movements_2 = ReturnRestockService.execute_return_restock(
             db=db,
             source_type="RETURN_REQUEST",
@@ -151,6 +215,9 @@ def test_dline14_multi_batch_return_restock_lifecycle():
                 "product_id": prod.id,
                 "product_name": prod.canonical_name,
                 "qty_to_restock": 2,
+                "batch_allocations": [
+                    {"batch_id": batch_b.id, "quantity": 2},
+                ],
             }],
             actor_user_id=admin.id,
         )
@@ -160,7 +227,7 @@ def test_dline14_multi_batch_return_restock_lifecycle():
         assert movements_2[0].batch_id == batch_b.id
         assert movements_2[0].quantity == 2
 
-        # 6. HOÀN THÊM (LẦN BA): Cố hoàn thêm 1 đơn vị -> Phải bị từ chối 400 vì đã hoàn đủ 5/5
+        # 7. HOÀN THÊM (LẦN BA): Cố hoàn thêm 1 đơn vị vào Lô A (đã hết dung lượng hoàn) -> Bị từ chối 400
         with pytest.raises(HTTPException) as exc_info:
             ReturnRestockService.execute_return_restock(
                 db=db,
@@ -172,6 +239,9 @@ def test_dline14_multi_batch_return_restock_lifecycle():
                     "product_id": prod.id,
                     "product_name": prod.canonical_name,
                     "qty_to_restock": 1,
+                    "batch_allocations": [
+                        {"batch_id": batch_a.id, "quantity": 1},
+                    ],
                 }],
                 actor_user_id=admin.id,
             )
