@@ -38,6 +38,7 @@ interface LiveChatSessionData {
   customer_name: string;
   customer_phone?: string;
   customer_email?: string;
+  customer_id?: number;
   guest_session_token?: string;
   assigned_staff_id?: number;
   assigned_staff_name?: string;
@@ -273,7 +274,10 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
         const data: LiveChatSessionData = await res.json();
         setSession(data);
         setMessages(data.messages || []);
-      } else if (res.status === 404 || res.status === 403) {
+      } else if (res.status === 404 || res.status === 403 || res.status === 401) {
+        if (res.status === 401) {
+          localStorage.removeItem("pharmatrust_access_token");
+        }
         localStorage.removeItem(STORAGE_SESSION_KEY);
         setSession(null);
       }
@@ -295,7 +299,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
     const sessionCode = session.session_code;
     const authToken = typeof window !== "undefined" ? (localStorage.getItem("pharmatrust_access_token") || localStorage.getItem("token") || "") : "";
     const guestToken = session.guest_session_token || (typeof window !== "undefined" ? (localStorage.getItem(STORAGE_GUEST_TOKEN_KEY) || "") : "");
-    const activeToken = authToken || guestToken;
+    const activeToken = session.customer_id ? (authToken || guestToken) : (guestToken || authToken);
     const wsUrl = `${WS_BASE}/api/v1/live-chat/ws/client/${sessionCode}?token=${encodeURIComponent(activeToken)}`;
 
     let socket: WebSocket;
@@ -483,11 +487,21 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
     if (selectedFile) {
       setIsUploading(true);
       try {
+        const guestToken = session.guest_session_token || (typeof window !== "undefined" ? localStorage.getItem(STORAGE_GUEST_TOKEN_KEY) : null);
+        const authToken = typeof window !== "undefined" ? (localStorage.getItem("pharmatrust_access_token") || localStorage.getItem("token")) : null;
+
         const formData = new FormData();
         formData.append("file", selectedFile);
+        formData.append("session_code", session.session_code);
+        if (guestToken) formData.append("guest_token", guestToken);
+
+        const uploadHeaders: Record<string, string> = {};
+        if (authToken) uploadHeaders["Authorization"] = `Bearer ${authToken}`;
+        if (guestToken) uploadHeaders["X-Chat-Guest-Token"] = guestToken;
 
         const uploadRes = await fetch(`${API_BASE}/api/v1/live-chat/upload`, {
           method: "POST",
+          headers: uploadHeaders,
           body: formData,
         });
 
@@ -531,8 +545,9 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
 
     try {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (session.guest_session_token) headers["X-Chat-Guest-Token"] = session.guest_session_token;
-      const authToken = localStorage.getItem("pharmatrust_access_token") || localStorage.getItem("token");
+      const guestToken = session.guest_session_token || (typeof window !== "undefined" ? localStorage.getItem(STORAGE_GUEST_TOKEN_KEY) : null);
+      if (guestToken) headers["X-Chat-Guest-Token"] = guestToken;
+      const authToken = typeof window !== "undefined" ? (localStorage.getItem("pharmatrust_access_token") || localStorage.getItem("token")) : null;
       if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
 
       const res = await fetch(`${API_BASE}/api/v1/live-chat/sessions/${session.session_code}/messages`, {
@@ -590,8 +605,9 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
 
     try {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (session.guest_session_token) headers["X-Chat-Guest-Token"] = session.guest_session_token;
-      const authToken = localStorage.getItem("pharmatrust_access_token") || localStorage.getItem("token");
+      const guestToken = session.guest_session_token || (typeof window !== "undefined" ? localStorage.getItem(STORAGE_GUEST_TOKEN_KEY) : null);
+      if (guestToken) headers["X-Chat-Guest-Token"] = guestToken;
+      const authToken = typeof window !== "undefined" ? (localStorage.getItem("pharmatrust_access_token") || localStorage.getItem("token")) : null;
       if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
 
       await fetch(`${API_BASE}/api/v1/live-chat/sessions/${session.session_code}/close`, {
@@ -619,8 +635,9 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
     if (!session) return;
     try {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (session.guest_session_token) headers["X-Chat-Guest-Token"] = session.guest_session_token;
-      const authToken = localStorage.getItem("pharmatrust_access_token") || localStorage.getItem("token");
+      const guestToken = session.guest_session_token || (typeof window !== "undefined" ? localStorage.getItem(STORAGE_GUEST_TOKEN_KEY) : null);
+      if (guestToken) headers["X-Chat-Guest-Token"] = guestToken;
+      const authToken = typeof window !== "undefined" ? (localStorage.getItem("pharmatrust_access_token") || localStorage.getItem("token")) : null;
       if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
 
       await fetch(`${API_BASE}/api/v1/live-chat/sessions/${session.session_code}/close`, {

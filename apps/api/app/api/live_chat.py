@@ -32,7 +32,7 @@ from app.api.deps import get_current_user, get_optional_current_user
 from app.core.config import settings
 from app.core.security import decode_token
 from app.db.session import SessionLocal, get_db
-from app.models import LiveChatAttachment, LiveChatMessage, LiveChatSession, User
+from app.models import AuditLog, LiveChatAttachment, LiveChatMessage, LiveChatSession, User
 from app.models.enums import UserRole
 from app.services.live_chat_service import chat_manager
 
@@ -480,7 +480,7 @@ async def create_or_resume_session(
             assigned_staff_id=assigned_staff.id,
         )
 
-    return _build_session_detail(new_session)
+    return _build_session_detail(new_session, reveal_guest_token=(new_session.customer_id is None))
 
 
 @router.get("/sessions/{session_code}")
@@ -491,7 +491,12 @@ def get_session_detail(
     guest_token: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
-    """Lấy chi tiết phiên chat và lịch sử tin nhắn."""
+    """
+    Lấy chi tiết phiên chat và lịch sử tin nhắn:
+    - Nếu là nhân viên/Admin: kiểm tra xem có phải phiên của mình hoặc chưa ai nhận không.
+      Tuyệt đối không để lộ guest_session_token cho nhân viên/admin.
+    - Nếu là khách hàng: kiểm tra quyền sở hữu và chỉ trả guest_session_token cho khách vãng lai sở hữu phiên.
+    """
     session = db.scalar(
         select(LiveChatSession).where(LiveChatSession.session_code == session_code)
     )
@@ -499,9 +504,33 @@ def get_session_detail(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy phiên trò chuyện")
 
     effective_guest_token = x_chat_guest_token or guest_token
-    verify_session_access(session, current_user, effective_guest_token)
 
-    return _build_session_detail(session)
+    # 1. Kiểm tra nếu là nhân viên hoặc Quản trị viên
+    is_staff = (
+        current_user is not None
+        and current_user.role in [UserRole.ADMIN, UserRole.PHARMACIST, UserRole.WAREHOUSE_MANAGER, UserRole.WAREHOUSE_STAFF]
+    )
+    if is_staff:
+        # Nếu phiên đã gán cho nhân viên khác -> chỉ ADMIN hoặc chính nhân viên phụ trách mới được xem
+        if session.assigned_staff_id and session.assigned_staff_id != current_user.id and current_user.role != UserRole.ADMIN:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cuộc trò chuyện này đang được nhân viên khác phụ trách. Bạn không có quyền truy cập.",
+            )
+        return _build_session_detail(session, reveal_guest_token=False)
+
+    # 2. Khách hàng đã đăng nhập
+    if current_user:
+        if session.customer_id and session.customer_id == current_user.id:
+            return _build_session_detail(session, reveal_guest_token=False)
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Bạn không có quyền truy cập phiên trò chuyện này")
+
+    # 3. Khách vãng lai khớp guest_token
+    if effective_guest_token and session.guest_session_token:
+        if secrets.compare_digest(str(effective_guest_token).strip(), session.guest_session_token.strip()):
+            return _build_session_detail(session, reveal_guest_token=True)
+
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Bạn không có quyền truy cập phiên trò chuyện này")
 
 
 @router.post("/sessions/{session_code}/messages")
@@ -520,8 +549,29 @@ async def send_message_as_customer(
     if not session:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy phiên trò chuyện")
 
+    # Khóa việc nhân viên gọi endpoint khách hàng để giả danh tin nhắn CUSTOMER
+    if current_user and current_user.role in [
+        UserRole.ADMIN,
+        UserRole.PHARMACIST,
+        UserRole.WAREHOUSE_MANAGER,
+        UserRole.WAREHOUSE_STAFF,
+    ]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tài khoản nhân viên không được gửi tin nhắn qua cổng khách hàng. Vui lòng sử dụng cổng nhân viên.",
+        )
+
     effective_guest_token = x_chat_guest_token or guest_token
-    verify_session_access(session, current_user, effective_guest_token)
+
+    # Xác minh quyền sở hữu khách hàng
+    if current_user:
+        if not session.customer_id or session.customer_id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Bạn không có quyền gửi tin nhắn vào phiên trò chuyện này")
+    else:
+        if not effective_guest_token or not session.guest_session_token or not secrets.compare_digest(
+            str(effective_guest_token).strip(), session.guest_session_token.strip()
+        ):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Bạn không có quyền gửi tin nhắn vào phiên trò chuyện này")
 
     if session.status == "CLOSED":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cuộc trò chuyện này đã kết thúc")
@@ -590,8 +640,27 @@ async def close_session_by_customer(
     if not session:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy phiên trò chuyện")
 
+    # Khóa việc nhân viên gọi endpoint khách hàng để đóng phiên khách
+    if current_user and current_user.role in [
+        UserRole.ADMIN,
+        UserRole.PHARMACIST,
+        UserRole.WAREHOUSE_MANAGER,
+        UserRole.WAREHOUSE_STAFF,
+    ]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tài khoản nhân viên không được kết thúc phiên qua cổng khách hàng. Vui lòng sử dụng cổng nhân viên.",
+        )
+
     effective_guest_token = x_chat_guest_token or guest_token
-    verify_session_access(session, current_user, effective_guest_token)
+    if current_user:
+        if not session.customer_id or session.customer_id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Bạn không có quyền kết thúc phiên trò chuyện này")
+    else:
+        if not effective_guest_token or not session.guest_session_token or not secrets.compare_digest(
+            str(effective_guest_token).strip(), session.guest_session_token.strip()
+        ):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Bạn không có quyền kết thúc phiên trò chuyện này")
 
     session.status = "CLOSED"
     session.closed_at = utcnow()
@@ -690,7 +759,7 @@ def list_staff_sessions(
     offset = (page - 1) * page_size
     sessions = db.scalars(query.offset(offset).limit(page_size)).all()
 
-    items = [_build_session_detail(s) for s in sessions]
+    items = [_build_session_detail(s, reveal_guest_token=False) for s in sessions]
 
     # Thống kê nhanh badge
     waiting_count = db.scalar(
@@ -711,6 +780,32 @@ def list_staff_sessions(
         "waiting_count": waiting_count,
         "my_active_count": my_active_count,
     }
+
+
+@router.get("/staff/sessions/{session_code}")
+def get_staff_session_detail(
+    session_code: str,
+    staff_user: User = Depends(get_current_staff_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Lấy chi tiết phiên chat cho nhân viên / Admin:
+    - Nếu phiên đã gán cho nhân viên khác -> chỉ ADMIN hoặc chính nhân viên phụ trách mới được xem.
+    - Tuyệt đối không để lộ guest_session_token cho nhân viên.
+    """
+    session = db.scalar(
+        select(LiveChatSession).where(LiveChatSession.session_code == session_code)
+    )
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy phiên trò chuyện")
+
+    if session.assigned_staff_id and session.assigned_staff_id != staff_user.id and staff_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cuộc trò chuyện này đang được nhân viên khác phụ trách. Bạn không có quyền truy cập.",
+        )
+
+    return _build_session_detail(session, reveal_guest_token=False)
 
 
 @router.post("/staff/sessions/{session_code}/claim")
@@ -753,6 +848,18 @@ async def claim_session(
         created_at=utcnow(),
     )
     db.add(join_msg)
+    # Ghi nhận AuditLog tiếp nhận phiên chat
+    db.add(
+        AuditLog(
+            user_id=staff_user.id,
+            action="CLAIM_LIVE_CHAT_SESSION",
+            entity_type="live_chat_session",
+            entity_id=str(session.id),
+            before_json={"assigned_staff_id": None, "session_code": session.session_code, "status": "WAITING"},
+            after_json={"assigned_staff_id": staff_user.id, "session_code": session.session_code, "status": "ACTIVE"},
+            created_at=utcnow(),
+        )
+    )
     db.commit()
     db.refresh(session)
 
@@ -769,7 +876,7 @@ async def claim_session(
         assigned_staff_id=staff_user.id,
     )
 
-    return _build_session_detail(session)
+    return _build_session_detail(session, reveal_guest_token=False)
 
 
 @router.post("/staff/sessions/{session_code}/assign")
@@ -804,6 +911,7 @@ async def assign_session(
             detail="Tài khoản đích không có vai trò nhân viên hợp lệ để tiếp nhận phiên tư vấn.",
         )
 
+    old_assigned_staff_id = session.assigned_staff_id
     session.assigned_staff_id = target_staff.id
     session.status = "ACTIVE"
     session.updated_at = utcnow()
@@ -820,6 +928,18 @@ async def assign_session(
         created_at=utcnow(),
     )
     db.add(transfer_msg)
+    # Ghi nhận AuditLog phân công/chuyển giao phiên chat
+    db.add(
+        AuditLog(
+            user_id=staff_user.id,
+            action="ASSIGN_LIVE_CHAT_SESSION",
+            entity_type="live_chat_session",
+            entity_id=str(session.id),
+            before_json={"assigned_staff_id": old_assigned_staff_id, "session_code": session.session_code},
+            after_json={"assigned_staff_id": target_staff.id, "session_code": session.session_code},
+            created_at=utcnow(),
+        )
+    )
     db.commit()
     db.refresh(session)
 
@@ -836,7 +956,7 @@ async def assign_session(
         assigned_staff_id=target_staff.id,
     )
 
-    return _build_session_detail(session)
+    return _build_session_detail(session, reveal_guest_token=False)
 
 
 @router.post("/staff/sessions/{session_code}/messages")
@@ -1054,6 +1174,12 @@ async def upload_chat_attachment(
 
     authorized = False
     if is_staff:
+        # Nếu phiên đã gán cho nhân viên khác -> chỉ ADMIN hoặc chính nhân viên phụ trách mới được upload
+        if session.assigned_staff_id and session.assigned_staff_id != current_user.id and current_user.role != UserRole.ADMIN:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Bạn không có quyền tải tệp lên cuộc trò chuyện do nhân viên khác phụ trách.",
+            )
         authorized = True
     elif session.customer_id is not None:
         # Phiên của khách có tài khoản: bắt buộc current_user là chính khách hàng sở hữu phiên
@@ -1197,6 +1323,12 @@ def serve_chat_attachment(
     if actor:
         # Nhân viên hỗ trợ hợp lệ
         if actor.role in [UserRole.ADMIN, UserRole.PHARMACIST, UserRole.WAREHOUSE_MANAGER, UserRole.WAREHOUSE_STAFF]:
+            # Nếu phiên đã gán cho nhân viên khác -> chỉ ADMIN hoặc chính nhân viên phụ trách mới được tải/xem tệp
+            if session.assigned_staff_id and session.assigned_staff_id != actor.id and actor.role != UserRole.ADMIN:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Bạn không có quyền truy cập tệp đính kèm trong cuộc trò chuyện do nhân viên khác phụ trách.",
+                )
             authorized = True
         # Khách hàng sở hữu phiên
         elif session.customer_id is not None and actor.id == session.customer_id:
@@ -1360,7 +1492,7 @@ def _build_message_response(msg: LiveChatMessage) -> dict[str, Any]:
     }
 
 
-def _build_session_detail(session: LiveChatSession) -> dict[str, Any]:
+def _build_session_detail(session: LiveChatSession, reveal_guest_token: bool = False) -> dict[str, Any]:
     messages_data = [_build_message_response(m) for m in session.messages]
     assigned_staff_title = get_role_title(session.assigned_staff) if session.assigned_staff else None
 
@@ -1371,7 +1503,7 @@ def _build_session_detail(session: LiveChatSession) -> dict[str, Any]:
         "customer_email": session.customer_email,
         "customer_phone": session.customer_phone,
         "customer_id": session.customer_id,
-        "guest_session_token": session.guest_session_token,
+        "guest_session_token": session.guest_session_token if reveal_guest_token else None,
         "assigned_staff_id": session.assigned_staff_id,
         "assigned_staff_name": session.assigned_staff.full_name if session.assigned_staff else None,
         "assigned_staff_title": assigned_staff_title,

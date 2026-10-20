@@ -54,14 +54,13 @@ def get_optional_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: Session = Depends(get_db),
 ) -> User | None:
-    if not credentials:
-        return None
-    try:
-        payload = decode_token(credentials.credentials, "access")
-        user_id = int(payload["sub"])
-    except (jwt.PyJWTError, KeyError, ValueError):
-        return None
-    return db.scalar(select(User).where(User.id == user_id, User.is_active.is_(True)))
+    """
+    Dependency cho phép khách vãng lai hoặc người dùng đăng nhập:
+    - Nếu KHÔNG gửi Authorization header: trả về None (khách vãng lai).
+    - Nếu CÓ gửi Authorization header nhưng token sai/hết hạn/bị thu hồi: trả HTTP 401 UNAUTHORIZED (không âm thầm coi là khách vãng lai).
+    - Nếu token hợp lệ: trả về đối tượng User đang hoạt động.
+    """
+    return strict_optional_current_user(credentials=credentials, db=db)
 
 
 def strict_optional_current_user(
