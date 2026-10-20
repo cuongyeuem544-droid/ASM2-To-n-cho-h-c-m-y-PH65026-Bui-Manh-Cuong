@@ -264,8 +264,9 @@ class MomoPaymentService:
 
         order_code = payload.get("orderId")
         result_code = int(payload.get("resultCode", -1))
-        trans_id = str(payload.get("transId", ""))
-        amount = payload.get("amount")
+        trans_id = str(payload.get("transId", "")).strip()
+        request_id = str(payload.get("requestId", "")).strip()
+        raw_amount = payload.get("amount")
 
         # 2. Ghi nhận sự kiện webhook
         webhook_log = PaymentWebhookEvent(
@@ -277,6 +278,38 @@ class MomoPaymentService:
         )
         db.add(webhook_log)
         db.flush()
+
+        # Bắt buộc payload IPN phải có amount hợp lệ (Requirement 1)
+        if raw_amount is None or str(raw_amount).strip() == "":
+            err_msg = "Payload IPN MoMo thiếu thông tin số tiền (amount) hợp lệ."
+            logger.error(f"[MOMO IPN] {err_msg} Đơn: {order_code}")
+            webhook_log.process_error = err_msg
+            db.commit()
+            raise HTTPException(status_code=400, detail=err_msg)
+
+        try:
+            paid_amount = int(raw_amount)
+            if paid_amount <= 0:
+                raise ValueError("Số tiền phải lớn hơn 0")
+        except (ValueError, TypeError):
+            err_msg = f"Số tiền thanh toán MoMo không hợp lệ: {raw_amount}"
+            logger.error(f"[MOMO IPN] {err_msg} Đơn: {order_code}")
+            webhook_log.process_error = err_msg
+            db.commit()
+            raise HTTPException(status_code=400, detail=err_msg)
+
+        # Bắt buộc có requestId và transId (khi thành công)
+        if not request_id:
+            err_msg = "Payload IPN MoMo thiếu thông tin requestId hợp lệ."
+            webhook_log.process_error = err_msg
+            db.commit()
+            raise HTTPException(status_code=400, detail=err_msg)
+
+        if result_code == 0 and (not trans_id or trans_id == "0"):
+            err_msg = "Payload IPN MoMo thiếu mã giao dịch transId hợp lệ."
+            webhook_log.process_error = err_msg
+            db.commit()
+            raise HTTPException(status_code=400, detail=err_msg)
 
         # 3. Tìm đơn hàng
         order = db.scalar(select(Order).where(Order.order_code == order_code))
@@ -310,8 +343,7 @@ class MomoPaymentService:
         if result_code == 0:
             # Kiểm tra số tiền: Sai một đồng cũng không tự chuyển đơn sang PAID
             order_total = int(order.total_amount)
-            paid_amount = int(amount) if amount is not None else None
-            if paid_amount is not None and paid_amount != order_total:
+            if paid_amount != order_total:
                 trans.status = "UNDERPAID" if paid_amount < order_total else "OVERPAID"
                 trans.updated_at = utcnow()
                 err_msg = f"Số tiền thanh toán MoMo ({paid_amount:,} đ) không khớp với số tiền đơn hàng ({order_total:,} đ)"
@@ -319,8 +351,12 @@ class MomoPaymentService:
                 db.commit()
                 raise HTTPException(status_code=400, detail=err_msg)
 
-            # Requirement II.9 & III.9: Đơn đã hủy không được kích hoạt lại tùy tiện khi nhận webhook đến muộn
-            if order.order_status == "CANCELLED" or order.fulfillment_status == "CANCELLED":
+            # Requirement II.9 & III.9: Đơn đã hủy/hết hạn không được kích hoạt lại tùy tiện khi nhận webhook đến muộn
+            if (
+                order.order_status == "CANCELLED"
+                or order.fulfillment_status == "CANCELLED"
+                or order.payment_status in ["EXPIRED", "CANCELLED"]
+            ):
                 trans.status = "SUCCESS"
                 trans.provider_trans_id = trans_id
                 trans.provider_response_raw = json.dumps(payload, ensure_ascii=False)
@@ -330,9 +366,9 @@ class MomoPaymentService:
                 db.commit()
 
                 dispatch_alert(
-                    title="CẢNH BÁO: THANH TOÁN MOMO ĐẾN MUỘN CHO ĐƠN ĐÃ HỦY",
+                    title="CẢNH BÁO: THANH TOÁN MOMO ĐẾN MUỘN CHO ĐƠN ĐÃ HỦY/HẾT HẠN",
                     message=(
-                        f"Đơn hàng: <b>{order.order_code}</b> (ĐÃ BỊ HỦY TRƯỚC ĐÓ)\n"
+                        f"Đơn hàng: <b>{order.order_code}</b> (ĐÃ BỊ HỦY HOẶC HẾT HẠN TRƯỚC ĐÓ)\n"
                         f"Khách hàng: <b>{order.customer_name}</b>\n"
                         f"Số tiền đã thanh toán: <b>{paid_amount:,} đ</b>\n"
                         f"Mã giao dịch MoMo: <code>{trans_id}</code>\n"
@@ -350,8 +386,52 @@ class MomoPaymentService:
                 )
                 return {
                     "resultCode": 0,
-                    "message": "Giao dịch đã nhận tiền nhưng đơn hàng đã bị hủy trước đó. Đã chuyển sang hàng đợi đối soát hoàn tiền.",
+                    "message": "Giao dịch đã nhận tiền nhưng đơn hàng đã bị hủy hoặc hết hạn trước đó. Đã chuyển sang hàng đợi đối soát hoàn tiền.",
                     "order_code": order.order_code,
+                    "payment_status": "REFUND_PENDING",
+                    "reconciliation_required": True,
+                }
+
+            # Kiểm tra trạng thái giữ chỗ thuốc (StockReservation) để chống tồn kho âm
+            from app.models.inventory import StockReservation
+            released_reservations = db.scalars(
+                select(StockReservation).where(
+                    StockReservation.order_id == order.id,
+                    StockReservation.status == "RELEASED",
+                )
+            ).all()
+            active_reservations = db.scalars(
+                select(StockReservation).where(
+                    StockReservation.order_id == order.id,
+                    StockReservation.status == "RESERVED",
+                )
+            ).all()
+            if released_reservations and not active_reservations:
+                # Thuốc giữ chỗ đã bị giải phóng trước khi nhận tiền
+                trans.status = "SUCCESS"
+                trans.provider_trans_id = trans_id
+                trans.provider_response_raw = json.dumps(payload, ensure_ascii=False)
+                trans.updated_at = utcnow()
+                order.payment_status = "REFUND_PENDING"
+                webhook_log.processed = True
+                webhook_log.process_error = "Thuốc giữ chỗ đã bị giải phóng trước khi nhận tiền. Chuyển sang hàng đợi đối soát hoàn tiền."
+                db.commit()
+                dispatch_alert(
+                    title="CẢNH BÁO: TỒN KHO THUỐC ĐÃ HẾT HẠN GIỮ CHỖ",
+                    message=(
+                        f"Đơn hàng: <b>{order.order_code}</b> nhận thanh toán MoMo {paid_amount:,} đ "
+                        f"nhưng tồn kho giữ chỗ đã bị giải phóng trước đó.\n"
+                        f"<b>Hệ thống KHÔNG xuất kho để chống tồn kho âm. Chuyển kế toán hoàn tiền.</b>"
+                    ),
+                    severity="WARNING",
+                    alert_type="OUT_OF_STOCK_REFUND",
+                    details={"order_code": order.order_code, "paid_amount": paid_amount, "trans_id": trans_id},
+                )
+                return {
+                    "resultCode": 0,
+                    "message": "Đã nhận tiền nhưng hàng giữ chỗ đã hết hạn trước đó. Chuyển sang đối soát hoàn tiền.",
+                    "order_code": order.order_code,
+                    "payment_status": "REFUND_PENDING",
                     "reconciliation_required": True,
                 }
 
@@ -529,8 +609,12 @@ class MomoPaymentService:
                                 "message": f"Số tiền MoMo ({paid_amount:,} đ) không khớp đơn hàng ({order_total:,} đ).",
                             }
 
-                        # BUG-02: Đơn đã hủy không được tái kích hoạt vào luồng kho
-                        if order.order_status == "CANCELLED" or order.fulfillment_status == "CANCELLED":
+                        # BUG-02: Đơn đã hủy hoặc hết hạn không được tái kích hoạt vào luồng kho
+                        if (
+                            order.order_status == "CANCELLED"
+                            or order.fulfillment_status == "CANCELLED"
+                            or order.payment_status in ["EXPIRED", "CANCELLED"]
+                        ):
                             trans.status = "SUCCESS"
                             trans.provider_trans_id = trans_id
                             trans.provider_response_raw = json.dumps(res_data, ensure_ascii=False)
@@ -545,6 +629,37 @@ class MomoPaymentService:
                                 "is_paid": True,
                                 "refund_pending": True,
                                 "is_cancelled": True,
+                            }
+
+                        # Kiểm tra thuốc giữ chỗ: nếu đã bị giải phóng thì chuyển REFUND_PENDING, không xuất kho
+                        from app.models.inventory import StockReservation
+                        released_reservations = db.scalars(
+                            select(StockReservation).where(
+                                StockReservation.order_id == order.id,
+                                StockReservation.status == "RELEASED",
+                            )
+                        ).all()
+                        active_reservations = db.scalars(
+                            select(StockReservation).where(
+                                StockReservation.order_id == order.id,
+                                StockReservation.status == "RESERVED",
+                            )
+                        ).all()
+                        if released_reservations and not active_reservations:
+                            trans.status = "SUCCESS"
+                            trans.provider_trans_id = trans_id
+                            trans.provider_response_raw = json.dumps(res_data, ensure_ascii=False)
+                            trans.updated_at = utcnow()
+                            order.payment_status = "REFUND_PENDING"
+                            db.commit()
+                            return {
+                                "order_code": order.order_code,
+                                "payment_status": "REFUND_PENDING",
+                                "fulfillment_status": order.fulfillment_status,
+                                "total_amount": float(order.total_amount),
+                                "is_paid": True,
+                                "refund_pending": True,
+                                "reservation_expired": True,
                             }
 
                         trans.status = "SUCCESS"

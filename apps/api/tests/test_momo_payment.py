@@ -801,5 +801,123 @@ class TestMomoPaymentSuite(unittest.TestCase):
         self.assertNotEqual(self.order.fulfillment_status, "ALLOCATED")
 
 
+    def test_15_momo_ipn_missing_amount_rejected(self):
+        """IPN MoMo thiếu amount hoặc amount null/rỗng bị từ chối 400 và không cập nhật PAID."""
+        from unittest.mock import patch
+
+        ipn_data = {
+            "partnerCode": settings.momo_partner_code,
+            "orderId": self.order_code,
+            "requestId": f"REQ-{self.order_code}",
+            # Thiếu trường "amount"
+            "orderInfo": "Thanh toan don hang " + self.order_code,
+            "orderType": "momo_wallet",
+            "transId": "MOMO-NO-AMOUNT-123",
+            "resultCode": 0,
+            "message": "Giao dich thanh cong",
+            "payType": "qr",
+            "responseTime": int(time.time() * 1000),
+            "extraData": "",
+            "signature": "valid_signature_hash",
+        }
+
+        with patch.object(MomoPaymentService, "verify_ipn_signature", return_value=True):
+            resp = self.client.post("/api/v1/payments/momo/ipn", json=ipn_data)
+            self.assertEqual(resp.status_code, 400)
+            self.assertIn("thiếu thông tin số tiền (amount)", resp.json()["detail"])
+
+        self.db.expire_all()
+        self.db.refresh(self.order)
+        self.assertNotEqual(self.order.payment_status, "PAID")
+        self.assertNotEqual(self.order.fulfillment_status, "ALLOCATED")
+
+    def test_16_momo_ipn_missing_request_id_or_trans_id_rejected(self):
+        """IPN MoMo thiếu requestId hoặc transId bị từ chối 400."""
+        from unittest.mock import patch
+
+        # Thiếu requestId
+        ipn_data_no_req = {
+            "partnerCode": settings.momo_partner_code,
+            "orderId": self.order_code,
+            "amount": 300000,
+            "orderInfo": "Thanh toan don hang " + self.order_code,
+            "orderType": "momo_wallet",
+            "transId": "MOMO-123",
+            "resultCode": 0,
+            "message": "Giao dich thanh cong",
+            "payType": "qr",
+            "responseTime": int(time.time() * 1000),
+            "extraData": "",
+            "signature": "valid_signature_hash",
+        }
+
+        with patch.object(MomoPaymentService, "verify_ipn_signature", return_value=True):
+            resp = self.client.post("/api/v1/payments/momo/ipn", json=ipn_data_no_req)
+            self.assertEqual(resp.status_code, 400)
+            self.assertIn("requestId", resp.json()["detail"])
+
+        # Thiếu transId khi resultCode == 0
+        ipn_data_no_trans = {
+            "partnerCode": settings.momo_partner_code,
+            "orderId": self.order_code,
+            "requestId": f"REQ-{self.order_code}",
+            "amount": 300000,
+            "transId": "",
+            "resultCode": 0,
+            "message": "Giao dich thanh cong",
+            "payType": "qr",
+            "responseTime": int(time.time() * 1000),
+            "extraData": "",
+            "signature": "valid_signature_hash",
+        }
+
+        with patch.object(MomoPaymentService, "verify_ipn_signature", return_value=True):
+            resp = self.client.post("/api/v1/payments/momo/ipn", json=ipn_data_no_trans)
+            self.assertEqual(resp.status_code, 400)
+            self.assertIn("transId", resp.json()["detail"])
+
+    def test_17_momo_late_payment_after_reservation_released_routes_to_refund(self):
+        """Đơn hàng đã bị giải phóng thuốc giữ chỗ (StockReservation = RELEASED): nhận tiền muộn chuyển REFUND_PENDING."""
+        from unittest.mock import patch
+        from app.models.inventory import StockReservation
+
+        # Tạo reservation đã bị giải phóng
+        resv = StockReservation(
+            order_id=self.order.id,
+            warehouse_id=self.wh.id,
+            batch_id=self.batch.id,
+            quantity=2,
+            status="RELEASED",
+        )
+        self.db.add(resv)
+        self.db.commit()
+
+        ipn_data = {
+            "partnerCode": settings.momo_partner_code,
+            "orderId": self.order_code,
+            "requestId": f"REQ-LATE-{self.order_code}",
+            "amount": 300000,
+            "transId": "MOMO-LATE-STOCK-888",
+            "resultCode": 0,
+            "message": "Giao dich thanh cong",
+            "payType": "qr",
+            "responseTime": int(time.time() * 1000),
+            "extraData": "",
+            "signature": "valid_signature_hash",
+        }
+
+        with patch.object(MomoPaymentService, "verify_ipn_signature", return_value=True):
+            resp = self.client.post("/api/v1/payments/momo/ipn", json=ipn_data)
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertEqual(data.get("payment_status"), "REFUND_PENDING")
+            self.assertTrue(data.get("reconciliation_required"))
+
+        self.db.expire_all()
+        self.db.refresh(self.order)
+        self.assertEqual(self.order.payment_status, "REFUND_PENDING")
+        self.assertNotEqual(self.order.fulfillment_status, "ALLOCATED")
+
+
 if __name__ == "__main__":
     unittest.main()

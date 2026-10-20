@@ -917,7 +917,7 @@ class FulfillmentRoutingService:
             select(Order).where(
                 Order.payment_status == "PENDING",
                 Order.order_status == "PENDING",
-                Order.payment_method.in_(["MOMO", "BANK_TRANSFER", "VIETQR"]),
+                Order.payment_method.in_(["MOMO", "BANK_TRANSFER", "VIETQR", "PAYOS"]),
                 Order.created_at <= threshold,
             )
         ).all()
@@ -926,6 +926,20 @@ class FulfillmentRoutingService:
         for o in stale_orders:
             cls.release_order_reservations(db, o.id, reason="PAYMENT_EXPIRED")
             o.payment_status = "EXPIRED"
+            o.order_status = "CANCELLED"
+            o.fulfillment_status = "CANCELLED"
+
+            # Hủy an toàn các giao dịch PENDING của cổng thanh toán
+            pending_txs = db.scalars(
+                select(PaymentTransaction).where(
+                    PaymentTransaction.order_id == o.id,
+                    PaymentTransaction.status == "PENDING",
+                )
+            ).all()
+            for tx in pending_txs:
+                tx.status = "CANCELLED"
+                tx.updated_at = utcnow()
+
             cancelled_order_codes.append(o.order_code)
 
         db.commit()

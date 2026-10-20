@@ -166,7 +166,10 @@ class TestPayOSIntegrationSuite(unittest.TestCase):
 
     def tearDown(self):
         try:
+            from app.models.inventory import StockReservation, PayosOrderCode
             if hasattr(self, "order") and self.order:
+                self.db.query(StockReservation).filter_by(order_id=self.order.id).delete()
+                self.db.query(PayosOrderCode).filter_by(order_id=self.order.id).delete()
                 self.db.query(OrderFulfillment).filter_by(order_id=self.order.id).delete()
                 self.db.query(OrderItem).filter_by(order_id=self.order.id).delete()
                 self.db.query(PaymentTransaction).filter_by(order_id=self.order.id).delete()
@@ -804,6 +807,283 @@ class TestPayOSIntegrationSuite(unittest.TestCase):
         )
         self.assertEqual(res.status_code, 400, res.text)
         self.assertIn("đã được thanh toán thành công (PAID)", res.json()["detail"])
+
+
+    @patch("app.services.payos_service.PayOS")
+    def test_18_payos_multiple_links_preserves_old_link_mapping(self, MockPayOS):
+        """Tạo nhiều link thanh toán cho một đơn: Không ghi đè mapping cũ, thanh toán link cũ vẫn thành công."""
+        mock_instance = MockPayOS.return_value
+
+        from app.models.inventory import StockReservation
+        resv = StockReservation(
+            order_id=self.order.id,
+            warehouse_id=self.wh.id,
+            batch_id=self.batch.id,
+            quantity=2,
+            status="RESERVED",
+        )
+        self.db.add(resv)
+
+        link_1_code = 111111111
+        link_2_code = 222222222
+
+        # Link 1
+        txn_1 = PaymentTransaction(
+            order_id=self.order.id,
+            transaction_code=f"TXN-PAYOS-{self.order.order_code}-{link_1_code}",
+            provider="PAYOS",
+            amount=Decimal("240000.0"),
+            currency="VND",
+            status="PENDING",
+            provider_trans_id=str(link_1_code),
+        )
+        self.db.add(txn_1)
+
+        # Link 2
+        txn_2 = PaymentTransaction(
+            order_id=self.order.id,
+            transaction_code=f"TXN-PAYOS-{self.order.order_code}-{link_2_code}",
+            provider="PAYOS",
+            amount=Decimal("240000.0"),
+            currency="VND",
+            status="PENDING",
+            provider_trans_id=str(link_2_code),
+        )
+        self.db.add(txn_2)
+        self.db.commit()
+
+        # Kiểm tra cả 2 giao dịch đều tồn tại với provider_trans_id riêng
+        self.db.expire_all()
+        txs = self.db.query(PaymentTransaction).filter_by(order_id=self.order.id, provider="PAYOS").all()
+        trans_ids = [t.provider_trans_id for t in txs]
+        self.assertIn(str(link_1_code), trans_ids)
+        self.assertIn(str(link_2_code), trans_ids)
+
+        # Khách quét và thanh toán link cũ (link_1_code)
+        fake_verified_data = WebhookData(
+            order_code=link_1_code,
+            amount=240000,
+            description=f"DH {self.order.order_code}",
+            account_number="123456789",
+            reference="FT_LINK_1_PAID",
+            transaction_date_time="2026-10-20 02:40:00",
+            currency="VND",
+            payment_link_id="link_1",
+            code="00",
+            desc="Thanh toan link 1 thanh cong",
+        )
+        mock_instance.webhooks.verify.return_value = fake_verified_data
+
+        with patch.object(settings, "payos_client_id", "dummy_client_id"), \
+             patch.object(settings, "payos_api_key", "dummy_api_key"), \
+             patch.object(settings, "payos_checksum_key", "dummy_checksum_key"):
+            res = self.client.post(
+                "/api/v1/payments/payos/webhook",
+                json={
+                    "code": "00",
+                    "data": {"orderCode": link_1_code, "amount": 240000},
+                },
+            )
+
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data.get("payment_status"), "PAID")
+        self.assertEqual(data.get("fulfillment_status"), "ALLOCATED")
+
+        self.db.expire_all()
+        refreshed_order = self.db.get(Order, self.order.id)
+        self.assertEqual(refreshed_order.payment_status, "PAID")
+        self.assertEqual(refreshed_order.fulfillment_status, "ALLOCATED")
+
+    @patch("app.services.payos_service.PayOS")
+    def test_19_payos_double_payment_on_multiple_links_prevented(self, MockPayOS):
+        """Khách thanh toán cả 2 link: Link 1 kích hoạt đơn, Link 2 bị chặn xuất kho thêm và chuyển đối soát hoàn tiền."""
+        mock_instance = MockPayOS.return_value
+
+        link_1_code = 333333333
+        link_2_code = 444444444
+
+        # Link 1 đã thanh toán thành công
+        txn_1 = PaymentTransaction(
+            order_id=self.order.id,
+            transaction_code=f"TXN-PAYOS-{self.order.order_code}-{link_1_code}",
+            provider="PAYOS",
+            amount=Decimal("240000.0"),
+            currency="VND",
+            status="SUCCESS",
+            provider_trans_id=str(link_1_code),
+        )
+        self.db.add(txn_1)
+
+        # Link 2 vẫn đang PENDING
+        txn_2 = PaymentTransaction(
+            order_id=self.order.id,
+            transaction_code=f"TXN-PAYOS-{self.order.order_code}-{link_2_code}",
+            provider="PAYOS",
+            amount=Decimal("240000.0"),
+            currency="VND",
+            status="PENDING",
+            provider_trans_id=str(link_2_code),
+        )
+        self.db.add(txn_2)
+
+        self.order.payment_status = "PAID"
+        self.order.fulfillment_status = "ALLOCATED"
+        self.db.commit()
+
+        # Webhook của link 2 đến (khách chuyển tiền lần thứ hai)
+        fake_verified_data = WebhookData(
+            order_code=link_2_code,
+            amount=240000,
+            description=f"DH {self.order.order_code}",
+            account_number="123456789",
+            reference="FT_LINK_2_DOUBLE_PAY",
+            transaction_date_time="2026-10-20 02:40:00",
+            currency="VND",
+            payment_link_id="link_2",
+            code="00",
+            desc="Thanh toan link 2 bi trung",
+        )
+        mock_instance.webhooks.verify.return_value = fake_verified_data
+
+        with patch.object(settings, "payos_client_id", "dummy_client_id"), \
+             patch.object(settings, "payos_api_key", "dummy_api_key"), \
+             patch.object(settings, "payos_checksum_key", "dummy_checksum_key"):
+            res = self.client.post(
+                "/api/v1/payments/payos/webhook",
+                json={
+                    "code": "00",
+                    "data": {"orderCode": link_2_code, "amount": 240000},
+                },
+            )
+
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data.get("duplicate_payment"))
+        self.assertTrue(data.get("refund_required"))
+
+        # Giao dịch 2 bị chuyển sang OVERPAID để kế toán hoàn tiền
+        self.db.expire_all()
+        refreshed_txn_2 = self.db.get(PaymentTransaction, txn_2.id)
+        self.assertEqual(refreshed_txn_2.status, "OVERPAID")
+
+    def test_20_payos_reservation_expiration_cancels_pending_orders(self):
+        """Bổ sung PAYOS vào quy trình hết hạn: Quá hạn thanh toán tự động giải phóng tồn kho và hủy đơn."""
+        from datetime import datetime, UTC, timedelta
+        from app.services.fulfillment_service import FulfillmentRoutingService
+        from app.models.inventory import StockReservation
+
+        self.order.payment_method = "PAYOS"
+        self.order.payment_status = "PENDING"
+        self.order.order_status = "PENDING"
+        self.order.created_at = datetime.now(UTC) - timedelta(minutes=45)
+        self.db.commit()
+
+        resv = StockReservation(
+            order_id=self.order.id,
+            warehouse_id=self.wh.id,
+            batch_id=self.batch.id,
+            quantity=2,
+            status="RESERVED",
+        )
+        self.db.add(resv)
+
+        txn = PaymentTransaction(
+            order_id=self.order.id,
+            transaction_code=f"TXN-PAYOS-EXPIRE-{self.order.order_code}",
+            provider="PAYOS",
+            amount=Decimal("240000.0"),
+            currency="VND",
+            status="PENDING",
+            provider_trans_id="999000111",
+        )
+        self.db.add(txn)
+        self.db.commit()
+
+        # Quét hết hạn các đơn quá 30 phút
+        cancelled_codes = FulfillmentRoutingService.expire_stale_reservations(self.db, max_age_minutes=30)
+        self.assertIn(self.order.order_code, cancelled_codes)
+
+        self.db.expire_all()
+        refreshed_order = self.db.get(Order, self.order.id)
+        self.assertEqual(refreshed_order.payment_status, "EXPIRED")
+        self.assertEqual(refreshed_order.order_status, "CANCELLED")
+        self.assertEqual(refreshed_order.fulfillment_status, "CANCELLED")
+
+        refreshed_resv = self.db.get(StockReservation, resv.id)
+        self.assertEqual(refreshed_resv.status, "RELEASED")
+
+        refreshed_txn = self.db.get(PaymentTransaction, txn.id)
+        self.assertEqual(refreshed_txn.status, "CANCELLED")
+
+    @patch("app.services.payos_service.PayOS")
+    def test_21_payos_late_payment_after_reservation_released_routes_to_refund(self, MockPayOS):
+        """Thanh toán payOS đến sau khi thuốc giữ chỗ đã bị giải phóng: Chuyển REFUND_PENDING, không xuất kho âm."""
+        mock_instance = MockPayOS.return_value
+        from app.models.inventory import StockReservation
+
+        payos_order_code = 888777666
+        self.order.payment_status = "EXPIRED"
+        self.order.order_status = "CANCELLED"
+        self.order.fulfillment_status = "CANCELLED"
+        self.db.commit()
+
+        resv = StockReservation(
+            order_id=self.order.id,
+            warehouse_id=self.wh.id,
+            batch_id=self.batch.id,
+            quantity=2,
+            status="RELEASED",
+        )
+        self.db.add(resv)
+
+        txn = PaymentTransaction(
+            order_id=self.order.id,
+            transaction_code=f"TXN-PAYOS-LATE-{self.order.order_code}",
+            provider="PAYOS",
+            amount=Decimal("240000.0"),
+            currency="VND",
+            status="CANCELLED",
+            provider_trans_id=str(payos_order_code),
+        )
+        self.db.add(txn)
+        self.db.commit()
+
+        fake_verified_data = WebhookData(
+            order_code=payos_order_code,
+            amount=240000,
+            description=f"DH {self.order.order_code}",
+            account_number="123456789",
+            reference="FT_LATE_AFTER_EXPIRE",
+            transaction_date_time="2026-10-20 02:40:00",
+            currency="VND",
+            payment_link_id="link_late_expire",
+            code="00",
+            desc="Khach tra tien muon",
+        )
+        mock_instance.webhooks.verify.return_value = fake_verified_data
+
+        with patch.object(settings, "payos_client_id", "dummy_client_id"), \
+             patch.object(settings, "payos_api_key", "dummy_api_key"), \
+             patch.object(settings, "payos_checksum_key", "dummy_checksum_key"):
+            res = self.client.post(
+                "/api/v1/payments/payos/webhook",
+                json={
+                    "code": "00",
+                    "data": {"orderCode": payos_order_code, "amount": 240000},
+                },
+            )
+
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data.get("payment_status"), "REFUND_PENDING")
+        self.assertTrue(data.get("refund_pending"))
+
+        self.db.expire_all()
+        refreshed_order = self.db.get(Order, self.order.id)
+        self.assertEqual(refreshed_order.payment_status, "REFUND_PENDING")
+        self.assertEqual(refreshed_order.fulfillment_status, "CANCELLED")
+        self.assertEqual(refreshed_order.order_status, "CANCELLED")
 
 
 if __name__ == "__main__":

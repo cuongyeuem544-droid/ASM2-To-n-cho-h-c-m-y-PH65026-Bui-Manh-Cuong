@@ -176,12 +176,14 @@ class PayOSPaymentService:
             )
 
         # Ghi nhận hoặc cập nhật PaymentTransaction
+        # Bảo toàn mapping: mỗi payos_order_code có một PaymentTransaction riêng biệt
+        # Không ghi đè provider_trans_id của link cũ để khách thanh toán link cũ vẫn đối soát được
         txn_code = f"TXN-PAYOS-{order.order_code}-{payos_order_code}"
         trans = db.scalar(
             select(PaymentTransaction).where(
                 PaymentTransaction.order_id == order.id,
                 PaymentTransaction.provider == "PAYOS",
-                PaymentTransaction.status == "PENDING",
+                PaymentTransaction.provider_trans_id == str(payos_order_code),
             )
         )
         metadata = {
@@ -207,9 +209,7 @@ class PayOSPaymentService:
             )
             db.add(trans)
         else:
-            trans.transaction_code = txn_code
             trans.amount = Decimal(str(amount))
-            trans.provider_trans_id = str(payos_order_code)
             trans.provider_pay_url = getattr(res, "checkout_url", None)
             trans.provider_response_raw = json.dumps(metadata, ensure_ascii=False)
             trans.updated_at = utcnow()
@@ -310,6 +310,27 @@ class PayOSPaymentService:
             )
 
         if not trans:
+            # Fallback tra cứu qua bảng payos_order_codes để đảm bảo mapping không bao giờ bị mất
+            from app.models.inventory import PayosOrderCode
+            poc = db.scalar(
+                select(PayosOrderCode).where(PayosOrderCode.order_code_num == order_code_num)
+            )
+            if poc:
+                matched_order = db.get(Order, poc.order_id)
+                if matched_order:
+                    trans = PaymentTransaction(
+                        order_id=matched_order.id,
+                        transaction_code=f"TXN-PAYOS-{matched_order.order_code}-{order_code_num}",
+                        provider="PAYOS",
+                        amount=Decimal(str(matched_order.total_amount)),
+                        currency="VND",
+                        status="PENDING",
+                        provider_trans_id=str(order_code_num),
+                    )
+                    db.add(trans)
+                    db.flush()
+
+        if not trans:
             err_msg = f"Không tìm thấy PaymentTransaction đã khởi tạo cho payOS orderCode={order_code_num}."
             logger.warning(f"[PAYOS WEBHOOK] {err_msg}")
             webhook_log.process_error = err_msg
@@ -369,14 +390,18 @@ class PayOSPaymentService:
                 db.commit()
                 raise HTTPException(status_code=400, detail=err_msg)
 
-            # BUG-02: Kiểm tra trạng thái đơn - Đơn đã hủy tuyệt đối không được kích hoạt lại kho
-            if order.order_status == "CANCELLED" or order.fulfillment_status == "CANCELLED":
+            # BUG-02: Kiểm tra trạng thái đơn - Đơn đã hủy/hết hạn tuyệt đối không được kích hoạt lại kho
+            if (
+                order.order_status == "CANCELLED"
+                or order.fulfillment_status == "CANCELLED"
+                or order.payment_status in ["EXPIRED", "CANCELLED"]
+            ):
                 trans.status = "SUCCESS"
                 trans.provider_response_raw = json.dumps(raw_info, ensure_ascii=False)
                 trans.updated_at = utcnow()
                 order.payment_status = "REFUND_PENDING"
                 webhook_log.processed = True
-                webhook_log.process_error = "Đơn hàng đã hủy trước khi nhận tiền. Chuyển sang hàng đợi đối soát hoàn tiền."
+                webhook_log.process_error = "Đơn hàng đã hủy hoặc hết hạn trước khi nhận tiền. Chuyển sang hàng đợi đối soát hoàn tiền."
                 write_audit(
                     db,
                     action="PAYOS_WEBHOOK_ON_CANCELLED_ORDER",
@@ -388,9 +413,9 @@ class PayOSPaymentService:
                     after={"payment_status": "REFUND_PENDING", "paid_amount": paid_amount},
                 )
                 dispatch_alert(
-                    title="THANH TOÁN ĐƠN ĐÃ HỦY - CẦN ĐỐI SOÁT HOÀN TIỀN",
+                    title="THANH TOÁN ĐƠN ĐÃ HỦY/HẾT HẠN - CẦN ĐỐI SOÁT HOÀN TIỀN",
                     message=(
-                        f"Đơn hàng <b>{order.order_code}</b> đã bị HỦY trước đó nhưng nhận được thanh toán payOS thành công.\n"
+                        f"Đơn hàng <b>{order.order_code}</b> đã bị HỦY HOẶC HẾT HẠN trước đó nhưng nhận được thanh toán payOS thành công.\n"
                         f"Số tiền: <b>{paid_amount:,} đ</b>\n"
                         f"Mã tham chiếu: <code>{ref_code}</code>\n"
                         f"<b>Hệ thống KHÔNG xuất kho đơn này. Vui lòng lập phiếu hoàn tiền cho khách.</b>"
@@ -402,22 +427,111 @@ class PayOSPaymentService:
                 db.commit()
                 return {
                     "success": True,
-                    "message": f"Đơn hàng {order.order_code} đã bị hủy trước đó. Ghi nhận tiền thành công và đưa vào danh sách đối soát hoàn tiền.",
+                    "message": f"Đơn hàng {order.order_code} đã bị hủy hoặc hết hạn trước đó. Ghi nhận tiền thành công và đưa vào danh sách đối soát hoàn tiền.",
                     "order_code": order.order_code,
                     "payment_status": "REFUND_PENDING",
                     "refund_pending": True,
                 }
 
-            # BUG-03: Chống trùng lặp (Idempotency check)
-            if order.payment_status == "PAID" and trans.status == "SUCCESS":
+            # Chống xử lý hai lần nếu 2 link khác nhau của cùng 1 đơn đều được thanh toán (Duplicate Payment)
+            if order.payment_status == "PAID":
+                if trans.status == "SUCCESS":
+                    webhook_log.processed = True
+                    db.commit()
+                    logger.info(f"[PAYOS WEBHOOK] Đơn hàng {order.order_code} đã ở trạng thái PAID trước đó (Idempotent).")
+                    return {
+                        "success": True,
+                        "message": f"Đơn hàng {order.order_code} đã được ghi nhận thanh toán trước đó.",
+                        "order_code": order.order_code,
+                        "already_paid": True,
+                    }
+                else:
+                    # Link thứ hai được thanh toán khi đơn đã PAID qua link thứ nhất!
+                    trans.status = "OVERPAID"
+                    trans.provider_response_raw = json.dumps(raw_info, ensure_ascii=False)
+                    trans.updated_at = utcnow()
+                    webhook_log.processed = True
+                    webhook_log.process_error = f"Thanh toán trùng lặp: Đơn {order.order_code} đã thanh toán trước đó. Giao dịch #{order_code_num} cần hoàn tiền."
+                    write_audit(
+                        db,
+                        action="PAYOS_DUPLICATE_PAYMENT_DETECTED",
+                        entity_type="Order",
+                        entity_id=order.id,
+                        user=None,
+                        request=None,
+                        before={"payment_status": "PAID"},
+                        after={"trans_id": trans.id, "payos_order_code": order_code_num, "amount": paid_amount},
+                    )
+                    dispatch_alert(
+                        title="CẢNH BÁO: KHÁCH HÀNG THANH TOÁN TRÙNG 2 LẦN (DUPLICATE PAYMENT)",
+                        message=(
+                            f"Đơn hàng <b>{order.order_code}</b> nhận thêm khoản thanh toán từ link payOS #{order_code_num}.\n"
+                            f"Số tiền: <b>{paid_amount:,} đ</b>\n"
+                            f"Mã tham chiếu: <code>{ref_code}</code>\n"
+                            f"<b>Hệ thống KHÔNG xuất kho thêm. Cần đối soát hoàn trả {paid_amount:,} đ cho khách hàng.</b>"
+                        ),
+                        severity="WARNING",
+                        alert_type="DUPLICATE_PAYMENT_REFUND",
+                        details={"order_code": order.order_code, "paid_amount": paid_amount, "ref_code": ref_code},
+                    )
+                    db.commit()
+                    return {
+                        "success": True,
+                        "message": f"Đơn hàng {order.order_code} đã thanh toán trước đó. Khoản thanh toán mới #{order_code_num} được ghi nhận để đối soát hoàn trả tiền trùng.",
+                        "order_code": order.order_code,
+                        "duplicate_payment": True,
+                        "refund_required": True,
+                    }
+
+            # Kiểm tra thuốc giữ chỗ: nếu đã bị giải phóng trước khi nhận tiền thì chuyển REFUND_PENDING, không xuất kho âm
+            from app.models.inventory import StockReservation
+            released_reservations = db.scalars(
+                select(StockReservation).where(
+                    StockReservation.order_id == order.id,
+                    StockReservation.status == "RELEASED",
+                )
+            ).all()
+            active_reservations = db.scalars(
+                select(StockReservation).where(
+                    StockReservation.order_id == order.id,
+                    StockReservation.status == "RESERVED",
+                )
+            ).all()
+            if released_reservations and not active_reservations:
+                trans.status = "SUCCESS"
+                trans.provider_response_raw = json.dumps(raw_info, ensure_ascii=False)
+                trans.updated_at = utcnow()
+                order.payment_status = "REFUND_PENDING"
                 webhook_log.processed = True
+                webhook_log.process_error = "Thuốc giữ chỗ đã bị giải phóng trước khi nhận tiền. Chuyển sang hàng đợi đối soát hoàn tiền."
+                write_audit(
+                    db,
+                    action="PAYOS_LATE_PAYMENT_RESERVATION_RELEASED",
+                    entity_type="Order",
+                    entity_id=order.id,
+                    user=None,
+                    request=None,
+                    before={"order_status": order.order_status, "payment_status": order.payment_status},
+                    after={"payment_status": "REFUND_PENDING", "paid_amount": paid_amount},
+                )
+                dispatch_alert(
+                    title="CẢNH BÁO: TỒN KHO THUỐC ĐÃ HẾT HẠN GIỮ CHỖ",
+                    message=(
+                        f"Đơn hàng <b>{order.order_code}</b> nhận thanh toán payOS {paid_amount:,} đ "
+                        f"nhưng tồn kho giữ chỗ đã bị giải phóng trước đó.\n"
+                        f"<b>Hệ thống KHÔNG xuất kho để chống tồn kho âm. Chuyển kế toán hoàn tiền.</b>"
+                    ),
+                    severity="WARNING",
+                    alert_type="OUT_OF_STOCK_REFUND",
+                    details={"order_code": order.order_code, "paid_amount": paid_amount, "ref_code": ref_code},
+                )
                 db.commit()
-                logger.info(f"[PAYOS WEBHOOK] Đơn hàng {order.order_code} đã ở trạng thái PAID trước đó (Idempotent).")
                 return {
                     "success": True,
-                    "message": f"Đơn hàng {order.order_code} đã được ghi nhận thanh toán trước đó.",
+                    "message": f"Đơn hàng {order.order_code} đã hết hạn giữ chỗ tồn kho. Ghi nhận tiền thành công và đưa vào danh sách đối soát hoàn tiền.",
                     "order_code": order.order_code,
-                    "already_paid": True,
+                    "payment_status": "REFUND_PENDING",
+                    "refund_pending": True,
                 }
 
             before_payment_status = order.payment_status
@@ -604,8 +718,12 @@ class PayOSPaymentService:
                     "message": f"Số tiền thanh toán ({paid_amount:,} đ) không khớp với đơn hàng ({order_total:,} đ).",
                 }
 
-            # BUG-02: Kiểm tra đơn đã hủy
-            if order.order_status == "CANCELLED" or order.fulfillment_status == "CANCELLED":
+            # BUG-02: Kiểm tra đơn đã hủy hoặc hết hạn
+            if (
+                order.order_status == "CANCELLED"
+                or order.fulfillment_status == "CANCELLED"
+                or order.payment_status in ["EXPIRED", "CANCELLED"]
+            ):
                 trans.status = "SUCCESS"
                 trans.updated_at = utcnow()
                 order.payment_status = "REFUND_PENDING"
@@ -618,6 +736,35 @@ class PayOSPaymentService:
                     "is_paid": True,
                     "refund_pending": True,
                     "is_cancelled": True,
+                }
+
+            # Kiểm tra thuốc giữ chỗ: nếu đã bị giải phóng trước khi nhận tiền thì chuyển REFUND_PENDING, không xuất kho âm
+            from app.models.inventory import StockReservation
+            released_reservations = db.scalars(
+                select(StockReservation).where(
+                    StockReservation.order_id == order.id,
+                    StockReservation.status == "RELEASED",
+                )
+            ).all()
+            active_reservations = db.scalars(
+                select(StockReservation).where(
+                    StockReservation.order_id == order.id,
+                    StockReservation.status == "RESERVED",
+                )
+            ).all()
+            if released_reservations and not active_reservations:
+                trans.status = "SUCCESS"
+                trans.updated_at = utcnow()
+                order.payment_status = "REFUND_PENDING"
+                db.commit()
+                return {
+                    "order_code": order.order_code,
+                    "payment_status": "REFUND_PENDING",
+                    "fulfillment_status": order.fulfillment_status,
+                    "total_amount": float(order.total_amount),
+                    "is_paid": True,
+                    "refund_pending": True,
+                    "reservation_expired": True,
                 }
 
             trans.status = "SUCCESS"
