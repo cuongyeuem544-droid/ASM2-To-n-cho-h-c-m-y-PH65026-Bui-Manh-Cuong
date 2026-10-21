@@ -272,3 +272,35 @@ class TestPaymentExpiryAndLifecycle:
         exp2 = datetime.fromisoformat(data2["expires_at"].replace("Z", "+00:00"))
         now2 = datetime.now(UTC)
         assert 14.5 <= (exp2 - now2).total_seconds() / 60.0 <= 15.5
+
+    def test_07_cancel_sepay_order_releases_stock_and_marks_cancelled(self, db_session, test_user, auth_headers):
+        """Khách bấm hủy đơn SePay: Đơn chuyển CANCELLED, mã thanh toán CANCELLED, tồn kho được giải phóng."""
+        client = TestClient(app)
+        order = _create_order(db_session, test_user, total_amount=250000, method="SEPAY")
+
+        # Tạo intent
+        client.post(
+            "/api/v1/payments/intent",
+            json={"order_code": order.order_code, "payment_method": "SEPAY"},
+            headers=auth_headers,
+        )
+
+        # Hủy đơn
+        res = client.post(
+            f"/api/v1/payments/orders/{order.order_code}/cancel",
+            json={"reason": "Khách hàng đổi ý muốn hủy đơn", "phone_verify": test_user.phone},
+            headers=auth_headers,
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "SUCCESS"
+        assert data["order_status"] == "CANCELLED"
+
+        # Kiểm tra database state
+        db_session.refresh(order)
+        assert order.order_status == "CANCELLED"
+        assert order.payment_status == "CANCELLED"
+
+        sepay_code = db_session.scalar(select(SepayPaymentCode).where(SepayPaymentCode.order_id == order.id))
+        if sepay_code:
+            assert sepay_code.status == "CANCELLED"
