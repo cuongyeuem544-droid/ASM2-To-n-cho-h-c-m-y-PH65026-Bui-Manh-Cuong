@@ -4,7 +4,7 @@ import json
 import logging
 import random
 import re
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Optional
 from urllib.parse import quote
@@ -60,7 +60,7 @@ class SepayService:
         return {"bin": "970422", "name": f"Ngân hàng {key}"}
 
     @classmethod
-    def generate_payment_code(cls, db: Session, order: Order) -> SepayPaymentCode:
+    def generate_payment_code(cls, db: Session, order: Order, force_new: bool = False) -> SepayPaymentCode:
         """
         Tạo mã thanh toán duy nhất cho đơn hàng theo chuẩn SePay:
         Tiền tố 'HC' + 8 chữ số (ví dụ: HC10000045).
@@ -69,7 +69,12 @@ class SepayService:
         existing = db.scalar(
             select(SepayPaymentCode).where(SepayPaymentCode.order_id == order.id)
         )
-        if existing:
+        is_still_valid = (
+            existing
+            and getattr(existing, "status", "ACTIVE") == "ACTIVE"
+            and (not getattr(existing, "expires_at", None) or existing.expires_at.replace(tzinfo=existing.expires_at.tzinfo or UTC) > utcnow())
+        )
+        if existing and not force_new and is_still_valid:
             return existing
 
         # Thử sinh mã từ order.id (nếu khả dụng)
@@ -116,10 +121,20 @@ class SepayService:
                 detail="Không thể tạo mã thanh toán SePay duy nhất sau nhiều lần thử.",
             )
 
+        if existing:
+            existing.payment_code = payment_code
+            existing.code_number = code_number
+            existing.status = "ACTIVE"
+            existing.created_at = utcnow()
+            db.commit()
+            db.refresh(existing)
+            return existing
+
         code_obj = SepayPaymentCode(
             order_id=order.id,
             payment_code=payment_code,
             code_number=code_number,
+            status="ACTIVE",
         )
         db.add(code_obj)
         db.commit()
@@ -176,7 +191,10 @@ class SepayService:
 
         amount = int(order.total_amount)
         bank_info = cls.get_bank_info()
-        payment_code_obj = cls.generate_payment_code(db, order)
+        expires_at = datetime.now(UTC) + timedelta(minutes=settings.payment_expiry_minutes)
+        payment_code_obj = cls.generate_payment_code(db, order, force_new=True)
+        payment_code_obj.expires_at = expires_at
+        payment_code_obj.status = "ACTIVE"
         payment_code = payment_code_obj.payment_code
 
         qr_url = cls.generate_vietqr_url(amount=amount, payment_code=payment_code)
@@ -208,6 +226,7 @@ class SepayService:
                 status="PENDING",
                 provider_pay_url=qr_url,
                 provider_response_raw=json.dumps(metadata, ensure_ascii=False),
+                expires_at=expires_at,
             )
             db.add(trans)
         else:
@@ -215,6 +234,7 @@ class SepayService:
             trans.status = "PENDING"
             trans.provider_pay_url = qr_url
             trans.provider_response_raw = json.dumps(metadata, ensure_ascii=False)
+            trans.expires_at = expires_at
 
         order.payment_method = "SEPAY"
         order.fulfillment_status = "WAITING_PAYMENT"
@@ -236,6 +256,7 @@ class SepayService:
             "account_number": settings.sepay_account_number,
             "account_holder": settings.sepay_account_holder,
             "transfer_memo": payment_code,
+            "expires_at": expires_at.isoformat(),
         }
 
     @classmethod
@@ -597,6 +618,121 @@ class SepayService:
             webhook_log.process_error = err_msg
             db.commit()
             return {"success": False, "message": err_msg, "sepay_id": sepay_id}
+
+        # 9.1 Kiểm tra nếu đơn hàng đã bị HỦY trước khi nhận được tiền
+        if order.order_status == "CANCELLED":
+            warn_msg = f"Đơn hàng {order.order_code} đã bị hủy trước đó. Tiền chuyển về SePay #{sepay_id} ({transfer_amount:,} đ) chuyển sang diện chờ đối soát/hoàn tiền."
+            logger.warning(f"[SEPAY WEBHOOK] {warn_msg}")
+            inbound_rec = SepayInboundTransaction(
+                sepay_id=sepay_id,
+                gateway=gateway,
+                account_number=account_number,
+                transfer_type=transfer_type,
+                transfer_amount=transfer_amount,
+                accumulated=accumulated,
+                code=matched_code,
+                content=content,
+                reference_code=ref_code,
+                description=description,
+                transaction_date=trans_date,
+                status="CANCELLED_ORDER_REFUND_PENDING",
+                order_id=order.id,
+                error_message=warn_msg,
+                raw_payload=raw_payload_str,
+            )
+            db.add(inbound_rec)
+            webhook_log.process_error = warn_msg
+            db.commit()
+
+            dispatch_alert(
+                title="ĐỐI SOÁT SEPAY: TIỀN VỀ ĐƠN ĐÃ HỦY",
+                message=(
+                    f"Đơn hàng: <b>{order.order_code}</b> (Mã TT: <code>{matched_code}</code>)\n"
+                    f"Số tiền: <b>{transfer_amount:,} đ</b>\n"
+                    f"Giao dịch: <b>#{sepay_id}</b>\n"
+                    f"Trạng thái: <b>Đã đưa vào danh sách chờ hoàn tiền (KHÔNG xuất kho)</b>"
+                ),
+                severity="HIGH",
+                alert_type="SEPAY_CANCELLED_ORDER",
+            )
+            return {"success": False, "message": warn_msg, "order_code": order.order_code, "sepay_id": sepay_id}
+
+        # 9.2 Kiểm tra phương thức thanh toán của đơn (chống trường hợp khách đã đổi sang COD)
+        if order.payment_method != "SEPAY":
+            warn_msg = f"Đơn hàng {order.order_code} hiện áp dụng phương thức '{order.payment_method}' (không phải SEPAY). Tiền về SePay #{sepay_id} chuyển vào đối soát kế toán."
+            logger.warning(f"[SEPAY WEBHOOK] {warn_msg}")
+            inbound_rec = SepayInboundTransaction(
+                sepay_id=sepay_id,
+                gateway=gateway,
+                account_number=account_number,
+                transfer_type=transfer_type,
+                transfer_amount=transfer_amount,
+                accumulated=accumulated,
+                code=matched_code,
+                content=content,
+                reference_code=ref_code,
+                description=description,
+                transaction_date=trans_date,
+                status="METHOD_MISMATCH_MANUAL_REVIEW",
+                order_id=order.id,
+                error_message=warn_msg,
+                raw_payload=raw_payload_str,
+            )
+            db.add(inbound_rec)
+            webhook_log.process_error = warn_msg
+            db.commit()
+
+            dispatch_alert(
+                title="ĐỐI SOÁT SEPAY: ĐƠN ĐÃ ĐỔI PHƯƠNG THỨC KHÁC",
+                message=(
+                    f"Đơn hàng: <b>{order.order_code}</b>\n"
+                    f"Phương thức hiện tại: <b>{order.payment_method}</b>\n"
+                    f"Số tiền: <b>{transfer_amount:,} đ</b> (SePay #{sepay_id})\n"
+                    f"Hành động: <b>Cần kế toán đối soát thủ công</b>"
+                ),
+                severity="WARNING",
+                alert_type="SEPAY_METHOD_MISMATCH",
+            )
+            return {"success": False, "message": warn_msg, "order_code": order.order_code, "sepay_id": sepay_id}
+
+        # 9.3 Kiểm tra thời hạn thanh toán (15 phút) của mã
+        code_exp = getattr(code_entry, "expires_at", None)
+        if (code_exp and code_exp.replace(tzinfo=code_exp.tzinfo or UTC) < utcnow()) or getattr(code_entry, "status", "ACTIVE") == "EXPIRED":
+            warn_msg = f"Mã thanh toán '{matched_code}' đã quá hạn 15 phút (Hết hạn lúc: {code_exp}). Tiền về SePay #{sepay_id} ({transfer_amount:,} đ) chuyển vào đối soát kế toán."
+            logger.warning(f"[SEPAY WEBHOOK] {warn_msg}")
+            inbound_rec = SepayInboundTransaction(
+                sepay_id=sepay_id,
+                gateway=gateway,
+                account_number=account_number,
+                transfer_type=transfer_type,
+                transfer_amount=transfer_amount,
+                accumulated=accumulated,
+                code=matched_code,
+                content=content,
+                reference_code=ref_code,
+                description=description,
+                transaction_date=trans_date,
+                status="EXPIRED_INTENT_MANUAL_REVIEW",
+                order_id=order.id,
+                error_message=warn_msg,
+                raw_payload=raw_payload_str,
+            )
+            db.add(inbound_rec)
+            webhook_log.process_error = warn_msg
+            db.commit()
+
+            dispatch_alert(
+                title="ĐỐI SOÁT SEPAY: CHUYỂN KHOẢN SAU HẾT HẠN (15 PHÚT)",
+                message=(
+                    f"Đơn hàng: <b>{order.order_code}</b> (Mã TT: <code>{matched_code}</code>)\n"
+                    f"Số tiền: <b>{transfer_amount:,} đ</b> (SePay #{sepay_id})\n"
+                    f"Hạn thanh toán: <code>{code_exp}</code>\n"
+                    f"Hành động: <b>Cần đối soát hoặc hoàn tiền theo quy định</b>"
+                ),
+                severity="WARNING",
+                alert_type="SEPAY_EXPIRED_PAYMENT",
+            )
+            return {"success": False, "message": warn_msg, "order_code": order.order_code, "sepay_id": sepay_id}
 
         # 10. Kiểm tra nếu đơn hàng đã được đánh dấu PAID trước đó
         if order.payment_status == "PAID":

@@ -124,7 +124,8 @@ class Settings(BaseSettings):
     vietqr_account_number: str = ""
     vietqr_account_holder: str = ""
     vietqr_webhook_secret: str = ""
-    payment_expiry_minutes: int = 30
+    payment_expiry_minutes: int = 15
+    order_unpaid_grace_minutes: int = 30
 
     # Cấu hình Cổng Thanh toán Chuyển khoản SePay Webhook + VietQR MBBank
     sepay_enabled: bool = False

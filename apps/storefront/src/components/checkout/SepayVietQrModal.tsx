@@ -12,6 +12,9 @@ import {
   RefreshCw,
   ArrowRight,
   AlertCircle,
+  AlertTriangle,
+  Clock,
+  Loader2,
 } from "lucide-react";
 
 interface SepayVietQrModalProps {
@@ -23,8 +26,10 @@ interface SepayVietQrModalProps {
   accountNumber?: string;
   accountHolder?: string;
   qrCodeUrl?: string;
+  expiresAt?: string;
   onClose: () => void;
   onChangeMethod?: () => void;
+  onRefreshQr?: () => Promise<void>;
   onSuccess: () => void;
 }
 
@@ -37,36 +42,81 @@ export default function SepayVietQrModal({
   accountNumber: propAccountNumber,
   accountHolder: propAccountHolder,
   qrCodeUrl: propQrCodeUrl,
+  expiresAt,
   onClose,
   onChangeMethod,
+  onRefreshQr,
   onSuccess,
 }: SepayVietQrModalProps) {
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [isPaid, setIsPaid] = useState(false);
   const [pollingCount, setPollingCount] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const bankName = propBankName || "Ngân hàng TMCP Quân Đội (MBBank)";
-  const accountNumber = propAccountNumber || "0901234567";
+  const accountNumber = propAccountNumber || "";
   const accountHolder = propAccountHolder || "PHARMATRUST / H4CARE";
   const transferContent = paymentCode || orderCode;
+
+  // Real 15-Minute Expiry Countdown
+  const calculateSecondsLeft = () => {
+    if (!expiresAt) return 15 * 60;
+    const diff = Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000);
+    return Math.max(0, diff);
+  };
+
+  const [timeLeft, setTimeLeft] = useState<number>(calculateSecondsLeft);
+
+  useEffect(() => {
+    if (isOpen) {
+      setTimeLeft(calculateSecondsLeft());
+    }
+  }, [isOpen, expiresAt]);
+
+  useEffect(() => {
+    if (!isOpen || isPaid) return;
+
+    const timer = setInterval(() => {
+      if (expiresAt) {
+        const diff = Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000);
+        setTimeLeft(Math.max(0, diff));
+      } else {
+        setTimeLeft((prev) => Math.max(0, prev - 1));
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [isOpen, isPaid, expiresAt]);
+
+  const isExpired = timeLeft <= 0;
+
+  const formatCountdown = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  };
 
   // URL VietQR chuẩn Napas 247
   const vietQrUrl =
     propQrCodeUrl ||
-    `https://img.vietqr.io/image/MB-${accountNumber}-compact2.png?amount=${amount}&addInfo=${encodeURIComponent(
-      transferContent
-    )}&accountName=${encodeURIComponent(accountHolder)}`;
+    (accountNumber
+      ? `https://img.vietqr.io/image/MB-${accountNumber}-compact2.png?amount=${amount}&addInfo=${encodeURIComponent(
+          transferContent
+        )}&accountName=${encodeURIComponent(accountHolder)}`
+      : "");
 
-  // Polling tự động kiểm tra trạng thái từ Backend (render & neon staging)
+  // Polling tự động kiểm tra trạng thái từ Backend
   useEffect(() => {
-    if (!isOpen || isPaid || !orderCode) return;
+    if (!isOpen || isPaid || !orderCode || isExpired) return;
 
     let isMounted = true;
     const intervalId = setInterval(async () => {
       try {
         const token =
           typeof window !== "undefined"
-            ? localStorage.getItem("h4care_auth_token") || localStorage.getItem("pharmatrust_token")
+            ? localStorage.getItem("pharmatrust_access_token") ||
+              localStorage.getItem("h4care_auth_token") ||
+              localStorage.getItem("pharmatrust_token")
             : null;
         const orderToken =
           typeof window !== "undefined"
@@ -84,17 +134,14 @@ export default function SepayVietQrModal({
         if (res.ok && isMounted) {
           const data = await res.json();
           setPollingCount((prev) => prev + 1);
-          if (
-            data.payment_status === "PAID" ||
-            data.status === "PAID" ||
-            data.order_status === "CONFIRMED"
-          ) {
+          // CHỈ ĐÁNH DẤU LÀ ĐÃ THANH TOÁN KHI PAYMENT_STATUS == 'PAID' (KHÔNG DÙNG CONFIRMED!)
+          if (data.payment_status === "PAID" || data.status === "PAID") {
             setIsPaid(true);
             clearInterval(intervalId);
           }
         }
       } catch (e) {
-        // Lỗi mạng hoặc polling tạm thời, tiếp tục kiểm tra
+        // Lỗi mạng tạm thời, tiếp tục kiểm tra
       }
     }, 2500);
 
@@ -102,14 +149,28 @@ export default function SepayVietQrModal({
       isMounted = false;
       clearInterval(intervalId);
     };
-  }, [isOpen, isPaid, orderCode]);
+  }, [isOpen, isPaid, orderCode, isExpired]);
 
   if (!isOpen) return null;
 
   const handleCopy = (text: string, fieldName: string) => {
+    if (!text) return;
     navigator.clipboard.writeText(text);
     setCopiedField(fieldName);
     setTimeout(() => setCopiedField(null), 2000);
+  };
+
+  const handleRefresh = async () => {
+    if (onRefreshQr) {
+      try {
+        setIsRefreshing(true);
+        await onRefreshQr();
+      } finally {
+        setIsRefreshing(false);
+      }
+    } else if (onChangeMethod) {
+      onChangeMethod();
+    }
   };
 
   return (
@@ -145,6 +206,53 @@ export default function SepayVietQrModal({
 
         {/* Scrollable Body */}
         <div className="overflow-y-auto p-4 sm:p-6 space-y-4">
+          {/* Live Countdown & Expiry Banners */}
+          {!isPaid && (
+            <div>
+              {isExpired ? (
+                <div className="p-3.5 rounded-2xl bg-rose-50 border-2 border-rose-300 text-rose-900 space-y-1.5">
+                  <div className="flex items-center gap-2 font-bold text-xs text-rose-800">
+                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                    <span>Mã thanh toán này đã hết hạn sau 15 phút</span>
+                  </div>
+                  <p className="text-[11px] text-rose-700 leading-relaxed">
+                    Vui lòng <strong>không chuyển tiền</strong> vào mã này để tránh giao dịch bị giữ lại đối soát kế toán. Bạn có thể tạo mã mới ngay lập tức hoặc chọn phương thức khác.
+                  </p>
+                </div>
+              ) : timeLeft <= 60 ? (
+                <div className="p-3 rounded-2xl bg-rose-50 border border-rose-300 text-rose-900 flex items-center justify-between gap-2 animate-pulse">
+                  <div className="flex items-center gap-2 text-xs font-bold text-rose-800">
+                    <Clock className="w-4 h-4 text-rose-600 shrink-0" />
+                    <span>Mã sắp hết hạn! Vui lòng hoàn tất trong:</span>
+                  </div>
+                  <span className="font-mono font-black text-rose-700 text-sm bg-rose-100 px-2 py-0.5 rounded-lg border border-rose-300">
+                    {formatCountdown(timeLeft)}
+                  </span>
+                </div>
+              ) : timeLeft <= 300 ? (
+                <div className="p-2.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-800">
+                    <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    <span>Thời gian quét mã còn lại:</span>
+                  </div>
+                  <span className="font-mono font-bold text-amber-800 text-xs bg-amber-100 px-2 py-0.5 rounded-md border border-amber-300">
+                    {formatCountdown(timeLeft)}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between text-[11px] text-slate-500 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
+                  <span className="flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Mã có hiệu lực trong 15 phút:</span>
+                  </span>
+                  <span className="font-mono font-bold text-slate-700">
+                    {formatCountdown(timeLeft)}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* PAID Banner nếu đã nhận tiền thành công */}
           {isPaid ? (
             <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-200 text-emerald-800 space-y-2 text-center animate-in zoom-in-95">
@@ -158,13 +266,41 @@ export default function SepayVietQrModal({
             </div>
           ) : (
             /* QR Box */
-            <div className="text-center bg-slate-50 p-4 rounded-2xl border border-slate-200/80">
-              <div className="inline-block bg-white p-2.5 rounded-2xl shadow-md border border-slate-100">
+            <div className="text-center bg-slate-50 p-4 rounded-2xl border border-slate-200/80 relative">
+              <div className="relative inline-block bg-white p-2.5 rounded-2xl shadow-md border border-slate-100 overflow-hidden">
                 <img
                   src={vietQrUrl}
                   alt="VietQR MBBank SePay"
-                  className="w-52 h-52 sm:w-56 sm:h-56 object-contain mx-auto rounded-xl"
+                  className={`w-52 h-52 sm:w-56 sm:h-56 object-contain mx-auto rounded-xl transition-all ${
+                    isExpired ? "opacity-20 blur-xs grayscale" : ""
+                  }`}
                 />
+
+                {/* Expired Overlay */}
+                {isExpired && (
+                  <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-2xs flex flex-col items-center justify-center p-4 text-white text-center">
+                    <AlertTriangle className="w-10 h-10 text-rose-400 mb-2 animate-bounce" />
+                    <p className="font-black text-xs uppercase tracking-wider text-rose-300">
+                      Mã Đã Hết Hạn
+                    </p>
+                    <p className="text-[10px] text-slate-200 mt-1 max-w-[180px] leading-relaxed">
+                      Nhấn nút bên dưới để tạo mã thanh toán mới 15 phút.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleRefresh}
+                      disabled={isRefreshing}
+                      className="mt-3 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center gap-1.5 shadow-md active:scale-95 transition-all cursor-pointer"
+                    >
+                      {isRefreshing ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-3.5 h-3.5" />
+                      )}
+                      <span>Tạo mã QR mới</span>
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="mt-2.5 flex items-center justify-center gap-2">
@@ -198,19 +334,23 @@ export default function SepayVietQrModal({
               <div className="flex items-center justify-between py-1 border-b border-slate-100">
                 <span className="text-slate-500">Số tài khoản nhận:</span>
                 <div className="flex items-center gap-2">
-                  <span className="font-mono font-bold text-emerald-800 text-sm">{accountNumber}</span>
-                  <button
-                    type="button"
-                    onClick={() => handleCopy(accountNumber, "accountNumber")}
-                    className="p-1 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
-                    title="Sao chép số tài khoản"
-                  >
-                    {copiedField === "accountNumber" ? (
-                      <Check className="w-3.5 h-3.5 text-emerald-600" />
-                    ) : (
-                      <Copy className="w-3.5 h-3.5" />
-                    )}
-                  </button>
+                  <span className="font-mono font-bold text-emerald-800 text-sm">
+                    {accountNumber || "Đang tải số tài khoản..."}
+                  </span>
+                  {accountNumber && (
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(accountNumber, "accountNumber")}
+                      className="p-1 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
+                      title="Sao chép số tài khoản"
+                    >
+                      {copiedField === "accountNumber" ? (
+                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -257,7 +397,9 @@ export default function SepayVietQrModal({
               <RefreshCw className="w-5 h-5 text-amber-600 animate-spin shrink-0" />
               <div>
                 <p className="font-bold text-[11px] text-amber-950">
-                  Đang chờ hệ thống ngân hàng xác nhận tiền về...
+                  {isExpired
+                    ? "Mã đã quá hạn 15 phút. Vui lòng tạo mã mới để tiếp tục."
+                    : "Đang chờ hệ thống ngân hàng xác nhận tiền về..."}
                 </p>
                 <p className="text-[10px] text-amber-800 mt-0.5 leading-relaxed">
                   Ngay khi bạn hoàn tất chuyển khoản từ ứng dụng ngân hàng, SePay sẽ gửi thông báo và hệ thống tự động hoàn tất đơn (không cần chụp biên lai).
@@ -274,16 +416,18 @@ export default function SepayVietQrModal({
 
         {/* Footer Actions */}
         <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-2 shrink-0">
-          <a
-            href={vietQrUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            download={`VietQR_MBBank_${orderCode}.png`}
-            className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
-          >
-            <Download className="w-4 h-4" />
-            <span>Tải ảnh QR</span>
-          </a>
+          {!isExpired && vietQrUrl && (
+            <a
+              href={vietQrUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              download={`VietQR_MBBank_${orderCode}.png`}
+              className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+            >
+              <Download className="w-4 h-4" />
+              <span>Tải ảnh QR</span>
+            </a>
+          )}
 
           {isPaid ? (
             <button
@@ -296,13 +440,30 @@ export default function SepayVietQrModal({
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           ) : (
-            <button
-              type="button"
-              onClick={onChangeMethod || onClose}
-              className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold text-xs transition-colors hover:border-slate-400"
-            >
-              Đổi phương thức khác
-            </button>
+            <div className="w-full sm:w-auto flex items-center gap-2 flex-1 justify-end">
+              {isExpired && (
+                <button
+                  type="button"
+                  onClick={handleRefresh}
+                  disabled={isRefreshing}
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-xs"
+                >
+                  {isRefreshing ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-4 h-4" />
+                  )}
+                  <span>Tạo mã thanh toán mới</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onChangeMethod || onClose}
+                className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold text-xs transition-colors hover:border-slate-400"
+              >
+                Đổi phương thức khác
+              </button>
+            </div>
           )}
         </div>
       </div>

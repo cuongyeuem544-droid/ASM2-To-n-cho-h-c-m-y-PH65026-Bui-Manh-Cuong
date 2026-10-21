@@ -222,16 +222,20 @@ class PaymentIntentService:
     ) -> dict[str, Any]:
         """
         Cơ chế Thử lại Thanh toán (Payment Retry) & Chuyển đổi Cổng thanh toán:
-        - Hủy giao dịch PENDING trước đó.
-        - Khởi tạo Intent mới với phương thức mong muốn (COD, MOMO, VIETQR).
+        - Sử dụng Row Locking (with_for_update) chống race condition.
+        - Kiểm tra trạng thái thanh toán mới nhất trước khi chuyển.
+        - Hủy link thanh toán đang mở trên cổng payOS nếu đổi phương thức.
+        - Hủy các giao dịch PENDING trước đó an toàn.
+        - Không tạo order_id mới: giữ nguyên mã đơn, danh sách thuốc, giá, kho và voucher.
         """
         clean_code = order_code.strip()
-        order = db.scalar(select(Order).where(Order.order_code == clean_code))
+        # Row locking chống race condition
+        order = db.scalar(select(Order).where(Order.order_code == clean_code).with_for_update())
         if not order:
             raise HTTPException(status_code=404, detail=f"Không tìm thấy đơn hàng '{clean_code}'.")
 
         if order.payment_status == "PAID":
-            raise HTTPException(status_code=400, detail="Đơn hàng này đã được thanh toán thành công, không thể thanh toán lại.")
+            raise HTTPException(status_code=400, detail="Đơn hàng này đã được thanh toán thành công, không thể thay đổi phương thức.")
 
         if order.order_status == "CANCELLED":
             raise HTTPException(status_code=400, detail="Đơn hàng này đã bị hủy, không thể tiếp tục thanh toán.")
@@ -249,6 +253,23 @@ class PaymentIntentService:
                 detail=f"Phương thức thanh toán '{new_payment_method}' không được hỗ trợ. Vui lòng chọn COD, payOS hoặc SEPAY.",
             )
 
+        if method == "PAYOS" and not getattr(settings, "is_payos_configured", False):
+            raise HTTPException(
+                status_code=503,
+                detail="Cổng thanh toán payOS hiện chưa được cấu hình sẵn sàng trên máy chủ. Vui lòng chọn COD hoặc SePay.",
+            )
+
+        # Nếu phương thức cũ là PAYOS và đang đổi sang phương thức khác -> Yêu cầu hủy link payOS đang mở
+        if order.payment_method == "PAYOS" and method != "PAYOS":
+            try:
+                PayOSPaymentService.cancel_payment_link(
+                    db=db,
+                    order=order,
+                    cancellation_reason=f"Khách hàng đổi sang phương thức {method}",
+                )
+            except Exception as e:
+                logger.warning(f"Lỗi khi hủy link payOS cũ: {e}")
+
         # Hủy các giao dịch đang PENDING của đơn hàng này
         pending_transactions = db.scalars(
             select(PaymentTransaction).where(
@@ -260,13 +281,20 @@ class PaymentIntentService:
             t.status = "CANCELLED"
             t.updated_at = utcnow()
 
+        # Vô hiệu hóa mã SePay cũ nếu đang đổi phương thức
+        if order.payment_method == "SEPAY" and method != "SEPAY":
+            from app.models.inventory import SepayPaymentCode
+            old_code = db.scalar(select(SepayPaymentCode).where(SepayPaymentCode.order_id == order.id))
+            if old_code:
+                old_code.status = "CANCELLED"
+
         db.commit()
 
-        # Tạo Payment Intent mới
+                # Tạo Payment Intent mới (hỗ trợ cả COD, SEPAY, PAYOS)
         return cls.create_intent(
             db=db,
             order_code=clean_code,
-            payment_method=new_payment_method,
+            payment_method=method,
             return_url=return_url,
         )
 
@@ -476,6 +504,24 @@ class PaymentIntentService:
                     "image_url": img_url,
                 })
 
+        # Kiểm tra tự động hết hạn intent (15 phút)
+        is_intent_expired = False
+        latest_expires_at = None
+        if latest_trans:
+            latest_expires_at = getattr(latest_trans, "expires_at", None)
+            if latest_expires_at:
+                exp_utc = latest_expires_at.replace(tzinfo=latest_expires_at.tzinfo or UTC)
+                if exp_utc <= utcnow():
+                    is_intent_expired = True
+                    if latest_trans.status == "PENDING" and latest_trans.provider in ("SEPAY", "PAYOS"):
+                        latest_trans.status = "EXPIRED"
+                        latest_trans.updated_at = utcnow()
+                        db.commit()
+
+        if sepay_details:
+            sepay_details["expires_at"] = latest_expires_at.isoformat() if latest_expires_at else None
+            sepay_details["is_expired"] = is_intent_expired
+
         return {
             "order_code": order.order_code,
             "payment_code": sepay_code,
@@ -491,6 +537,9 @@ class PaymentIntentService:
             "discount_amount": float(getattr(order, "discount_amount", 0) or 0),
             "items": serialized_items,
             "sepay_details": sepay_details,
+            "expires_at": latest_expires_at.isoformat() if latest_expires_at else None,
+            "is_expired": is_intent_expired,
+            "server_time": utcnow().isoformat(),
             "can_retry": can_retry,
             "latest_transaction": {
                 "id": latest_trans.id,

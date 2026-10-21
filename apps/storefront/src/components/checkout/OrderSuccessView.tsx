@@ -112,12 +112,18 @@ export default function OrderSuccessView({
           <div className="flex items-center justify-between">
             <span className="text-slate-500">Hình thức thanh toán:</span>
             <span className="font-semibold text-slate-900">
-              {order.payment_method === "MOMO" ? (
+              {order.payment_method === "SEPAY" ? (
+                <span className="inline-flex items-center gap-1 font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 text-xs">
+                  Chuyển khoản VietQR MBBank (SePay)
+                </span>
+              ) : order.payment_method === "PAYOS" ? (
+                <span className="inline-flex items-center gap-1 font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 text-xs">
+                  Cổng thanh toán payOS
+                </span>
+              ) : order.payment_method === "MOMO" ? (
                 <span className="inline-flex items-center gap-1 font-bold text-pink-700 bg-pink-50 px-2 py-0.5 rounded border border-pink-200 text-xs">
                   Ví điện tử MoMo
                 </span>
-              ) : order.payment_method === "BANK_TRANSFER" ? (
-                "Chuyển khoản VietQR"
               ) : (
                 "Tiền mặt khi nhận hàng (COD)"
               )}

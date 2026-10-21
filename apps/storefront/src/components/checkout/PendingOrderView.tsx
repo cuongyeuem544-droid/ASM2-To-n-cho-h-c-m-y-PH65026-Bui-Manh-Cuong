@@ -17,8 +17,9 @@ import {
   ShieldCheck,
   RefreshCw,
   ArrowRight,
+  CreditCard,
+  Loader2,
 } from "lucide-react";
-import { CartItem } from "./CartItemsTable";
 
 export interface PendingOrderData {
   orderCode: string;
@@ -32,13 +33,15 @@ export interface PendingOrderData {
   shippingFee?: number;
   discountAmount?: number;
   createdAt?: string;
+  expiresAt?: string;
   sepayData?: any;
 }
 
 interface PendingOrderViewProps {
   order: PendingOrderData;
   onReopenPayment: () => void;
-  onChangeMethodToCod: () => Promise<void>;
+  onChangePaymentMethod: () => void;
+  onRefreshPaymentCode?: () => Promise<void>;
   onCancelOrder: () => Promise<void>;
   onPaymentSuccess: () => void;
 }
@@ -46,16 +49,54 @@ interface PendingOrderViewProps {
 export default function PendingOrderView({
   order,
   onReopenPayment,
-  onChangeMethodToCod,
+  onChangePaymentMethod,
+  onRefreshPaymentCode,
   onCancelOrder,
   onPaymentSuccess,
 }: PendingOrderViewProps) {
   const [copiedCode, setCopiedCode] = useState(false);
-  const [isChangingMethod, setIsChangingMethod] = useState(false);
+  const [isRefreshingCode, setIsRefreshingCode] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [liveStatus, setLiveStatus] = useState<string>("PENDING");
+
+  // Calculate remaining seconds for 15-minute payment expiry
+  const effectiveExpiresAt = order.expiresAt || order.sepayData?.expiresAt;
+  const calculateSecondsLeft = () => {
+    if (!effectiveExpiresAt) return 15 * 60;
+    const diff = Math.floor((new Date(effectiveExpiresAt).getTime() - Date.now()) / 1000);
+    return Math.max(0, diff);
+  };
+
+  const [timeLeft, setTimeLeft] = useState<number>(calculateSecondsLeft);
+
+  useEffect(() => {
+    setTimeLeft(calculateSecondsLeft());
+  }, [effectiveExpiresAt]);
+
+  useEffect(() => {
+    if (order.paymentMethod === "COD") return;
+
+    const timer = setInterval(() => {
+      if (effectiveExpiresAt) {
+        const diff = Math.floor((new Date(effectiveExpiresAt).getTime() - Date.now()) / 1000);
+        setTimeLeft(Math.max(0, diff));
+      } else {
+        setTimeLeft((prev) => Math.max(0, prev - 1));
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [order.paymentMethod, effectiveExpiresAt]);
+
+  const isExpired = order.paymentMethod !== "COD" && timeLeft <= 0;
+
+  const formatCountdown = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  };
 
   // Live polling kiểm tra trạng thái thanh toán từ backend
   useEffect(() => {
@@ -64,7 +105,9 @@ export default function PendingOrderView({
       try {
         const token =
           typeof window !== "undefined"
-            ? localStorage.getItem("h4care_auth_token") || localStorage.getItem("pharmatrust_token")
+            ? localStorage.getItem("pharmatrust_access_token") ||
+              localStorage.getItem("h4care_auth_token") ||
+              localStorage.getItem("pharmatrust_token")
             : null;
         const orderToken =
           order.orderToken ||
@@ -84,12 +127,9 @@ export default function PendingOrderView({
 
         if (res.ok && isMounted) {
           const data = await res.json();
-          setLiveStatus(data.payment_status || data.order_status || "PENDING");
-          if (
-            data.payment_status === "PAID" ||
-            data.status === "PAID" ||
-            data.order_status === "CONFIRMED"
-          ) {
+          setLiveStatus(data.payment_status || "PENDING");
+          // CHỈ COI LÀ THÀNH CÔNG KHI PAYMENT_STATUS == 'PAID' (KHÔNG DÙNG CONFIRMED!)
+          if (data.payment_status === "PAID" || data.status === "PAID") {
             onPaymentSuccess();
           }
         }
@@ -110,15 +150,19 @@ export default function PendingOrderView({
     setTimeout(() => setCopiedCode(false), 2000);
   };
 
-  const handleSwitchToCod = async () => {
+  const handleRefreshCode = async () => {
+    if (!onRefreshPaymentCode) {
+      onChangePaymentMethod();
+      return;
+    }
     try {
-      setIsChangingMethod(true);
+      setIsRefreshingCode(true);
       setErrorMessage(null);
-      await onChangeMethodToCod();
+      await onRefreshPaymentCode();
     } catch (err: any) {
-      setErrorMessage(err?.message || "Không thể chuyển đổi phương thức thanh toán. Vui lòng thử lại.");
+      setErrorMessage(err?.message || "Không thể tạo mã mới. Vui lòng thử lại.");
     } finally {
-      setIsChangingMethod(false);
+      setIsRefreshingCode(false);
     }
   };
 
@@ -183,15 +227,50 @@ export default function PendingOrderView({
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Primary Action Card */}
         <div className="md:col-span-2 p-5 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-4">
-          <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-            Phương thức đã chọn:{" "}
-            {order.paymentMethod === "SEPAY"
-              ? "Chuyển khoản VietQR MBBank (SePay)"
-              : order.paymentMethod === "PAYOS"
-              ? "Cổng thanh toán payOS"
-              : "Thanh toán khi nhận hàng (COD)"}
-          </h2>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+              Phương thức đã chọn:{" "}
+              {order.paymentMethod === "SEPAY"
+                ? "Chuyển khoản VietQR MBBank (SePay)"
+                : order.paymentMethod === "PAYOS"
+                ? "Cổng thanh toán payOS"
+                : "Thanh toán khi nhận hàng (COD)"}
+            </h2>
+
+            {/* Live Countdown Badge */}
+            {order.paymentMethod !== "COD" && (
+              <div
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono font-bold border ${
+                  isExpired
+                    ? "bg-rose-50 text-rose-700 border-rose-300"
+                    : timeLeft <= 60
+                    ? "bg-rose-50 text-rose-700 border-rose-300 animate-pulse"
+                    : timeLeft <= 300
+                    ? "bg-amber-50 text-amber-800 border-amber-300"
+                    : "bg-slate-100 text-slate-700 border-slate-200"
+                }`}
+              >
+                <Clock className="w-3.5 h-3.5" />
+                <span>
+                  {isExpired ? "Hết hạn thanh toán" : `Còn lại: ${formatCountdown(timeLeft)}`}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Expired Warning Notice */}
+          {isExpired && (
+            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs space-y-1">
+              <div className="flex items-center gap-1.5 font-bold">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>Mã thanh toán 15 phút đã hết hạn</span>
+              </div>
+              <p className="text-[11px] text-rose-700 leading-relaxed">
+                Đơn hàng và tồn kho vẫn được bảo lưu trong thời gian gia hạn 30 phút. Vui lòng bấm &quot;Tạo mã thanh toán mới&quot; hoặc &quot;Đổi phương thức thanh toán&quot; để tiếp tục hoàn tất.
+              </p>
+            </div>
+          )}
 
           <div className="p-4 rounded-xl bg-emerald-50/70 border border-emerald-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div>
@@ -205,15 +284,33 @@ export default function PendingOrderView({
             </div>
 
             {order.paymentMethod === "SEPAY" && (
-              <button
-                type="button"
-                onClick={onReopenPayment}
-                className="w-full sm:w-auto px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-sm transition-all active:scale-98"
-              >
-                <QrCode className="w-4 h-4" />
-                <span>Mở lại mã VietQR</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                {isExpired ? (
+                  <button
+                    type="button"
+                    onClick={handleRefreshCode}
+                    disabled={isRefreshingCode}
+                    className="w-full sm:w-auto px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
+                  >
+                    {isRefreshingCode ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="w-4 h-4" />
+                    )}
+                    <span>Tạo mã thanh toán mới</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={onReopenPayment}
+                    className="w-full sm:w-auto px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-sm transition-all active:scale-98 cursor-pointer"
+                  >
+                    <QrCode className="w-4 h-4" />
+                    <span>Mở lại mã VietQR</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
             )}
           </div>
 
@@ -221,21 +318,18 @@ export default function PendingOrderView({
           <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
             <button
               type="button"
-              onClick={handleSwitchToCod}
-              disabled={isChangingMethod}
-              className="px-4 py-2.5 rounded-xl border border-brand-blue-300 bg-brand-blue-50/50 hover:bg-brand-blue-100/70 text-brand-blue-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
+              onClick={onChangePaymentMethod}
+              className="px-4 py-2.5 rounded-xl border border-brand-blue-300 bg-brand-blue-50/50 hover:bg-brand-blue-100/70 text-brand-blue-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
             >
-              <Banknote className="w-4 h-4 text-brand-blue-600" />
-              <span>
-                {isChangingMethod ? "Đang chuyển đổi..." : "Đổi sang nhận hàng thanh toán (COD)"}
-              </span>
+              <CreditCard className="w-4 h-4 text-brand-blue-600" />
+              <span>Đổi phương thức thanh toán</span>
             </button>
 
             <button
               type="button"
               onClick={() => setShowCancelConfirm(true)}
               disabled={isCancelling}
-              className="px-4 py-2.5 rounded-xl text-slate-500 hover:text-rose-600 hover:bg-rose-50 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+              className="px-4 py-2.5 rounded-xl text-slate-500 hover:text-rose-600 hover:bg-rose-50 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
             >
               <XCircle className="w-4 h-4" />
               <span>Hủy đơn hàng</span>
@@ -278,87 +372,86 @@ export default function PendingOrderView({
 
         <div className="divide-y divide-slate-100 border border-slate-100 rounded-xl overflow-hidden">
           {order.items?.map((item: any, idx: number) => {
-            const itemImg = item.image || item.image_url;
-            const itemName = item.name || item.product_name || "Thuốc";
+            const price = item.salePrice || item.price || 0;
+            const subtotal = price * item.quantity;
             return (
-            <div key={item.id || idx} className="p-3.5 flex items-center justify-between gap-3 bg-white">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center overflow-hidden shrink-0">
-                  {itemImg ? (
-                    <Image
-                      src={itemImg}
-                      alt={itemName}
-                      width={48}
-                      height={48}
-                      className="w-full h-full object-cover"
-                      unoptimized
-                    />
-                  ) : (
-                    <Package className="w-6 h-6 text-slate-400" />
-                  )}
-                </div>
-                <div>
-                  <h3 className="text-xs sm:text-sm font-bold text-slate-900 line-clamp-1">
-                    {itemName}
-                  </h3>
-                  <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
-                    <span>Số lượng: {item.quantity}</span>
-                    <span>•</span>
-                    <span>Đơn giá: {(item.price || 0).toLocaleString("vi-VN")} đ</span>
+              <div key={item.id || idx} className="p-3.5 flex items-center justify-between gap-3 bg-white">
+                <div className="flex items-center gap-3">
+                  <div className="relative w-12 h-12 rounded-lg bg-slate-50 border border-slate-200 overflow-hidden shrink-0">
+                    {item.image ? (
+                      <Image
+                        src={item.image}
+                        alt={item.name}
+                        fill
+                        className="object-cover"
+                        sizes="48px"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-slate-400">
+                        <Package className="w-5 h-5" />
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-xs text-slate-900 line-clamp-1">{item.name}</h3>
+                    <p className="text-[11px] text-slate-500">
+                      {item.unit || item.packaging} • SL: <span className="font-bold text-slate-800">{item.quantity}</span>
+                    </p>
                   </div>
                 </div>
-              </div>
 
-              <div className="text-right shrink-0">
-                <span className="text-xs sm:text-sm font-bold text-slate-900">
-                  {((item.price || 0) * (item.quantity || 1)).toLocaleString("vi-VN")} đ
-                </span>
+                <div className="text-right">
+                  <span className="font-bold text-xs text-slate-900">
+                    {subtotal.toLocaleString("vi-VN")} đ
+                  </span>
+                  <p className="text-[10px] text-slate-500">
+                    {price.toLocaleString("vi-VN")} đ / {item.unit || item.packaging}
+                  </p>
+                </div>
               </div>
-            </div>
             );
           })}
         </div>
       </div>
 
-      {/* Cancel Confirmation Modal */}
+      {/* Cancel Order Confirmation Modal */}
       {showCancelConfirm && (
-        <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">
-          <div className="w-full max-w-md bg-white rounded-2xl p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4">
-            <div className="flex items-center gap-3 text-rose-600">
-              <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-sm sm:text-base font-bold text-slate-900">
-                  Xác nhận hủy đơn hàng #{order.orderCode}
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Hành động này sẽ giải phóng tồn kho thuốc cho khách hàng khác.
-                </p>
-              </div>
+        <div className="fixed inset-0 z-[1200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-2xs animate-in fade-in">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 space-y-4">
+            <div className="w-11 h-11 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+              <AlertTriangle className="w-6 h-6" />
             </div>
 
-            <p className="text-xs text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-200 leading-relaxed">
-              Bạn có chắc chắn muốn hủy đơn hàng này? Bạn có thể đổi sang phương thức <strong>COD (Thanh toán khi nhận hàng)</strong> thay vì hủy bỏ.
-            </p>
+            <div className="text-center space-y-1">
+              <h3 className="text-base font-black text-slate-900">Xác nhận hủy đơn hàng</h3>
+              <p className="text-xs text-slate-600">
+                Toàn bộ sản phẩm sẽ được hoàn về giỏ hàng để bạn có thể tiếp tục mua sắm mà không bị mất lựa chọn. Tồn kho giữ chỗ sẽ được giải phóng cho khách hàng khác.
+              </p>
+            </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2">
+            <div className="flex items-center gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setShowCancelConfirm(false)}
                 disabled={isCancelling}
-                className="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 text-xs font-semibold hover:bg-slate-50 transition-colors"
+                className="flex-1 py-2 px-3 rounded-xl border border-slate-200 text-slate-700 font-bold text-xs hover:bg-slate-50 transition-colors"
               >
-                Giữ đơn hàng
+                Quay lại
               </button>
               <button
                 type="button"
                 onClick={handleConfirmCancel}
                 disabled={isCancelling}
-                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs disabled:opacity-50"
+                className="flex-1 py-2 px-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
               >
-                {isCancelling ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
-                <span>{isCancelling ? "Đang hủy..." : "Xác nhận hủy"}</span>
+                {isCancelling ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Đang hủy...</span>
+                  </>
+                ) : (
+                  <span>Đồng ý hủy</span>
+                )}
               </button>
             </div>
           </div>

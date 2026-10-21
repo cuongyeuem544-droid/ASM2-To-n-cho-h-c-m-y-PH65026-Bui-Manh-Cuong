@@ -2,7 +2,7 @@ import json
 import logging
 import threading
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Optional
 
@@ -77,6 +77,8 @@ class PayOSPaymentService:
                 record = PayosOrderCode(
                     order_id=order_id,
                     order_code_num=candidate_code,
+                    status="ACTIVE",
+                    expires_at=datetime.now(UTC) + timedelta(minutes=settings.payment_expiry_minutes),
                 )
                 db.add(record)
                 db.flush()
@@ -153,6 +155,7 @@ class PayOSPaymentService:
 
         # Mô tả giao dịch cho payOS (tối đa 25 ký tự)
         desc_text = f"DH {order.order_code}".strip()[:25]
+        expires_at = datetime.now(UTC) + timedelta(minutes=settings.payment_expiry_minutes)
 
         payment_data = CreatePaymentLinkRequest(
             order_code=payos_order_code,
@@ -164,6 +167,7 @@ class PayOSPaymentService:
             buyer_name=order.customer_name[:50] if order.customer_name else None,
             buyer_phone=order.customer_phone[:20] if order.customer_phone else None,
             buyer_address=order.shipping_address[:100] if order.shipping_address else None,
+            expired_at=int(expires_at.timestamp()),
         )
 
         try:
@@ -206,12 +210,15 @@ class PayOSPaymentService:
                 provider_trans_id=str(payos_order_code),
                 provider_pay_url=getattr(res, "checkout_url", None),
                 provider_response_raw=json.dumps(metadata, ensure_ascii=False),
+                expires_at=expires_at,
             )
             db.add(trans)
         else:
             trans.amount = Decimal(str(amount))
+            trans.status = "PENDING"
             trans.provider_pay_url = getattr(res, "checkout_url", None)
             trans.provider_response_raw = json.dumps(metadata, ensure_ascii=False)
+            trans.expires_at = expires_at
             trans.updated_at = utcnow()
 
         order.payment_method = "PAYOS"
@@ -237,6 +244,7 @@ class PayOSPaymentService:
             "bin": getattr(res, "bin", None),
             "payment_link_id": getattr(res, "payment_link_id", None),
             "instructions": f"Quét mã VietQR trên ứng dụng ngân hàng hoặc mở cổng payOS để thanh toán {amount:,} đ.",
+            "expires_at": expires_at.isoformat(),
         }
 
     @classmethod
@@ -627,6 +635,42 @@ class PayOSPaymentService:
                 "message": f"Giao dịch payOS kết thúc với trạng thái {code}.",
                 "order_code": order.order_code,
             }
+
+    @classmethod
+    def cancel_payment_link(
+        cls,
+        db: Session,
+        order: Order,
+        cancellation_reason: str = "Khách hàng đổi phương thức hoặc hủy đơn",
+    ) -> None:
+        """Hủy link thanh toán đang mở trên cổng payOS để tránh khách hàng thanh toán nhầm."""
+        if not getattr(settings, "is_payos_configured", False):
+            return
+
+        poc = db.scalar(
+            select(PayosOrderCode)
+            .where(
+                PayosOrderCode.order_id == order.id,
+                PayosOrderCode.status == "ACTIVE",
+            )
+            .order_by(desc(PayosOrderCode.id))
+        )
+        if not poc:
+            return
+
+        try:
+            client = cls.get_client()
+            client.payment_requests.cancel(
+                id=poc.order_code_num,
+                cancellation_reason=cancellation_reason[:100],
+            )
+            poc.status = "CANCELLED"
+            db.commit()
+            logger.info(f"[PAYOS CANCEL] Đã hủy link payos_order_code={poc.order_code_num} cho đơn {order.order_code}")
+        except Exception as e:
+            logger.warning(f"[PAYOS CANCEL] Không thể hủy link trên cổng payOS (link có thể đã hết hạn/đã đóng): {e}")
+            poc.status = "CANCELLED"
+            db.commit()
 
     @classmethod
     def check_payment_status(cls, db: Session, order_code: str) -> dict[str, Any]:

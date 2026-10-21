@@ -394,6 +394,7 @@ class PaymentTransaction(Base):
     provider_trans_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     provider_pay_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     provider_response_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -418,6 +419,8 @@ class PayosOrderCode(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"), index=True)
     order_code_num: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(50), default="ACTIVE", server_default="ACTIVE")
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -429,6 +432,8 @@ class SepayPaymentCode(Base):
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"), unique=True, index=True)
     payment_code: Mapped[str] = mapped_column(String(20), unique=True, index=True)
     code_number: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(50), default="ACTIVE", server_default="ACTIVE")
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
