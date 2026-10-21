@@ -1332,13 +1332,18 @@ class PlacesService:
                     for b in boundaries:
                         if not isinstance(b, dict):
                             continue
-                        b_type = (b.get("type") or "").lower()
+                        raw_type = b.get("type")
+                        b_type = str(raw_type or "").lower().strip()
+                        b_prefix = str(b.get("prefix") or "").lower().strip()
                         b_name = (b.get("name") or "").strip()
-                        if b_type == "ward":
+                        if not b_name:
+                            continue
+
+                        if raw_type == 3 or b_type == "ward" or b_prefix in ["phường", "xã", "thị trấn"]:
                             ward_name = b_name
-                        elif b_type in ["district", "county"]:
+                        elif raw_type == 2 or b_type in ["district", "county"] or b_prefix in ["quận", "huyện", "thị xã", "thành phố (thuộc tỉnh)"]:
                             district_name = b_name
-                        elif b_type in ["city", "province", "state"]:
+                        elif raw_type == 1 or b_type in ["city", "province", "state"] or b_prefix in ["thành phố", "tỉnh"]:
                             city_name = b_name
 
                 data_new = item.get("data_new") or {}
