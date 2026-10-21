@@ -85,7 +85,12 @@ async def validation_exception_handler(request, exc: RequestValidationError):
     return JSONResponse(status_code=422, content={"detail": detail_str, "errors": jsonable_encoder(exc.errors())})
 
 
-web_dist_dir = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
+from app.core.config import _REPO_ROOT
+web_dist_dir = (
+    _REPO_ROOT / "apps" / "web" / "dist"
+    if (_REPO_ROOT / "apps" / "web" / "dist").exists()
+    else _REPO_ROOT / "web" / "dist"
+)
 assets_dir = web_dist_dir / "assets"
 index_html = web_dist_dir / "index.html"
 

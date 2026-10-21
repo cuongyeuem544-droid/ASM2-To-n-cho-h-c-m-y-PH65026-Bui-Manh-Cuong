@@ -439,7 +439,8 @@ def update_provider_api_key(
 
     # 2. Ghi đè hoặc thêm vào file .env ở thư mục gốc
     try:
-        repo_root = Path(__file__).resolve().parent.parent.parent.parent.parent
+        from app.core.config import _REPO_ROOT
+        repo_root = _REPO_ROOT
         env_file = repo_root / ".env"
         if env_file.exists():
             content = env_file.read_text(encoding="utf-8")

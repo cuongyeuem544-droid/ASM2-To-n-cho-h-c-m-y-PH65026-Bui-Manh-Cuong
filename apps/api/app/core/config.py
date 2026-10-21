@@ -7,8 +7,50 @@ from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
-_REPO_ROOT = Path(__file__).resolve().parents[4]
-_ENV_FILES = (_REPO_ROOT / ".env", _REPO_ROOT / "apps" / "api" / ".env", ".env")
+def _resolve_repo_root() -> Path:
+    """Xác định an toàn thư mục gốc dự án hoặc thư mục triển khai Backend.
+    
+    Tương thích cả 2 môi trường:
+    - Local monorepo: <root>/apps/api/app/core/config.py (5 cấp thư mục)
+    - Docker container: /app/app/core/config.py (3 cấp thư mục)
+    Tuyệt đối không truy cập trực tiếp parents[4] để tránh IndexError trên Linux/Docker.
+    """
+    file_path = Path(__file__).resolve()
+    for parent in file_path.parents:
+        if (parent / ".git").exists() or (parent / "apps" / "api").exists():
+            return parent
+    if len(file_path.parents) >= 3:
+        return file_path.parents[2]
+    return file_path.parent
+
+
+_REPO_ROOT = _resolve_repo_root()
+
+
+def _resolve_env_files() -> tuple[Path, ...]:
+    """Tìm danh sách các file .env ứng viên theo thứ tự ưu tiên."""
+    candidates = [
+        Path.cwd() / ".env",
+        _REPO_ROOT / ".env",
+        _REPO_ROOT / "apps" / "api" / ".env",
+        Path(".env"),
+    ]
+    seen = set()
+    env_files = []
+    for c in candidates:
+        try:
+            resolved = c.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                env_files.append(c)
+        except Exception:
+            if c not in seen:
+                seen.add(c)
+                env_files.append(c)
+    return tuple(env_files)
+
+
+_ENV_FILES = _resolve_env_files()
 
 
 class Settings(BaseSettings):
