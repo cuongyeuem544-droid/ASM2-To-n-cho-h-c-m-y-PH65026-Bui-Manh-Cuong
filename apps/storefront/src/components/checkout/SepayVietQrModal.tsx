@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import Link from "next/link";
 import {
   QrCode,
   Copy,
@@ -15,6 +16,8 @@ import {
   AlertTriangle,
   Clock,
   Loader2,
+  ExternalLink,
+  XCircle,
 } from "lucide-react";
 
 interface SepayVietQrModalProps {
@@ -30,6 +33,7 @@ interface SepayVietQrModalProps {
   onClose: () => void;
   onChangeMethod?: () => void;
   onRefreshQr?: () => Promise<void>;
+  onCancelOrder?: () => Promise<void>;
   onSuccess: () => void;
 }
 
@@ -46,12 +50,16 @@ export default function SepayVietQrModal({
   onClose,
   onChangeMethod,
   onRefreshQr,
+  onCancelOrder,
   onSuccess,
 }: SepayVietQrModalProps) {
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [isPaid, setIsPaid] = useState(false);
   const [pollingCount, setPollingCount] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   const bankName = propBankName || "Ngân hàng TMCP Quân Đội (MBBank)";
   const accountNumber = propAccountNumber || "";
@@ -173,6 +181,21 @@ export default function SepayVietQrModal({
     }
   };
 
+  const handleCancelOrderAction = async () => {
+    if (!onCancelOrder) return;
+    try {
+      setIsCancelling(true);
+      setCancelError(null);
+      await onCancelOrder();
+      setShowCancelConfirm(false);
+      onClose();
+    } catch (err: any) {
+      setCancelError(err?.message || "Không thể hủy đơn hàng.");
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[1000] flex items-center justify-center p-3 sm:p-4 bg-slate-900/70 backdrop-blur-xs animate-in fade-in duration-200">
       <div className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
@@ -194,14 +217,25 @@ export default function SepayVietQrModal({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition-colors"
-            title="Đóng cửa sổ"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-1.5">
+            <Link
+              href={`/checkout/payment/${encodeURIComponent(orderCode)}`}
+              target="_blank"
+              className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition-colors"
+              title="Mở toàn màn hình trang thanh toán"
+            >
+              <ExternalLink className="w-4 h-4" />
+            </Link>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition-colors"
+              title="Đóng cửa sổ"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Scrollable Body */}
@@ -416,18 +450,31 @@ export default function SepayVietQrModal({
 
         {/* Footer Actions */}
         <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-2 shrink-0">
-          {!isExpired && vietQrUrl && (
-            <a
-              href={vietQrUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              download={`VietQR_MBBank_${orderCode}.png`}
-              className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
-            >
-              <Download className="w-4 h-4" />
-              <span>Tải ảnh QR</span>
-            </a>
-          )}
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            {!isExpired && vietQrUrl && (
+              <a
+                href={vietQrUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                download={`VietQR_MBBank_${orderCode}.png`}
+                className="w-full sm:w-auto px-3.5 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                <span>Tải QR</span>
+              </a>
+            )}
+
+            {!isPaid && onCancelOrder && (
+              <button
+                type="button"
+                onClick={() => setShowCancelConfirm(true)}
+                className="w-full sm:w-auto px-3 py-2.5 rounded-xl text-slate-500 hover:text-rose-600 hover:bg-rose-50 text-xs font-semibold flex items-center justify-center gap-1 transition-colors cursor-pointer"
+              >
+                <XCircle className="w-3.5 h-3.5" />
+                <span>Hủy đơn</span>
+              </button>
+            )}
+          </div>
 
           {isPaid ? (
             <button
@@ -459,13 +506,66 @@ export default function SepayVietQrModal({
               <button
                 type="button"
                 onClick={onChangeMethod || onClose}
-                className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold text-xs transition-colors hover:border-slate-400"
+                className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold text-xs transition-colors hover:border-slate-400 cursor-pointer"
               >
                 Đổi phương thức khác
               </button>
             </div>
           )}
         </div>
+
+        {/* Cancel Confirmation Dialog */}
+        {showCancelConfirm && (
+          <div className="absolute inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+            <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 space-y-4">
+              <div className="w-11 h-11 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+
+              <div className="text-center space-y-1">
+                <h3 className="text-base font-black text-slate-900">Xác nhận hủy đơn hàng</h3>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Bạn có chắc chắn muốn hủy đơn hàng <strong>#{orderCode}</strong> không? Các mặt hàng thuốc giữ chỗ tại kho sẽ được giải phóng ngay lập tức cho khách hàng khác.
+                </p>
+              </div>
+
+              {cancelError && (
+                <p className="text-xs text-rose-600 font-medium text-center bg-rose-50 p-2 rounded-lg border border-rose-200">
+                  {cancelError}
+                </p>
+              )}
+
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCancelConfirm(false);
+                    setCancelError(null);
+                  }}
+                  disabled={isCancelling}
+                  className="flex-1 py-2 px-3 rounded-xl border border-slate-200 text-slate-700 font-bold text-xs hover:bg-slate-50 transition-colors"
+                >
+                  Không, quay lại
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancelOrderAction}
+                  disabled={isCancelling}
+                  className="flex-1 py-2 px-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  {isCancelling ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Đang hủy...</span>
+                    </>
+                  ) : (
+                    <span>Xác nhận hủy</span>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import {
   Clock,
   QrCode,
@@ -300,15 +301,24 @@ export default function PendingOrderView({
                     <span>Tạo mã thanh toán mới</span>
                   </button>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={onReopenPayment}
-                    className="w-full sm:w-auto px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-sm transition-all active:scale-98 cursor-pointer"
-                  >
-                    <QrCode className="w-4 h-4" />
-                    <span>Mở lại mã VietQR</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
+                  <div className="flex flex-col sm:flex-row items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={onReopenPayment}
+                      className="w-full sm:w-auto px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-sm transition-all active:scale-98 cursor-pointer"
+                    >
+                      <QrCode className="w-4 h-4" />
+                      <span>Mở lại mã VietQR</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+
+                    <Link
+                      href={`/checkout/payment/${encodeURIComponent(order.orderCode)}`}
+                      className="w-full sm:w-auto px-4 py-3 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                    >
+                      <span>Trang thanh toán riêng</span>
+                    </Link>
+                  </div>
                 )}
               </div>
             )}

@@ -169,7 +169,7 @@ class TestPaymentExpiryAndLifecycle:
         payload = {
             "id": sepay_id,
             "gateway": "MBBank",
-            "accountNumber": settings.sepay_account_number or "68207111222333",
+            "accountNumber": settings.sepay_account_number or "0901234567",
             "transferType": "in",
             "transferAmount": 350000,
             "code": code_obj.payment_code,
@@ -211,7 +211,7 @@ class TestPaymentExpiryAndLifecycle:
         payload = {
             "id": sepay_id,
             "gateway": "MBBank",
-            "accountNumber": settings.sepay_account_number or "68207111222333",
+            "accountNumber": settings.sepay_account_number or "0901234567",
             "transferType": "in",
             "transferAmount": 400000,
             "code": code_obj.payment_code,

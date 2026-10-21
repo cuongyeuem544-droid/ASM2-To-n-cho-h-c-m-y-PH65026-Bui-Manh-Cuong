@@ -474,13 +474,25 @@ class PaymentIntentService:
         if order.payment_method == "SEPAY":
             sepay_code = db.scalar(select(SepayPaymentCode.payment_code).where(SepayPaymentCode.order_id == order.id))
             if sepay_code:
-                acc_num = (getattr(settings, "sepay_account_number", "") or "68207111222333").strip()
-                acc_holder = (getattr(settings, "sepay_account_holder", "") or "LAI HOANG PHI HUNG").strip()
+                acc_num = (getattr(settings, "sepay_account_number", "") or "").strip()
+                acc_holder = (getattr(settings, "sepay_account_holder", "") or "").strip()
+                bank_name = (getattr(settings, "sepay_bank_name", "") or "Ngân hàng TMCP Quân Đội (MBBank)").strip()
                 amt = int(order.total_amount)
-                qr_url = f"https://img.vietqr.io/image/MB-{acc_num}-compact2.png?amount={amt}&addInfo={sepay_code}&accountName={urllib.parse.quote(acc_holder)}"
+                from app.services.sepay_service import SepayService
+                qr_url = (
+                    SepayService.generate_vietqr_url(
+                        amount=amt,
+                        payment_code=sepay_code,
+                        bank_id=settings.sepay_bank_id,
+                        account_number=acc_num,
+                        account_holder=acc_holder,
+                    )
+                    if acc_num and acc_holder
+                    else None
+                )
                 sepay_details = {
                     "payment_code": sepay_code,
-                    "bank_name": "Ngân hàng TMCP Quân Đội (MBBank)",
+                    "bank_name": bank_name,
                     "account_number": acc_num,
                     "account_holder": acc_holder,
                     "qr_code_url": qr_url,
@@ -522,6 +534,26 @@ class PaymentIntentService:
             sepay_details["expires_at"] = latest_expires_at.isoformat() if latest_expires_at else None
             sepay_details["is_expired"] = is_intent_expired
 
+        payos_details = None
+        if order.payment_method == "PAYOS" and latest_trans and latest_trans.provider == "PAYOS":
+            metadata = {}
+            if latest_trans.provider_response_raw:
+                try:
+                    metadata = json.loads(latest_trans.provider_response_raw)
+                except Exception:
+                    pass
+            payos_details = {
+                "checkout_url": latest_trans.provider_pay_url,
+                "qr_code_url": metadata.get("qr_code"),
+                "account_number": metadata.get("account_number"),
+                "account_name": metadata.get("account_name"),
+                "bin": metadata.get("bin"),
+                "payos_order_code": metadata.get("payos_order_code") or latest_trans.provider_trans_id,
+                "amount": float(latest_trans.amount),
+                "expires_at": latest_expires_at.isoformat() if latest_expires_at else None,
+                "is_expired": is_intent_expired,
+            }
+
         return {
             "order_code": order.order_code,
             "payment_code": sepay_code,
@@ -537,6 +569,7 @@ class PaymentIntentService:
             "discount_amount": float(getattr(order, "discount_amount", 0) or 0),
             "items": serialized_items,
             "sepay_details": sepay_details,
+            "payos_details": payos_details,
             "expires_at": latest_expires_at.isoformat() if latest_expires_at else None,
             "is_expired": is_intent_expired,
             "server_time": utcnow().isoformat(),

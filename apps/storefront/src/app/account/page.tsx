@@ -36,6 +36,7 @@ import {
   AlertCircle,
   Search,
   ChevronLeft,
+  ArrowRight,
 } from "lucide-react";
 import { CustomerAddressBook } from "@/components/account/CustomerAddressBook";
 import { CustomerReturnsSection } from "@/components/returns/CustomerReturnsSection";
@@ -1160,14 +1161,23 @@ export default function AccountPage() {
               {selectedOrder.payment_status !== "PAID" && selectedOrder.order_status !== "CANCELLED" && (
                 <div className="pt-2 border-t border-blue-200/60 space-y-2">
                   <span className="text-[11px] font-bold text-slate-700 block">Thanh toán hoặc đổi phương thức:</span>
-                  <div>
+                  <div className="space-y-1.5">
+                    <Link
+                      href={`/checkout/payment/${encodeURIComponent(selectedOrder.order_code)}`}
+                      className="w-full py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-xs cursor-pointer"
+                    >
+                      <QrCode className="w-4 h-4" />
+                      <span>Trang thanh toán trực tuyến (SePay VietQR / payOS)</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </Link>
+
                     <button
                       type="button"
                       onClick={() => handleOpenPayOS(selectedOrder.order_code)}
-                      className="w-full py-2.5 px-3 rounded-xl bg-brand-blue-600 hover:bg-brand-blue-700 text-white font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-xs cursor-pointer"
+                      className="w-full py-2 px-3 rounded-xl bg-brand-blue-50 hover:bg-brand-blue-100 text-brand-blue-700 border border-brand-blue-200 font-bold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
                     >
-                      <span className="w-4 h-4 rounded-full bg-white text-brand-blue-600 flex items-center justify-center text-[9px] font-black shrink-0">P</span>
-                      <span>Thanh toán Cổng payOS (QR Ngân hàng / Napas 247)</span>
+                      <span className="w-4 h-4 rounded-full bg-brand-blue-600 text-white flex items-center justify-center text-[9px] font-black shrink-0">P</span>
+                      <span>Mở link thanh toán Cổng payOS</span>
                     </button>
                   </div>
 

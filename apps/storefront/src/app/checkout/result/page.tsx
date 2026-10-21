@@ -411,11 +411,20 @@ function CheckoutResultContent() {
               </>
             ) : (
               <>
+                <Link
+                  href={`/checkout/payment/${encodeURIComponent(cleanOrderCode)}`}
+                  className="w-full sm:w-auto px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <QrCode className="w-4 h-4" />
+                  <span>Trang thanh toán trực tuyến</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
+
                 <button
                   type="button"
                   disabled={isRetrying || isCancellingOrder}
                   onClick={handleSwitchToCod}
-                  className="w-full sm:w-auto px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  className="w-full sm:w-auto px-5 py-3 rounded-xl border border-emerald-300 bg-emerald-50/80 hover:bg-emerald-100/80 text-emerald-800 font-bold text-xs shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                 >
                   {isRetrying ? (
                     <>
@@ -424,7 +433,7 @@ function CheckoutResultContent() {
                     </>
                   ) : (
                     <>
-                      <Banknote className="w-4 h-4" />
+                      <Banknote className="w-4 h-4 text-emerald-600" />
                       <span>Chuyển sang trả khi nhận hàng (COD)</span>
                     </>
                   )}
@@ -526,11 +535,20 @@ function CheckoutResultContent() {
 
           {/* Action buttons including 1-click switch to COD */}
           <div className="mt-8 flex flex-col sm:flex-row flex-wrap items-center justify-center gap-3">
+            <Link
+              href={`/checkout/payment/${encodeURIComponent(cleanOrderCode)}`}
+              className="w-full sm:w-auto px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <QrCode className="w-4 h-4" />
+              <span>Trang thanh toán trực tuyến</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+
             <button
               type="button"
               disabled={isRetrying || isCancellingOrder}
               onClick={handleSwitchToCod}
-              className="w-full sm:w-auto px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              className="w-full sm:w-auto px-5 py-3 rounded-xl border border-emerald-300 bg-emerald-50/80 hover:bg-emerald-100/80 text-emerald-800 font-bold text-xs shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
               {isRetrying ? (
                 <>
@@ -539,7 +557,7 @@ function CheckoutResultContent() {
                 </>
               ) : (
                 <>
-                  <Banknote className="w-4 h-4" />
+                  <Banknote className="w-4 h-4 text-emerald-600" />
                   <span>Chuyển sang trả khi nhận hàng (COD)</span>
                 </>
               )}
