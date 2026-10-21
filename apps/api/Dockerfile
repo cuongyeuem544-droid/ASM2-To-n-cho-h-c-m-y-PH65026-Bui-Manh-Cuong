@@ -14,6 +14,5 @@ RUN pip install -r requirements.txt
 COPY . .
 RUN mkdir -p /app/storage/raw /app/storage/uploads
 
-EXPOSE 8000
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
-
+EXPOSE 10000
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000}"]
