@@ -12,8 +12,18 @@ from app.services.normalization import normalize_for_match, strip_accents
 logger = logging.getLogger("pharmatrust.search")
 
 
+def _is_sqlite(db: Session) -> bool:
+    try:
+        bind = db.get_bind()
+        return bind is not None and getattr(bind.dialect, "name", "") == "sqlite"
+    except Exception:
+        return False
+
+
 def init_fts_table(db: Session) -> None:
-    """Khởi tạo bảng ảo FTS5 cho tìm kiếm toàn văn thuốc nếu chưa có."""
+    """Khởi tạo bảng ảo FTS5 cho tìm kiếm toàn văn thuốc nếu dùng SQLite."""
+    if not _is_sqlite(db):
+        return
     try:
         db.execute(text("""
             CREATE VIRTUAL TABLE IF NOT EXISTS products_fts USING fts5(
@@ -35,7 +45,9 @@ def init_fts_table(db: Session) -> None:
 
 
 def index_single_product(db: Session, product: CanonicalProduct) -> None:
-    """Cập nhật chỉ mục FTS5 cho một sản phẩm."""
+    """Cập nhật chỉ mục FTS5 cho một sản phẩm (chỉ trên SQLite)."""
+    if not _is_sqlite(db):
+        return
     try:
         # Chuẩn bị dữ liệu hoạt chất
         ingredients_list = []
@@ -85,7 +97,9 @@ def index_single_product(db: Session, product: CanonicalProduct) -> None:
 
 
 def reindex_all_products(db: Session) -> int:
-    """Lập lại toàn bộ chỉ mục tìm kiếm FTS5 cho kho thuốc."""
+    """Lập lại toàn bộ chỉ mục tìm kiếm FTS5 cho kho thuốc (chỉ trên SQLite)."""
+    if not _is_sqlite(db):
+        return 0
     init_fts_table(db)
     try:
         db.execute(text("DELETE FROM products_fts"))
@@ -109,47 +123,45 @@ def search_product_ids_fts(
     offset: int = 0,
 ) -> List[int]:
     """
-    Tìm kiếm danh sách ID sản phẩm qua FTS5 theo thứ tự độ liên quan (BM25 ranking).
+    Tìm kiếm danh sách ID sản phẩm theo thứ tự độ liên quan.
     Hỗ trợ tiếng Việt có dấu, không dấu, tìm theo hoạt chất, bệnh lý/triệu chứng.
+    Tự động tương thích cả SQLite FTS5 lẫn Neon PostgreSQL.
     """
     clean_q = query.strip()[:100]
     if not clean_q or len(clean_q) < 2:
         return []
 
     unaccent_q = strip_accents(clean_q).lower()
-    
-    # Tách từ khóa và lọc ký tự an toàn (loại bỏ toàn bộ ký tự đặc biệt FTS)
-    words = [re.sub(r"[^\w\d]", "", w) for w in unaccent_q.split() if len(w) > 1]
-    if not words:
-        words = [re.sub(r"[^\w\d]", "", w) for w in clean_q.split() if w]
-    
-    if not words:
-        return []
 
-    # Xây dựng câu truy vấn FTS5 an toàn:
-    # Ưu tiên khớp cả cụm nguyên bản an toàn -> khớp các từ đơn lẻ với tiền tố *
-    safe_phrase = re.sub(r"[^\w\d\s]", " ", unaccent_q).strip()
-    prefix_terms = " ".join([f'"{w}"*' for w in words[:8]])
-    if safe_phrase:
-        match_query = f'"{safe_phrase}" OR ({prefix_terms})'
-    else:
-        match_query = prefix_terms
+    if _is_sqlite(db):
+        words = [re.sub(r"[^\w\d]", "", w) for w in unaccent_q.split() if len(w) > 1]
+        if not words:
+            words = [re.sub(r"[^\w\d]", "", w) for w in clean_q.split() if w]
 
-    try:
-        sql = text("""
-            SELECT product_id, bm25(products_fts, 5.0, 4.0, 4.0, 3.0, 2.0, 1.0, 1.0) AS rank
-            FROM products_fts
-            WHERE products_fts MATCH :mq
-            ORDER BY rank ASC
-            LIMIT :lim OFFSET :off
-        """)
-        rows = db.execute(sql, {"mq": match_query, "lim": limit, "off": offset}).fetchall()
-        if rows:
-            return [int(r[0]) for r in rows if r[0]]
-    except Exception as e:
-        logger.debug(f"FTS5 query không thành công, chuyển sang fallback ranking: {e}")
+        if words:
+            safe_phrase = re.sub(r"[^\w\d\s]", " ", unaccent_q).strip()
+            prefix_terms = " ".join([f'"{w}"*' for w in words[:8]])
+            if safe_phrase:
+                match_query = f'"{safe_phrase}" OR ({prefix_terms})'
+            else:
+                match_query = prefix_terms
 
-    # Fallback nếu FTS5 không có kết quả hoặc gặp lỗi cú pháp FTS
+            try:
+                with db.begin_nested():
+                    sql = text("""
+                        SELECT product_id, bm25(products_fts, 5.0, 4.0, 4.0, 3.0, 2.0, 1.0, 1.0) AS rank
+                        FROM products_fts
+                        WHERE products_fts MATCH :mq
+                        ORDER BY rank ASC
+                        LIMIT :lim OFFSET :off
+                    """)
+                    rows = db.execute(sql, {"mq": match_query, "lim": limit, "off": offset}).fetchall()
+                    if rows:
+                        return [int(r[0]) for r in rows if r[0]]
+            except Exception as e:
+                logger.debug(f"FTS5 query không thành công, chuyển sang fallback ranking: {e}")
+
+    # Fallback chuẩn hóa an toàn trên PostgreSQL (Neon) và SQLite
     return _fallback_weighted_search(db, clean_q, unaccent_q, limit, offset)
 
 
