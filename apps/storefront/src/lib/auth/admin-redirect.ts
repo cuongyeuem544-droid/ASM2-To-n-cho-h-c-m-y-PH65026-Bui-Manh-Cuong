@@ -21,7 +21,8 @@ export function getAdminAuthQuery(): string {
 export function getAdminPortalUrl(preferredPort: 5173 | 8000 = 5173, path = ""): string {
   const query = getAdminAuthQuery();
   const cleanPath = path ? (path.startsWith("/") ? path : `/${path}`) : "/";
-  return `http://localhost:${preferredPort}${cleanPath}${query}`;
+  const adminBase = process.env.NEXT_PUBLIC_ADMIN_URL || (typeof window !== "undefined" && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1" ? "https://h4care-api-staging.onrender.com" : `http://localhost:${preferredPort}`);
+  return `${adminBase.replace(/\/+$/, "")}${cleanPath}${query}`;
 }
 
 /**

@@ -62,8 +62,18 @@ interface LiveChatPanelProps {
 const STORAGE_SESSION_KEY = "h4care_live_chat_session_code";
 const STORAGE_GUEST_TOKEN_KEY = "h4care_live_chat_guest_token";
 
-const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
-const WS_BASE = API_BASE.replace(/^http/, "ws");
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/+$/, "");
+const getWsBase = () => {
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL.replace(/^http/, "ws").replace(/\/+$/, "");
+  }
+  if (typeof window !== "undefined") {
+    const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    return isLocal ? "ws://localhost:8000" : "wss://h4care-api-staging.onrender.com";
+  }
+  return "ws://localhost:8000";
+};
+const WS_BASE = getWsBase();
 
 /**
  * Phát âm thanh thông báo nhẹ nhàng bằng Web Audio API

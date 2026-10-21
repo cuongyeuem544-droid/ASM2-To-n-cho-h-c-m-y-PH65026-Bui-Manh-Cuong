@@ -75,7 +75,7 @@ export async function searchMedicines(
 
   // 1. Thử lấy từ Backend API nếu đang hoạt động
   try {
-    const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const apiBase = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/+$/, "");
     const res = await fetch(`${apiBase}/api/v1/store/products?search=${encodeURIComponent(cleanQ)}&limit=${limit}`, {
       next: { revalidate: 30 },
       signal: AbortSignal.timeout(1500),

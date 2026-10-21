@@ -31,7 +31,7 @@ export async function GET(
   }
 
   // 3. Forward tới FastAPI backend - nguồn thẩm quyền duy nhất
-  const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const apiBase = (process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || "https://h4care-api-staging.onrender.com").replace(/\/+$/, "");
   const backendUrl = `${apiBase}/api/v1/live-chat/attachments/${encodeURIComponent(attachmentId)}`;
 
   const forwardHeaders: Record<string, string> = {};

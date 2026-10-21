@@ -104,7 +104,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Xác thực token qua FastAPI backend
-    const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const apiBase = (process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || "https://h4care-api-staging.onrender.com").replace(/\/+$/, "");
     let verifiedUser: { id: string | number; role?: string } | null = null;
 
     try {

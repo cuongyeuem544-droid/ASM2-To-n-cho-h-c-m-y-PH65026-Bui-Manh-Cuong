@@ -71,7 +71,7 @@ export default function ForgotPasswordPage() {
     return () => clearInterval(timer);
   }, [step, countdown]);
 
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/+$/, "");
 
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();

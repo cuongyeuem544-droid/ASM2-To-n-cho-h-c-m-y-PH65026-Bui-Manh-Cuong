@@ -5,7 +5,7 @@
  * Hỗ trợ Autocomplete POI, Reverse Geocoding, Browser Geolocation và Provider Status.
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import { API_BASE } from "@/lib/api-config";
 
 export interface PlaceSuggestionItem {
   place_id: string;

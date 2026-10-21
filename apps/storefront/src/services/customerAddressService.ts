@@ -5,7 +5,7 @@
  * Hỗ trợ xác thực token, CRUD sổ địa chỉ, tính cước vận chuyển và đồng bộ địa giới.
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import { API_BASE } from "@/lib/api-config";
 
 export interface CustomerAddressItem {
   id: number;

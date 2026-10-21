@@ -6,7 +6,7 @@ import { AuthUser, AuthContextType, RegisterFormState } from "@/types/auth";
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const STORAGE_KEY = "h4care_auth_session";
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import { API_BASE } from "@/lib/api-config";
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<AuthUser | null>(null);
