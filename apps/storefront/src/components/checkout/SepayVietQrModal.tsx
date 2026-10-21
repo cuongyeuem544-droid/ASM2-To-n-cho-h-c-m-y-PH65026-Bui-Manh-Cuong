@@ -24,6 +24,7 @@ interface SepayVietQrModalProps {
   accountHolder?: string;
   qrCodeUrl?: string;
   onClose: () => void;
+  onChangeMethod?: () => void;
   onSuccess: () => void;
 }
 
@@ -37,6 +38,7 @@ export default function SepayVietQrModal({
   accountHolder: propAccountHolder,
   qrCodeUrl: propQrCodeUrl,
   onClose,
+  onChangeMethod,
   onSuccess,
 }: SepayVietQrModalProps) {
   const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -296,8 +298,8 @@ export default function SepayVietQrModal({
           ) : (
             <button
               type="button"
-              onClick={onClose}
-              className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-600 font-medium text-xs transition-colors"
+              onClick={onChangeMethod || onClose}
+              className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold text-xs transition-colors hover:border-slate-400"
             >
               Đổi phương thức khác
             </button>

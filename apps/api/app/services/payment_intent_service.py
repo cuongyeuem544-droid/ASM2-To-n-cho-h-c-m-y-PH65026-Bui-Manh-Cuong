@@ -64,6 +64,11 @@ class PaymentIntentService:
                 detail=f"Phương thức thanh toán '{payment_method}' đã ngừng hỗ trợ cho đơn hàng mới. Vui lòng chọn COD hoặc Cổng thanh toán payOS.",
             )
         elif method == "PAYOS":
+            if not getattr(settings, "is_payos_configured", False):
+                raise HTTPException(
+                    status_code=503,
+                    detail="Cổng thanh toán payOS hiện chưa được cấu hình sẵn sàng trên máy chủ. Vui lòng chọn Thanh toán khi nhận hàng (COD) hoặc Chuyển khoản VietQR MBBank (SePay).",
+                )
             provider = "PAYOS"
         elif method == "COD":
             provider = "COD"
@@ -433,10 +438,43 @@ class PaymentIntentService:
             and order.order_status not in ["CANCELLED", "COMPLETED"]
         )
 
+        import urllib.parse
+        from app.models.inventory import SepayPaymentCode
+
         sepay_code = None
+        sepay_details = None
         if order.payment_method == "SEPAY":
-            from app.models.inventory import SepayPaymentCode
             sepay_code = db.scalar(select(SepayPaymentCode.payment_code).where(SepayPaymentCode.order_id == order.id))
+            if sepay_code:
+                acc_num = (getattr(settings, "sepay_account_number", "") or "68207111222333").strip()
+                acc_holder = (getattr(settings, "sepay_account_holder", "") or "LAI HOANG PHI HUNG").strip()
+                amt = int(order.total_amount)
+                qr_url = f"https://img.vietqr.io/image/MB-{acc_num}-compact2.png?amount={amt}&addInfo={sepay_code}&accountName={urllib.parse.quote(acc_holder)}"
+                sepay_details = {
+                    "payment_code": sepay_code,
+                    "bank_name": "Ngân hàng TMCP Quân Đội (MBBank)",
+                    "account_number": acc_num,
+                    "account_holder": acc_holder,
+                    "qr_code_url": qr_url,
+                    "amount": amt,
+                }
+
+        serialized_items = []
+        if getattr(order, "items", None):
+            for item in order.items:
+                img_url = None
+                if getattr(item, "product", None) and hasattr(item.product, "image_url"):
+                    img_url = item.product.image_url
+                serialized_items.append({
+                    "id": item.id,
+                    "product_id": item.product_id,
+                    "product_name": item.product_name,
+                    "product_sku": item.product_sku,
+                    "price": float(item.price or 0),
+                    "quantity": int(item.quantity or 1),
+                    "subtotal": float(item.subtotal or 0),
+                    "image_url": img_url,
+                })
 
         return {
             "order_code": order.order_code,
@@ -444,8 +482,15 @@ class PaymentIntentService:
             "payment_status": order.payment_status,
             "payment_method": order.payment_method,
             "order_status": order.order_status,
+            "fulfillment_status": getattr(order, "fulfillment_status", None),
             "total_amount": float(order.total_amount),
             "customer_name": order.customer_name,
+            "customer_phone": getattr(order, "customer_phone", None),
+            "shipping_address": getattr(order, "shipping_address", None),
+            "shipping_fee": float(getattr(order, "shipping_fee", 0) or 0),
+            "discount_amount": float(getattr(order, "discount_amount", 0) or 0),
+            "items": serialized_items,
+            "sepay_details": sepay_details,
             "can_retry": can_retry,
             "latest_transaction": {
                 "id": latest_trans.id,

@@ -28,6 +28,7 @@ import OrderSuccessView, {
 } from "@/components/checkout/OrderSuccessView";
 import MobileStickyCheckoutBar from "@/components/checkout/MobileStickyCheckoutBar";
 import SepayVietQrModal from "@/components/checkout/SepayVietQrModal";
+import PendingOrderView, { PendingOrderData } from "@/components/checkout/PendingOrderView";
 import { placesService } from "@/services/placesService";
 
 
@@ -92,6 +93,7 @@ export default function CartPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [orderSuccess, setOrderSuccess] = useState<OrderSuccessData | null>(null);
+  const [pendingOrder, setPendingOrder] = useState<PendingOrderData | null>(null);
 
 
   // Idempotency key to prevent duplicate order placement
@@ -173,6 +175,72 @@ export default function CartPage() {
       console.warn("Lỗi kiểm tra giỏ hàng với máy chủ:", e);
     }
   };
+
+  // Khôi phục và đối soát đơn hàng chờ thanh toán từ localStorage & backend
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const rawPending = localStorage.getItem("h4care_pending_order");
+    if (!rawPending) return;
+
+    try {
+      const parsed: PendingOrderData = JSON.parse(rawPending);
+      if (!parsed?.orderCode) return;
+
+      const orderToken =
+        parsed.orderToken ||
+        localStorage.getItem(`h4care_order_token_${parsed.orderCode}`) ||
+        localStorage.getItem("h4care_latest_order_token") ||
+        "";
+
+      const token =
+        localStorage.getItem("pharmatrust_access_token") ||
+        localStorage.getItem("pharmatrust_token") ||
+        localStorage.getItem("h4care_auth_token") ||
+        localStorage.getItem("access_token") ||
+        null;
+
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      if (orderToken) headers["X-Order-Token"] = orderToken;
+
+      fetch(`/api/v1/payments/orders/${encodeURIComponent(parsed.orderCode)}/status`, { headers })
+        .then((r) => r.json())
+        .then((statusData) => {
+          if (statusData?.payment_status === "PAID" || statusData?.status === "PAID") {
+            localStorage.removeItem("h4care_pending_order");
+            router.push(`/checkout/result?order_code=${encodeURIComponent(parsed.orderCode)}`);
+          } else if (statusData?.order_status === "CANCELLED") {
+            localStorage.removeItem("h4care_pending_order");
+          } else {
+            // Làm giàu dữ liệu đơn từ server nếu có
+            if (statusData?.sepay_details) {
+              parsed.sepayData = {
+                isOpen: false,
+                orderCode: parsed.orderCode,
+                ...statusData.sepay_details,
+              };
+            }
+            if (Array.isArray(statusData?.items) && statusData.items.length > 0) {
+              parsed.items = statusData.items.map((it: any) => ({
+                id: String(it.product_id),
+                dbId: it.product_id,
+                name: it.product_name,
+                sku: it.product_sku || "",
+                price: it.price,
+                quantity: it.quantity,
+                image_url: it.image_url,
+              }));
+            }
+            setPendingOrder(parsed);
+          }
+        })
+        .catch(() => {
+          setPendingOrder(parsed);
+        });
+    } catch (e) {
+      localStorage.removeItem("h4care_pending_order");
+    }
+  }, [router]);
 
   // Initialize cart from localStorage
   useEffect(() => {
@@ -287,6 +355,152 @@ export default function CartPage() {
   const clearCart = () => {
     setItems([]);
     localStorage.removeItem("pharmatrust_cart");
+  };
+
+  // Mở lại modal QR SePay cho đơn đang chờ
+  const handleReopenSepay = () => {
+    if (!pendingOrder) return;
+    if (pendingOrder.sepayData) {
+      setSepayModalData({
+        ...pendingOrder.sepayData,
+        isOpen: true,
+      });
+    } else {
+      const memo = pendingOrder.orderCode;
+      const amt = pendingOrder.totalAmount;
+      const acc = "68207111222333";
+      const holder = "LAI HOANG PHI HUNG";
+      setSepayModalData({
+        isOpen: true,
+        orderCode: pendingOrder.orderCode,
+        paymentCode: memo,
+        amount: amt,
+        bankName: "Ngân hàng TMCP Quân Đội (MBBank)",
+        accountNumber: acc,
+        accountHolder: holder,
+        qrCodeUrl: `https://img.vietqr.io/image/MB-${acc}-compact2.png?amount=${amt}&addInfo=${encodeURIComponent(memo)}&accountName=${encodeURIComponent(holder)}`,
+      });
+    }
+  };
+
+  // Đổi phương thức thanh toán sang COD cho đơn đang chờ (Giữ nguyên đơn, không tạo mới)
+  const handleChangeMethodToCod = async () => {
+    if (!pendingOrder) return;
+    const token = typeof window !== "undefined"
+      ? localStorage.getItem("pharmatrust_access_token") ||
+        localStorage.getItem("pharmatrust_token") ||
+        localStorage.getItem("h4care_auth_token") ||
+        localStorage.getItem("access_token")
+      : null;
+    const orderToken =
+      pendingOrder.orderToken ||
+      (typeof window !== "undefined"
+        ? localStorage.getItem(`h4care_order_token_${pendingOrder.orderCode}`) ||
+          localStorage.getItem("h4care_latest_order_token") ||
+          ""
+        : "");
+
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    if (orderToken) headers["X-Order-Token"] = orderToken;
+
+    const res = await fetch("/api/v1/payments/retry", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        order_code: pendingOrder.orderCode,
+        new_payment_method: "COD",
+        phone_verify: pendingOrder.customerPhone,
+        order_token: orderToken,
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.detail || "Không thể chuyển sang phương thức COD. Vui lòng thử lại.");
+    }
+
+    // Đổi thành công sang COD -> Hiển thị OrderSuccessView
+    const storeObj = PHARMACY_STORES.find((s) => s.id === selectedStoreId);
+    setOrderSuccess({
+      order_code: pendingOrder.orderCode,
+      total: pendingOrder.totalAmount,
+      customer_name: pendingOrder.customerName,
+      customer_phone: pendingOrder.customerPhone,
+      shipping_address: pendingOrder.shippingAddress,
+      payment_method: "COD",
+      fulfillment_type: fulfillmentType,
+      store_name: storeObj?.name,
+    });
+    setPendingOrder(null);
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("h4care_pending_order");
+      localStorage.removeItem("pharmatrust_cart");
+      window.dispatchEvent(new Event("cart_updated"));
+    }
+  };
+
+  // Hủy đơn hàng đang chờ thanh toán an toàn và giải phóng kho
+  const handleCancelPendingOrder = async () => {
+    if (!pendingOrder) return;
+    const token = typeof window !== "undefined"
+      ? localStorage.getItem("pharmatrust_access_token") ||
+        localStorage.getItem("pharmatrust_token") ||
+        localStorage.getItem("h4care_auth_token") ||
+        localStorage.getItem("access_token")
+      : null;
+    const orderToken =
+      pendingOrder.orderToken ||
+      (typeof window !== "undefined"
+        ? localStorage.getItem(`h4care_order_token_${pendingOrder.orderCode}`) ||
+          localStorage.getItem("h4care_latest_order_token") ||
+          ""
+        : "");
+
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    if (orderToken) headers["X-Order-Token"] = orderToken;
+
+    const res = await fetch(`/api/v1/payments/orders/${encodeURIComponent(pendingOrder.orderCode)}/cancel`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        reason: "Khách hàng hủy đơn trên website",
+        phone_verify: pendingOrder.customerPhone,
+        order_token: orderToken,
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.detail || "Không thể hủy đơn hàng.");
+    }
+
+    // Khôi phục lại sản phẩm vào giỏ hàng để khách không phải chọn lại từ đầu
+    if (pendingOrder.items && pendingOrder.items.length > 0) {
+      setItems(pendingOrder.items);
+      if (typeof window !== "undefined") {
+        localStorage.setItem("pharmatrust_cart", JSON.stringify(pendingOrder.items));
+        window.dispatchEvent(new Event("cart_updated"));
+      }
+    }
+
+    setPendingOrder(null);
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("h4care_pending_order");
+    }
+  };
+
+  const handlePendingOrderPaymentSuccess = () => {
+    if (!pendingOrder) return;
+    const code = pendingOrder.orderCode;
+    setPendingOrder(null);
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("h4care_pending_order");
+      localStorage.removeItem("pharmatrust_cart");
+      window.dispatchEvent(new Event("cart_updated"));
+    }
+    router.push(`/checkout/result?order_code=${encodeURIComponent(code)}`);
   };
 
   // GPS locator & VIETMAP Auto-fill
@@ -473,6 +687,21 @@ export default function CartPage() {
         "Giỏ hàng của bạn chứa thuốc kê đơn (Rx). Theo quy định của Bộ Y Tế, thuốc kê đơn không được phép bán trực tuyến. Vui lòng xóa thuốc kê đơn khỏi giỏ hàng hoặc gửi đơn thuốc qua chuyên mục Tư Vấn Dược Sĩ."
       );
       return;
+    }
+
+    // Kiểm tra tính sẵn sàng của cổng thanh toán payOS trước khi tạo đơn
+    if (paymentMethod === "PAYOS") {
+      try {
+        const mRes = await fetch("/api/v1/payments/methods");
+        if (mRes.ok) {
+          const mData = await mRes.json();
+          const isPayosReady = mData?.methods?.find((m: any) => m.id === "PAYOS")?.available;
+          if (!isPayosReady) {
+            setErrorMessage("Cổng thanh toán payOS hiện đang trong quá trình bảo trì cấu hình keys trên máy chủ. Vui lòng chọn Thanh toán khi nhận hàng (COD) hoặc Chuyển khoản VietQR MBBank (SePay).");
+            return;
+          }
+        }
+      } catch (e) {}
     }
 
     let currentVerified = verifiedAddress;
@@ -665,9 +894,7 @@ export default function CartPage() {
           });
           const sepayData = await sepayRes.json();
           if (sepayRes.ok && sepayData?.payment_code) {
-            setItems([]);
-            localStorage.removeItem("pharmatrust_cart");
-            setSepayModalData({
+            const modalInfo = {
               isOpen: true,
               orderCode: data.order_code,
               paymentCode: sepayData.payment_code,
@@ -676,7 +903,32 @@ export default function CartPage() {
               accountNumber: sepayData.account_number,
               accountHolder: sepayData.account_holder,
               qrCodeUrl: sepayData.qr_code_url,
-            });
+            };
+
+            const pendingData: PendingOrderData = {
+              orderCode: data.order_code,
+              orderToken: guestOrderToken,
+              customerName: customerName.trim(),
+              customerPhone: customerPhone.trim(),
+              shippingAddress: fullShippingAddress,
+              totalAmount: data.total_amount || grandTotal,
+              paymentMethod: "SEPAY",
+              items: [...items],
+              shippingFee: effectiveShippingFee,
+              discountAmount: discount,
+              createdAt: new Date().toISOString(),
+              sepayData: modalInfo,
+            };
+
+            // Lưu pendingOrder vào state và localStorage trước khi xóa giỏ hàng
+            setPendingOrder(pendingData);
+            if (typeof window !== "undefined") {
+              localStorage.setItem("h4care_pending_order", JSON.stringify(pendingData));
+              localStorage.removeItem("pharmatrust_cart");
+              window.dispatchEvent(new Event("cart_updated"));
+            }
+            setItems([]);
+            setSepayModalData(modalInfo);
             return;
           } else {
             throw new Error(sepayData?.detail || "Không thể khởi tạo mã chuyển khoản SePay MBBank");
@@ -776,8 +1028,17 @@ export default function CartPage() {
             order={orderSuccess}
             isAuthenticated={isAuthenticated}
           />
+        ) : pendingOrder ? (
+          /* 2. PENDING ORDER VIEW (Đơn đang chờ thanh toán) */
+          <PendingOrderView
+            order={pendingOrder}
+            onReopenPayment={handleReopenSepay}
+            onChangeMethodToCod={handleChangeMethodToCod}
+            onCancelOrder={handleCancelPendingOrder}
+            onPaymentSuccess={handlePendingOrderPaymentSuccess}
+          />
         ) : items.length === 0 && isLoaded ? (
-          /* 2. EMPTY CART VIEW */
+          /* 3. EMPTY CART VIEW */
           <EmptyCartState />
         ) : (
           /* 3. TWO-COLUMN PHARMACY CHECKOUT (Long Châu style) */
@@ -942,9 +1203,19 @@ export default function CartPage() {
           accountHolder={sepayModalData.accountHolder}
           qrCodeUrl={sepayModalData.qrCodeUrl}
           onClose={() => setSepayModalData(null)}
+          onChangeMethod={() => {
+            setSepayModalData(null);
+            handleChangeMethodToCod();
+          }}
           onSuccess={() => {
             const code = sepayModalData.orderCode;
             setSepayModalData(null);
+            setPendingOrder(null);
+            if (typeof window !== "undefined") {
+              localStorage.removeItem("h4care_pending_order");
+              localStorage.removeItem("pharmatrust_cart");
+              window.dispatchEvent(new Event("cart_updated"));
+            }
             router.push(`/checkout/result?order_code=${encodeURIComponent(code)}`);
           }}
         />

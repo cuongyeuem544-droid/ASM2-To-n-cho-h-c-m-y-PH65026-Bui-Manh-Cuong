@@ -182,6 +182,55 @@ def _verify_order_payment_access(
 
 
 # ==============================================================================
+# 0. PAYMENT METHODS CONFIGURATION & AVAILABILITY
+# ==============================================================================
+
+@payments_router.get("/methods")
+def get_payment_methods():
+    """
+    Báo cáo trạng thái các phương thức thanh toán sẵn sàng:
+    - COD: Sẵn sàng (Thanh toán khi nhận hàng)
+    - SEPAY: Sẵn sàng (VietQR MBBank SePay)
+    - PAYOS: Sẵn sàng nếu máy chủ cấu hình đủ keys, nếu chưa thì báo trạng thái bảo trì
+    """
+    is_payos_ready = getattr(settings, "is_payos_configured", False)
+    methods = [
+        {
+            "id": "COD",
+            "title": "Thanh toán khi nhận hàng (COD)",
+            "available": True,
+            "badge": "Phổ biến",
+            "badge_color": "green",
+            "desc": "Kiểm tra hàng trước khi thanh toán tiền mặt trực tiếp cho nhân viên giao hàng",
+            "unavailability_reason": None,
+        },
+        {
+            "id": "SEPAY",
+            "title": "Chuyển khoản VietQR MBBank (SePay)",
+            "available": True,
+            "badge": "Tự động 24/7",
+            "badge_color": "emerald",
+            "desc": "Quét mã QR Napas 247, xác nhận tự động tức thì 24/7 từ mọi ứng dụng ngân hàng",
+            "unavailability_reason": None,
+        },
+        {
+            "id": "PAYOS",
+            "title": "Cổng thanh toán payOS (Napas 247)",
+            "available": is_payos_ready,
+            "badge": "Cổng trực tuyến" if is_payos_ready else "Đang bảo trì cấu hình",
+            "badge_color": "blue" if is_payos_ready else "slate",
+            "desc": "Mở cổng payOS thanh toán bằng mã QR ngân hàng hoặc thẻ ATM nội địa",
+            "unavailability_reason": None if is_payos_ready else "Cổng thanh toán payOS đang tạm thời bảo trì cấu hình API key trên máy chủ.",
+        },
+    ]
+    return {
+        "methods": methods,
+        "default_method": "COD",
+        "payos_configured": is_payos_ready,
+    }
+
+
+# ==============================================================================
 # 1. MOMO SANDBOX GATEWAY ENDPOINTS (Backward Compatible)
 # ==============================================================================
 
