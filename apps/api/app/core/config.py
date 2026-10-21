@@ -30,6 +30,7 @@ class Settings(BaseSettings):
             "http://127.0.0.1:5173",
         ]
     )
+    cors_origin_regex: str | None = None
     public_api_min_score: int = 85
     storage_root: Path = Path("storage")
     max_upload_mb: int = 20
@@ -112,18 +113,24 @@ class Settings(BaseSettings):
 
     @field_validator("database_url", mode="after")
     @classmethod
-    def canonicalize_sqlite_url(cls, v: str) -> str:
+    def canonicalize_database_url(cls, v: str) -> str:
         if not isinstance(v, str):
             return v
-        if v.startswith("sqlite:///") and not v.startswith("sqlite:///:memory:"):
-            raw_path = v[len("sqlite:///"):]
+        val = v.strip()
+        # Chuẩn hóa postgres:// hoặc postgresql:// từ Render/Neon sang postgresql+psycopg:// (psycopg 3)
+        if val.startswith("postgres://"):
+            val = "postgresql+psycopg://" + val[len("postgres://"):]
+        elif val.startswith("postgresql://") and not val.startswith("postgresql+"):
+            val = "postgresql+psycopg://" + val[len("postgresql://"):]
+        elif val.startswith("sqlite:///") and not val.startswith("sqlite:///:memory:"):
+            raw_path = val[len("sqlite:///"):]
             if raw_path.startswith("./"):
                 raw_path = raw_path[2:]
             path_obj = Path(raw_path)
             if not path_obj.is_absolute():
                 canonical_db = (_REPO_ROOT / path_obj).resolve()
                 return f"sqlite:///{canonical_db.as_posix()}"
-        return v
+        return val
 
     @model_validator(mode="after")
     def validate_production_security(self) -> "Settings":

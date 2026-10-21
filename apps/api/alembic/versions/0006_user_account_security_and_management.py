@@ -26,7 +26,7 @@ def upgrade() -> None:
 
     user_new_cols = [
         ("warehouse_id", sa.Integer(), sa.ForeignKey("warehouses.id", ondelete="SET NULL"), None),
-        ("must_change_password", sa.Boolean(), None, sa.text("0")),
+        ("must_change_password", sa.Boolean(), None, sa.false()),
         ("password_changed_at", sa.DateTime(timezone=True), None, None),
         ("failed_login_attempts", sa.Integer(), None, sa.text("0")),
         ("locked_until", sa.DateTime(timezone=True), None, None),
@@ -49,13 +49,14 @@ def upgrade() -> None:
             op.add_column("users", sa.Column(col_name, *col_args, **kwargs))
 
     # Sync existing warehouse_id from user_warehouse_memberships if present
-    conn.execute(sa.text("""
+    is_active_condition = "user_warehouse_memberships.is_active = 1" if conn.dialect.name == "sqlite" else "user_warehouse_memberships.is_active IS TRUE"
+    conn.execute(sa.text(f"""
         UPDATE users
         SET warehouse_id = (
             SELECT warehouse_id
             FROM user_warehouse_memberships
             WHERE user_warehouse_memberships.user_id = users.id
-              AND user_warehouse_memberships.is_active = 1
+              AND {is_active_condition}
             LIMIT 1
         )
         WHERE warehouse_id IS NULL

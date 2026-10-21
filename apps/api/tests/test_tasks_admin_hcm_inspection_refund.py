@@ -429,6 +429,7 @@ def test_inspection_strict_safety_validation(client, test_setup):
             "inspections": [
                 {
                     "return_item_id": ret_item.id,
+                    "condition": "Hư hỏng",
                     "package_condition": "Hư hỏng",
                     "seal_intact": False,
                     "batch_matched": False,

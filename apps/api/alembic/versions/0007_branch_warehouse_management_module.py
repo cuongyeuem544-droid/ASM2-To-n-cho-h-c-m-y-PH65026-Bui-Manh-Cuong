@@ -65,7 +65,7 @@ def upgrade() -> None:
             sa.Column("severity", sa.String(20), server_default="WARNING", nullable=False),
             sa.Column("reference_type", sa.String(50), nullable=True),
             sa.Column("reference_id", sa.String(100), nullable=True),
-            sa.Column("is_read", sa.Boolean(), server_default=sa.text("0"), nullable=False, index=True),
+            sa.Column("is_read", sa.Boolean(), server_default=sa.false(), nullable=False, index=True),
             sa.Column("read_by", sa.Integer(), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
             sa.Column("read_at", sa.DateTime(timezone=True), nullable=True),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False, index=True),
@@ -74,7 +74,7 @@ def upgrade() -> None:
     # 3. Cột mới cho stock_adjustments
     adj_cols = _get_existing_columns(conn, "stock_adjustments")
     if "is_large_adjustment" not in adj_cols:
-        op.add_column("stock_adjustments", sa.Column("is_large_adjustment", sa.Boolean(), server_default=sa.text("0"), nullable=True))
+        op.add_column("stock_adjustments", sa.Column("is_large_adjustment", sa.Boolean(), server_default=sa.false(), nullable=True))
     if "total_quantity_variance" not in adj_cols:
         op.add_column("stock_adjustments", sa.Column("total_quantity_variance", sa.Integer(), server_default=sa.text("0"), nullable=True))
     if "total_amount_variance" not in adj_cols:

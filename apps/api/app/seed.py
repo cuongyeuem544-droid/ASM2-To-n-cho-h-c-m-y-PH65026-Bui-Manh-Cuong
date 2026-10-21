@@ -468,6 +468,12 @@ def seed_demo_products(db):
 
 def main():
     import os
+    from app.core.config import settings
+
+    env = (settings.app_env or "").lower().strip()
+    if env in {"staging", "production", "prod"} and os.environ.get("ALLOW_INSECURE_DEMO_SEED") != "1":
+        print(f"[BẢO MẬT HỆ THỐNG] Đang chạy trên môi trường '{env}'. Tuyệt đối không tự động nạp tài khoản demo hoặc mật khẩu mặc định.")
+        return
     Base.metadata.create_all(engine)
     db = SessionLocal()
     try:
