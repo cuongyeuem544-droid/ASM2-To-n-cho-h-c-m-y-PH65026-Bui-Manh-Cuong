@@ -3,7 +3,7 @@
 import React from "react";
 import { Banknote, Check } from "lucide-react";
 
-export type PaymentMethod = "COD" | "PAYOS";
+export type PaymentMethod = "COD" | "PAYOS" | "SEPAY";
 
 interface PaymentMethodSelectorProps {
   paymentMethod: PaymentMethod;
@@ -24,15 +24,27 @@ export default function PaymentMethodSelector({
       tagColor: "bg-emerald-50 text-emerald-700 border-emerald-200",
     },
     {
+      id: "SEPAY" as PaymentMethod,
+      title: "Chuyển khoản VietQR MBBank (SePay)",
+      desc: "Quét mã QR Napas 247, xác nhận tự động tức thì 24/7 từ mọi ứng dụng ngân hàng",
+      icon: (
+        <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px] font-black shrink-0">
+          MB
+        </span>
+      ),
+      tag: "Tự động 24/7",
+      tagColor: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    },
+    {
       id: "PAYOS" as PaymentMethod,
-      title: "Cổng thanh toán payOS (QR Ngân hàng / Napas 247)",
-      desc: "Quét mã VietQR tự động khớp tiền tức thì 24/7 từ mọi ứng dụng ngân hàng",
+      title: "Cổng thanh toán payOS (Napas 247)",
+      desc: "Mở cổng payOS thanh toán bằng mã QR ngân hàng hoặc thẻ ATM nội địa",
       icon: (
         <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-black shrink-0">
           P
         </span>
       ),
-      tag: "Tự động 24/7",
+      tag: "Cổng trực tuyến",
       tagColor: "bg-blue-50 text-brand-blue-700 border-blue-200",
     },
   ];
@@ -48,7 +60,7 @@ export default function PaymentMethodSelector({
         </p>
       </div>
 
-      <div className="mt-3.5 grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+      <div className="mt-3.5 grid grid-cols-1 sm:grid-cols-3 gap-3.5">
         {methods.map((m) => {
           const isSelected = paymentMethod === m.id;
           return (

@@ -259,6 +259,8 @@ function CheckoutResultContent() {
               <span className="inline-flex items-center gap-1.5 font-bold text-slate-800 bg-white px-2.5 py-0.5 rounded-full border border-slate-200 text-xs">
                 {orderData?.payment_method === "PAYOS"
                   ? "Cổng thanh toán payOS"
+                  : orderData?.payment_method === "SEPAY"
+                  ? "Chuyển khoản VietQR MBBank (SePay)"
                   : orderData?.payment_method === "MOMO"
                   ? "Ví điện tử MoMo"
                   : orderData?.payment_method === "BANK_TRANSFER" || orderData?.payment_method === "VIETQR"
@@ -355,6 +357,8 @@ function CheckoutResultContent() {
               <span className="inline-flex items-center gap-1.5 font-bold text-slate-800 bg-white px-2.5 py-0.5 rounded-full border border-slate-200 text-xs">
                 {orderData?.payment_method === "PAYOS"
                   ? "Cổng thanh toán payOS"
+                  : orderData?.payment_method === "SEPAY"
+                  ? "Chuyển khoản VietQR MBBank (SePay)"
                   : orderData?.payment_method === "MOMO"
                   ? "Ví điện tử MoMo"
                   : orderData?.payment_method || "Trực tuyến"}
@@ -500,6 +504,8 @@ function CheckoutResultContent() {
               <span className="font-semibold text-slate-800">
                 {orderData?.payment_method === "PAYOS"
                   ? "Cổng thanh toán payOS"
+                  : orderData?.payment_method === "SEPAY"
+                  ? "Chuyển khoản VietQR MBBank (SePay)"
                   : orderData?.payment_method || "Trực tuyến"}
               </span>
             </div>

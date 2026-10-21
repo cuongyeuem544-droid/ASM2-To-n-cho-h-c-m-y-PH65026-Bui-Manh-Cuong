@@ -27,6 +27,7 @@ import OrderSuccessView, {
   OrderSuccessData,
 } from "@/components/checkout/OrderSuccessView";
 import MobileStickyCheckoutBar from "@/components/checkout/MobileStickyCheckoutBar";
+import SepayVietQrModal from "@/components/checkout/SepayVietQrModal";
 
 
 export default function CartPage() {
@@ -61,6 +62,16 @@ export default function CartPage() {
 
   // Payment method
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("COD");
+  const [sepayModalData, setSepayModalData] = useState<{
+    isOpen: boolean;
+    orderCode: string;
+    paymentCode: string;
+    amount: number;
+    bankName?: string;
+    accountNumber?: string;
+    accountHolder?: string;
+    qrCodeUrl?: string;
+  } | null>(null);
 
   // Vouchers state
   const [voucherCode, setVoucherCode] = useState("");
@@ -597,6 +608,50 @@ export default function CartPage() {
         localStorage.setItem("h4care_latest_order_token", guestOrderToken);
       }
 
+      // Handle SePay MBBank VietQR payment
+      if (paymentMethod === "SEPAY") {
+        if (typeof window !== "undefined" && finalCustomerPhone) {
+          localStorage.setItem("h4care_checkout_phone", finalCustomerPhone);
+        }
+        try {
+          const payHeaders: Record<string, string> = { "Content-Type": "application/json" };
+          if (token) payHeaders["Authorization"] = `Bearer ${token}`;
+          if (guestOrderToken) payHeaders["X-Order-Token"] = guestOrderToken;
+
+          const sepayRes = await fetch("/api/v1/payments/sepay/create", {
+            method: "POST",
+            headers: payHeaders,
+            body: JSON.stringify({
+              order_code: data.order_code,
+              phone_verify: finalCustomerPhone,
+              order_token: guestOrderToken,
+            }),
+          });
+          const sepayData = await sepayRes.json();
+          if (sepayRes.ok && sepayData?.payment_code) {
+            setItems([]);
+            localStorage.removeItem("pharmatrust_cart");
+            setSepayModalData({
+              isOpen: true,
+              orderCode: data.order_code,
+              paymentCode: sepayData.payment_code,
+              amount: sepayData.amount || data.total_amount || grandTotal,
+              bankName: sepayData.bank_name,
+              accountNumber: sepayData.account_number,
+              accountHolder: sepayData.account_holder,
+              qrCodeUrl: sepayData.qr_code_url,
+            });
+            return;
+          } else {
+            throw new Error(sepayData?.detail || "Không thể khởi tạo mã chuyển khoản SePay MBBank");
+          }
+        } catch (sErr: any) {
+          console.warn("Lỗi khi kết nối cổng SePay:", sErr);
+          setErrorMessage(sErr?.message || "Lỗi khi kết nối cổng thanh toán SePay MBBank");
+          return;
+        }
+      }
+
       // Handle payOS Gateway payment
       if (paymentMethod === "PAYOS") {
         const returnUrl = typeof window !== "undefined"
@@ -836,6 +891,25 @@ export default function CartPage() {
           onSubmit={handleCheckout}
           onScrollToSummary={() => {
             summaryRef.current?.scrollIntoView({ behavior: "smooth" });
+          }}
+        />
+      )}
+
+      {sepayModalData && (
+        <SepayVietQrModal
+          isOpen={sepayModalData.isOpen}
+          orderCode={sepayModalData.orderCode}
+          paymentCode={sepayModalData.paymentCode}
+          amount={sepayModalData.amount}
+          bankName={sepayModalData.bankName}
+          accountNumber={sepayModalData.accountNumber}
+          accountHolder={sepayModalData.accountHolder}
+          qrCodeUrl={sepayModalData.qrCodeUrl}
+          onClose={() => setSepayModalData(null)}
+          onSuccess={() => {
+            const code = sepayModalData.orderCode;
+            setSepayModalData(null);
+            router.push(`/checkout/result?order_code=${encodeURIComponent(code)}`);
           }}
         />
       )}

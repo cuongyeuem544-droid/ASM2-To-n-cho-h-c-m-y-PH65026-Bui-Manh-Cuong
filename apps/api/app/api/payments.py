@@ -1,3 +1,5 @@
+import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
@@ -18,8 +20,10 @@ from app.services.payos_service import PayOSPaymentService
 from app.services.payment_intent_service import PaymentIntentService
 from app.services.reconciliation_service import PaymentReconciliationService
 from app.services.vietqr_service import VietQrService
+from app.services.sepay_service import SepayService
 
 payments_router = APIRouter(prefix="/payments", tags=["Cổng thanh toán & Đối soát H4CARE"])
+logger = logging.getLogger(__name__)
 
 
 # ==============================================================================
@@ -34,6 +38,13 @@ class CreateMomoPaymentRequest(BaseModel):
 
 
 class CreatePayOSPaymentRequest(BaseModel):
+    order_code: str = Field(..., min_length=5, max_length=50)
+    return_url: Optional[str] = None
+    phone_verify: Optional[str] = None
+    order_token: Optional[str] = None
+
+
+class CreateSepayPaymentRequest(BaseModel):
     order_code: str = Field(..., min_length=5, max_length=50)
     return_url: Optional[str] = None
     phone_verify: Optional[str] = None
@@ -462,6 +473,79 @@ def confirm_payos_webhook_url(
     Đăng ký và xác nhận Webhook URL với máy chủ payOS (Chỉ dành cho ADMIN khi cấu hình Tunnel).
     """
     return PayOSPaymentService.confirm_webhook_url(payload.webhook_url)
+
+
+# ==============================================================================
+# 2.6 SEPAY WEBHOOK & VIETQR MBBANK ENDPOINTS
+# ==============================================================================
+
+@payments_router.post("/sepay/create")
+def create_sepay_payment(
+    payload: CreateSepayPaymentRequest,
+    current_user: Optional[User] = Depends(get_optional_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Khởi tạo mã VietQR Napas 247 và mã thanh toán SePay (HC + 8 chữ số) cho đơn hàng.
+    """
+    order = db.scalar(select(Order).where(Order.order_code == payload.order_code.strip()))
+    if not order:
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy đơn hàng '{payload.order_code}'")
+
+    _verify_order_payment_access(
+        order,
+        current_user,
+        phone_verify=payload.phone_verify,
+        order_token=payload.order_token,
+        action_name="tạo thanh toán SePay",
+    )
+
+    return SepayService.create_payment_request(db=db, order=order, return_url=payload.return_url)
+
+
+@payments_router.post("/sepay/webhook")
+async def sepay_payment_webhook(
+    request: Request,
+    x_sepay_signature: Optional[str] = Header(None, alias="X-SePay-Signature"),
+    x_sepay_timestamp: Optional[str] = Header(None, alias="X-SePay-Timestamp"),
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """
+    Endpoint tiếp nhận Webhook biến động số dư MBBank chính thức từ SePay.
+    Xác thực HMAC-SHA256, kiểm tra timestamp, chống trùng lặp và tự động cập nhật đơn hàng.
+    """
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        logger.error(f"[SEPAY WEBHOOK] Parse JSON thất bại: {e}")
+        raise HTTPException(status_code=400, detail="Dữ liệu Webhook SePay không đúng định dạng JSON.")
+
+    effective_sig = (
+        x_sepay_signature
+        or request.headers.get("x-sepay-signature")
+        or request.headers.get("X-SePay-Signature")
+    )
+    effective_ts = (
+        x_sepay_timestamp
+        or request.headers.get("x-sepay-timestamp")
+        or request.headers.get("X-SePay-Timestamp")
+    )
+    effective_auth = (
+        authorization
+        or request.headers.get("authorization")
+        or request.headers.get("Authorization")
+    )
+
+    return SepayService.process_webhook(
+        db=db,
+        payload=payload,
+        raw_body=raw_body,
+        signature_header=effective_sig,
+        timestamp_header=effective_ts,
+        auth_header=effective_auth,
+    )
 
 
 # ==============================================================================

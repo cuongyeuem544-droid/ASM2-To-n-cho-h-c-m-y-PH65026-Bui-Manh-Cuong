@@ -421,6 +421,40 @@ class PayosOrderCode(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class SepayPaymentCode(Base):
+    """Bảng lưu trữ mã thanh toán SePay duy nhất (HC + 8 chữ số) liên kết với Đơn hàng."""
+    __tablename__ = "sepay_payment_codes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"), unique=True, index=True)
+    payment_code: Mapped[str] = mapped_column(String(20), unique=True, index=True)
+    code_number: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SepayInboundTransaction(Base):
+    """Bảng lưu trữ và đối soát giao dịch chuyển khoản SePay từ Webhook (Chống trùng lặp tuyệt đối)."""
+    __tablename__ = "sepay_inbound_transactions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    sepay_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
+    gateway: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    account_number: Mapped[str] = mapped_column(String(50), index=True)
+    transfer_type: Mapped[str] = mapped_column(String(20))
+    transfer_amount: Mapped[int] = mapped_column(BigInteger)
+    accumulated: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    code: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reference_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transaction_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="PROCESSED")
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id", ondelete="SET NULL"), nullable=True, index=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw_payload: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class EmailOutbox(Base):
     __tablename__ = "email_outboxes"
 

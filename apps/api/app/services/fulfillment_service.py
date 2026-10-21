@@ -917,7 +917,7 @@ class FulfillmentRoutingService:
             select(Order).where(
                 Order.payment_status == "PENDING",
                 Order.order_status == "PENDING",
-                Order.payment_method.in_(["MOMO", "BANK_TRANSFER", "VIETQR", "PAYOS"]),
+                Order.payment_method.in_(["MOMO", "BANK_TRANSFER", "VIETQR", "PAYOS", "SEPAY"]),
                 Order.created_at <= threshold,
             )
         ).all()

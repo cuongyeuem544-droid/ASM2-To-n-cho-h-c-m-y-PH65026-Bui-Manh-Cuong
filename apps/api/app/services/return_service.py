@@ -203,7 +203,7 @@ class ReturnService:
         # 5. Khởi tạo mã phiếu và ReturnRequest
         return_code = cls.generate_return_code(db)
         # Validate required beneficiary bank info for prepaid orders
-        is_prepaid = order.payment_method in ["PAYOS", "BANK_TRANSFER", "MOMO"] or (order.payment_method != "COD" and order.payment_status == "PAID")
+        is_prepaid = order.payment_method in ["PAYOS", "SEPAY", "BANK_TRANSFER", "MOMO"] or (order.payment_method != "COD" and order.payment_status == "PAID")
         if request_type == ReturnRequestType.RETURN.value and is_prepaid:
             if not refund_bank_name or not str(refund_bank_name).strip():
                 raise HTTPException(status_code=400, detail="Vui lòng cung cấp tên ngân hàng nhận tiền hoàn.")

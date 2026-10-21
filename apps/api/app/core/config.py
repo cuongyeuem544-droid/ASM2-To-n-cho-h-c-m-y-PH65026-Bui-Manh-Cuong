@@ -126,6 +126,13 @@ class Settings(BaseSettings):
     vietqr_webhook_secret: str = ""
     payment_expiry_minutes: int = 30
 
+    # Cấu hình Cổng Thanh toán Chuyển khoản SePay Webhook + VietQR MBBank
+    sepay_enabled: bool = False
+    sepay_bank_id: str = "MB"
+    sepay_account_number: str = ""
+    sepay_account_holder: str = ""
+    sepay_webhook_secret: str = "" 
+
     # Cơ chế kiểm soát Payment Simulator (Mặc định TẮT hoàn toàn - Fail Closed)
     enable_payment_simulator: bool = False
 
@@ -236,6 +243,16 @@ class Settings(BaseSettings):
             and self.payos_api_key.strip()
             and self.payos_checksum_key
             and self.payos_checksum_key.strip()
+        )
+
+    @property
+    def is_sepay_configured(self) -> bool:
+        """Kiểm tra xem SePay đã được cấu hình tài khoản MBBank hay chưa."""
+        return bool(
+            self.sepay_account_number
+            and self.sepay_account_number.strip()
+            and self.sepay_account_holder
+            and self.sepay_account_holder.strip()
         )
 
     @property

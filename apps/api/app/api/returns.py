@@ -266,7 +266,7 @@ def create_return_request(
             evidences_data.append({"file_url": url, "file_name": os.path.basename(url)})
 
     # Bắt buộc thông tin tài khoản thụ hưởng cho đơn hoàn tiền trực tuyến / chuyển khoản
-    is_prepaid = order.payment_method in ["PAYOS", "BANK_TRANSFER", "MOMO"] or (order.payment_method != "COD" and order.payment_status == "PAID")
+    is_prepaid = order.payment_method in ["PAYOS", "SEPAY", "BANK_TRANSFER", "MOMO"] or (order.payment_method != "COD" and order.payment_status == "PAID")
     if payload.request_type == "RETURN" and is_prepaid:
         if not payload.refund_bank_name or not str(payload.refund_bank_name).strip():
             raise HTTPException(status_code=400, detail="Vui lòng cung cấp tên ngân hàng nhận tiền hoàn.")

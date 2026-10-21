@@ -67,10 +67,12 @@ class PaymentIntentService:
             provider = "PAYOS"
         elif method == "COD":
             provider = "COD"
+        elif method == "SEPAY":
+            provider = "SEPAY"
         else:
             raise HTTPException(
                 status_code=400,
-                detail=f"Phương thức thanh toán '{payment_method}' không được hỗ trợ. Vui lòng chọn COD hoặc payOS.",
+                detail=f"Phương thức thanh toán '{payment_method}' không được hỗ trợ. Vui lòng chọn COD, payOS hoặc SEPAY.",
             )
 
         amount = int(order.total_amount)
@@ -168,6 +170,26 @@ class PaymentIntentService:
                 )
             )
 
+        elif provider == "SEPAY":
+            from app.services.sepay_service import SepayService
+            sepay_res = SepayService.create_payment_request(db=db, order=order, return_url=return_url)
+            qr_code_url = sepay_res.get("qr_code_url")
+            instructions = f"Quét mã VietQR trên bất kỳ ứng dụng ngân hàng nào với số tiền {amount:,} đ và nội dung '{sepay_res.get('payment_code')}'."
+            bank_details = {
+                "bank_name": sepay_res.get("bank_name"),
+                "bank_id": sepay_res.get("bank_id"),
+                "account_number": sepay_res.get("account_number"),
+                "account_holder": sepay_res.get("account_holder"),
+                "payment_code": sepay_res.get("payment_code"),
+                "transfer_memo": sepay_res.get("payment_code"),
+            }
+            trans = db.scalar(
+                select(PaymentTransaction).where(
+                    PaymentTransaction.order_id == order.id,
+                    PaymentTransaction.provider == "SEPAY",
+                )
+            )
+
         return {
             "intent_id": intent_id,
             "order_code": order.order_code,
@@ -216,10 +238,10 @@ class PaymentIntentService:
                 status_code=400,
                 detail=f"Phương thức thanh toán '{new_payment_method}' đã ngừng hỗ trợ cho giao dịch mới. Vui lòng chọn COD hoặc Cổng thanh toán payOS.",
             )
-        if method not in ["COD", "PAYOS"]:
+        if method not in ["COD", "PAYOS", "SEPAY"]:
             raise HTTPException(
                 status_code=400,
-                detail=f"Phương thức thanh toán '{new_payment_method}' không được hỗ trợ. Vui lòng chọn COD hoặc payOS.",
+                detail=f"Phương thức thanh toán '{new_payment_method}' không được hỗ trợ. Vui lòng chọn COD, payOS hoặc SEPAY.",
             )
 
         # Hủy các giao dịch đang PENDING của đơn hàng này
@@ -411,8 +433,14 @@ class PaymentIntentService:
             and order.order_status not in ["CANCELLED", "COMPLETED"]
         )
 
+        sepay_code = None
+        if order.payment_method == "SEPAY":
+            from app.models.inventory import SepayPaymentCode
+            sepay_code = db.scalar(select(SepayPaymentCode.payment_code).where(SepayPaymentCode.order_id == order.id))
+
         return {
             "order_code": order.order_code,
+            "payment_code": sepay_code,
             "payment_status": order.payment_status,
             "payment_method": order.payment_method,
             "order_status": order.order_status,

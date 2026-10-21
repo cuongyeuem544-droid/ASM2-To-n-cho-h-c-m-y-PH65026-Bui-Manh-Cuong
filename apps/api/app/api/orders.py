@@ -452,10 +452,10 @@ def checkout_order(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Phương thức thanh toán '{payload.payment_method}' đã ngừng hỗ trợ cho đơn hàng mới. Vui lòng chọn Thanh toán khi nhận hàng (COD) hoặc Cổng thanh toán payOS.",
         )
-    if chosen_method not in ["COD", "PAYOS"]:
+    if chosen_method not in ["COD", "PAYOS", "SEPAY"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Phương thức thanh toán '{payload.payment_method}' không hợp lệ. Vui lòng chọn COD hoặc PAYOS.",
+            detail=f"Phương thức thanh toán '{payload.payment_method}' không hợp lệ. Vui lòng chọn COD, PAYOS hoặc SEPAY.",
         )
 
     # Xác thực địa chỉ giao hàng đối với hình thức Giao Tận Nơi
@@ -640,6 +640,8 @@ def checkout_order(
             init_provider = "VIETQR"
         elif order.payment_method == "PAYOS":
             init_provider = "PAYOS"
+        elif order.payment_method == "SEPAY":
+            init_provider = "SEPAY"
         else:
             init_provider = "MOMO"
 
