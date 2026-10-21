@@ -328,8 +328,11 @@ class GeoService:
 
         results = []
         for wh in warehouses:
-            wh_lat = float(wh.lat) if wh.lat is not None else (10.7872 if "HCM" in wh.code else 21.0253)
-            wh_lng = float(wh.lng) if wh.lng is not None else (106.7001 if "HCM" in wh.code else 105.8552)
+            # FIX: Bắt buộc đọc tọa độ thực tế của kho từ Neon database (Không dùng hardcode)
+            if wh.lat is None or wh.lng is None:
+                continue
+            wh_lat = float(wh.lat)
+            wh_lng = float(wh.lng)
 
             dist = calculate_haversine_distance(cust_lat, cust_lng, wh_lat, wh_lng)
             eta = get_estimated_delivery_time(dist)
@@ -342,6 +345,7 @@ class GeoService:
                 "lat": wh_lat,
                 "lng": wh_lng,
                 "distance_km": dist,
+                "distance_basis": "Ước tính theo khoảng cách đường chim bay (Haversine)",
                 "estimated_delivery_time": eta,
                 "is_central": wh.is_central,
                 "navigation_url": f"https://www.google.com/maps/dir/?api=1&origin={cust_lat},{cust_lng}&destination={wh_lat},{wh_lng}",

@@ -134,6 +134,7 @@ async def suggest_address(
         pass
 
     # Fallback gợi ý cấu trúc nếu mạng ngoài chậm hoặc không tìm thấy
+    # TUYỆT ĐỐI KHÔNG gán verified: True cho tọa độ mô phỏng trung tâm
     if not suggestions:
         box = prov.get("boundingBox", {})
         default_lat = (box.get("minLat", 10.0) + box.get("maxLat", 11.0)) / 2
@@ -146,7 +147,9 @@ async def suggest_address(
             "province_name": prov["fullName"],
             "lat": default_lat,
             "lng": default_lng,
-            "verified": True,
+            "verified": False,
+            "is_simulated": True,
+            "warning": "Vị trí ước tính theo khu vực hành chính, chưa được xác minh số nhà chính xác. Vui lòng ghim vị trí trên bản đồ.",
         })
 
     return suggestions

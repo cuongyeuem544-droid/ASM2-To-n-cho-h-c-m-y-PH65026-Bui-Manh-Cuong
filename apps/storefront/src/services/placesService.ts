@@ -56,11 +56,11 @@ export interface CurrentLocationResult {
 
 export const placesService = {
   /**
-   * Tìm kiếm gợi ý địa điểm / địa chỉ theo thời gian thực (Google-like Place Autocomplete)
+   * Tìm kiếm gợi ý địa điểm / địa chỉ theo thời gian thực (Google-like Place Autocomplete có Session Token)
    */
   async searchPlaces(
     query: string,
-    options?: { limit?: number; lat?: number; lng?: number }
+    options?: { limit?: number; lat?: number; lng?: number; sessionToken?: string }
   ): Promise<PlaceSuggestionItem[]> {
     const q = query.trim();
     if (q.length < 2) return [];
@@ -74,6 +74,9 @@ export const placesService = {
         params.append("lat", String(options.lat));
         params.append("lng", String(options.lng));
       }
+      if (options?.sessionToken) {
+        params.append("session_token", options.sessionToken);
+      }
 
       const res = await fetch(`${API_BASE}/api/v1/addresses/places/autocomplete?${params.toString()}`);
       if (res.ok) {
@@ -84,6 +87,26 @@ export const placesService = {
     }
 
     return [];
+  },
+
+  /**
+   * Lấy chi tiết địa điểm theo Place ID (Tọa độ chính xác và thành phần hành chính)
+   */
+  async getPlaceDetails(placeId: string, sessionToken?: string): Promise<PlaceSuggestionItem | null> {
+    if (!placeId) return null;
+    try {
+      const params = new URLSearchParams({ place_id: placeId });
+      if (sessionToken) {
+        params.append("session_token", sessionToken);
+      }
+      const res = await fetch(`${API_BASE}/api/v1/addresses/places/details?${params.toString()}`);
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn("Place details API error:", e);
+    }
+    return null;
   },
 
   /**
@@ -103,12 +126,12 @@ export const placesService = {
 
     return {
       place_id: `local_rev_${lat.toFixed(4)}_${lng.toFixed(4)}`,
-      formatted_address: `Vị trí tọa độ (${lat.toFixed(4)}, ${lng.toFixed(4)})`,
+      formatted_address: `Vị trí ghim tọa độ (${lat.toFixed(4)}, ${lng.toFixed(4)})`,
       street_address: `Tọa độ (${lat.toFixed(4)}, ${lng.toFixed(4)})`,
       lat,
       lng,
       provider: "fallback_client",
-      is_verified: true,
+      is_verified: false, // TUYỆT ĐỐI không gán true cho client fallback
     };
   },
 

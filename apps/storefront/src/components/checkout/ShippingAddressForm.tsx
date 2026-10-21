@@ -237,6 +237,14 @@ export default function ShippingAddressForm({
 
     const lat = addr.lat || 10.7769;
     const lng = addr.lng || 106.7009;
+    // FIX: Không tự gán verified = true nếu tọa độ chỉ là mặc định TP.HCM hoặc thiếu GPS
+    const isActuallyVerified = Boolean(
+      addr.is_verified &&
+      addr.lat &&
+      addr.lng &&
+      !(Math.abs(addr.lat - 10.7769) < 0.0001 && Math.abs(addr.lng - 106.7009) < 0.0001)
+    );
+
     const fullAddr =
       addr.formatted_address ||
       `${addr.address_line}, ${addr.commune_name || ""}, ${addr.province_name || ""}`;
@@ -251,7 +259,7 @@ export default function ShippingAddressForm({
       fullAddress: fullAddr,
       lat,
       lng,
-      isVerified: true,
+      isVerified: isActuallyVerified,
       placeId: addr.place_id || undefined,
       deliveryNote: addr.delivery_note || undefined,
       districtName: addr.district_code || undefined,
@@ -263,7 +271,7 @@ export default function ShippingAddressForm({
     if (setShippingAddress) {
       setShippingAddress(fullAddr);
     }
-    setIsAddressVerified(true);
+    setIsAddressVerified(isActuallyVerified);
 
     calculateShippingForLocation(lat, lng, addr.province_code, addr.district_code);
   };

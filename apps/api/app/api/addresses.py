@@ -383,12 +383,25 @@ async def autocomplete_places(
     limit: int = Query(8, ge=1, le=15),
     lat: Optional[float] = Query(None, ge=-90, le=90),
     lng: Optional[float] = Query(None, ge=-180, le=180),
+    session_token: Optional[str] = Query(None, description="Session Token Google Places để gom nhóm request"),
 ):
     """
-    Tìm kiếm địa điểm toàn diện Google Maps-like.
+    Tìm kiếm địa điểm toàn diện Google Maps-like có hỗ trợ Session Token.
     Cho phép tìm kiếm theo tên trường học, bệnh viện, tòa nhà, địa chỉ mà không bắt buộc chọn Tỉnh/Xã trước.
     """
-    return await PlacesService.autocomplete_places(q=q, limit=limit, lat=lat, lng=lng)
+    return await PlacesService.autocomplete_places(q=q, limit=limit, lat=lat, lng=lng, session_token=session_token)
+
+
+@addresses_router.get("/places/details")
+async def get_place_details(
+    place_id: str = Query(..., min_length=3, description="Place ID từ Google Maps, OSM hoặc POI trọng điểm"),
+    session_token: Optional[str] = Query(None, description="Session Token Google Places"),
+):
+    """
+    Lấy thông tin chi tiết địa điểm, tọa độ GPS chính xác và thành phần hành chính từ Place ID.
+    Dùng khi khách hàng bấm chọn một gợi ý địa chỉ để xác định tọa độ thật trên bản đồ.
+    """
+    return await PlacesService.get_place_details(place_id=place_id, session_token=session_token)
 
 
 @addresses_router.get("/reverse-geocode")

@@ -18,6 +18,7 @@ import math
 import httpx
 from typing import Any, Optional
 
+from app.core.config import settings
 from app.services.administrative_service import AdministrativeDataService, remove_accents
 from app.services.geo_service import GeoService, PROVINCE_BOUNDING_BOXES, calculate_haversine_distance
 
@@ -605,6 +606,7 @@ class PlacesService:
         limit: int = 8,
         lat: Optional[float] = None,
         lng: Optional[float] = None,
+        session_token: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """
         Tìm kiếm địa điểm đa năng Google-like (POI, trường học, bệnh viện, tòa nhà, đường phố, địa danh).
@@ -642,11 +644,11 @@ class PlacesService:
             return results[:search_limit]
 
         # 1. Nếu có cấu hình GOOGLE_MAPS_API_KEY, thử gọi Google Places API
-        google_key = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
+        google_key = (os.getenv("GOOGLE_MAPS_API_KEY", "") or getattr(settings, "google_maps_api_key", "")).strip()
         if google_key and len(google_key) > 10:
             try:
                 google_results = await cls._search_google_places(
-                    query_clean, google_key, search_limit, lat, lng
+                    query_clean, google_key, search_limit, lat, lng, session_token
                 )
                 if google_results:
                     for gr in google_results:
@@ -884,9 +886,10 @@ class PlacesService:
         limit: int = 8,
         lat: Optional[float] = None,
         lng: Optional[float] = None,
+        session_token: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """
-        Gọi Google Places Autocomplete API.
+        Gọi Google Places Autocomplete API có sessiontoken để nhóm tính phí hợp lý.
         """
         params: dict[str, Any] = {
             "input": query,
@@ -894,6 +897,8 @@ class PlacesService:
             "components": "country:vn",
             "language": "vi",
         }
+        if session_token:
+            params["sessiontoken"] = session_token
         if lat is not None and lng is not None:
             params["location"] = f"{lat},{lng}"
             params["radius"] = "50000"
@@ -924,17 +929,157 @@ class PlacesService:
                     "short_address": secondary_text or desc,
                     "formatted_address": desc,
                     "street_address": main_text or query,
-                    "lat": 0.0,
-                    "lng": 0.0,
+                    "lat": None,
+                    "lng": None,
                     "province_code": prov["code"] if prov else None,
                     "province_name": prov["fullName"] if prov else None,
                     "commune_code": comm["code"] if comm else None,
                     "commune_name": comm["fullName"] if comm else None,
                     "provider": "google",
                     "category": "place",
+                    "verified": False,
+                    "requires_details": True,
                 })
 
             return results
+
+    @classmethod
+    async def get_place_details(
+        cls,
+        place_id: str,
+        session_token: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """
+        Lấy thông tin chi tiết địa điểm, tọa độ GPS chính xác và thành phần hành chính từ Place ID.
+        Hỗ trợ:
+        1. Google Place ID: Gọi Google Place Details API với session token.
+        2. Curated POI ID: Tra cứu trong VIETNAM_CURATED_POIS.
+        3. OSM/Admin Place ID: Trả về thông tin tương ứng.
+        """
+        clean_id = place_id.strip()
+
+        # 1. Tra cứu Curated POI
+        if clean_id.startswith("curated_"):
+            for poi in VIETNAM_CURATED_POIS:
+                if poi["place_id"] == clean_id:
+                    return {
+                        "place_id": poi["place_id"],
+                        "name": poi["name"],
+                        "formatted_address": poi["formatted_address"],
+                        "street_address": poi["street_address"],
+                        "lat": poi["lat"],
+                        "lng": poi["lng"],
+                        "province_code": poi.get("province_code"),
+                        "province_name": poi.get("province_name"),
+                        "commune_code": poi.get("commune_code"),
+                        "commune_name": poi.get("commune_name"),
+                        "district_name": poi.get("district_name"),
+                        "provider": "curated_national_poi",
+                        "is_verified": True,
+                    }
+
+        # 2. Tra cứu Google Place Details nếu có API key
+        google_key = (os.getenv("GOOGLE_MAPS_API_KEY", "") or getattr(settings, "google_maps_api_key", "")).strip()
+        if google_key and len(google_key) >= 15 and not clean_id.startswith(("osm_", "admin_", "legacy_")):
+            try:
+                g_detail = await cls._fetch_google_place_details(clean_id, google_key, session_token)
+                if g_detail:
+                    return g_detail
+            except Exception as e:
+                logger.warning("Google Place Details API error: %s", e)
+
+        # 3. Fallback: Nếu không có Google hoặc là OSM ID
+        return {
+            "place_id": clean_id,
+            "formatted_address": "",
+            "street_address": "",
+            "lat": None,
+            "lng": None,
+            "province_code": None,
+            "province_name": None,
+            "commune_code": None,
+            "commune_name": None,
+            "provider": "fallback",
+            "is_verified": False,
+            "warning": "Không tìm thấy tọa độ chi tiết từ Place ID. Vui lòng ghim vị trí trên bản đồ để xác minh.",
+        }
+
+    @classmethod
+    async def _fetch_google_place_details(
+        cls,
+        place_id: str,
+        api_key: str,
+        session_token: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        """
+        Gọi Google Maps Place Details API để lấy tọa độ hình học (geometry) và thành phần hành chính.
+        """
+        params: dict[str, Any] = {
+            "place_id": place_id,
+            "fields": "place_id,geometry,formatted_address,name,address_components,types",
+            "language": "vi",
+            "key": api_key,
+        }
+        if session_token:
+            params["sessiontoken"] = session_token
+
+        async with httpx.AsyncClient(timeout=4.5) as client:
+            resp = await client.get(
+                "https://maps.googleapis.com/maps/api/place/details/json",
+                params=params,
+            )
+            if resp.status_code != 200:
+                return None
+
+            data = resp.json()
+            if data.get("status") != "OK":
+                logger.warning("Google Place Details returned status: %s", data.get("status"))
+                return None
+
+            result = data.get("result", {})
+            loc = result.get("geometry", {}).get("location", {})
+            lat = loc.get("lat")
+            lng = loc.get("lng")
+            if lat is None or lng is None:
+                return None
+
+            formatted_address = result.get("formatted_address", "")
+            name = result.get("name", "")
+
+            city_hint = None
+            district_hint = None
+            for comp in result.get("address_components", []):
+                types = comp.get("types", [])
+                if "administrative_area_level_1" in types:
+                    city_hint = comp.get("long_name")
+                elif "administrative_area_level_2" in types:
+                    district_hint = comp.get("long_name")
+
+            prov, comm = cls._match_administrative_units(
+                lat=lat,
+                lng=lng,
+                city_hint=city_hint,
+                district_hint=district_hint,
+                full_text=formatted_address,
+            )
+
+            street_address = name or (formatted_address.split(",")[0].strip() if "," in formatted_address else formatted_address)
+
+            return {
+                "place_id": place_id,
+                "name": name,
+                "formatted_address": formatted_address,
+                "street_address": street_address,
+                "lat": round(float(lat), 6),
+                "lng": round(float(lng), 6),
+                "province_code": prov["code"] if prov else None,
+                "province_name": prov["fullName"] if prov else city_hint,
+                "commune_code": comm["code"] if comm else None,
+                "commune_name": comm["fullName"] if comm else None,
+                "district_name": comm.get("legacyDistrictName") if comm else district_hint,
+                "provider": "google_place_details",
+                "is_verified": True,
+            }
 
     @classmethod
     async def _search_photon_places_with_client(

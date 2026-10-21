@@ -57,19 +57,19 @@ class ShippingService:
         if dist <= 5.0:
             base_fee = 15000.0
             eta = "Dự kiến giao siêu tốc 1 - 2 giờ (Nội thành cùng kho)"
-            logic_desc = f"Khoảng cách {dist:.1f} km (Bán kính siêu tốc ≤ 5km)"
+            logic_desc = f"Khoảng cách {dist:.1f} km (Bán kính siêu tốc ≤ 5km - Ước tính đường chim bay)"
         elif dist <= 15.0:
             base_fee = 25000.0
             eta = "Dự kiến giao trong ngày 3 - 6 giờ (Bán kính 5 - 15km)"
-            logic_desc = f"Khoảng cách {dist:.1f} km (Khu vực lân cận)"
+            logic_desc = f"Khoảng cách {dist:.1f} km (Khu vực lân cận - Ước tính đường chim bay)"
         elif dist <= 50.0:
             base_fee = 35000.0
             eta = "Dự kiến giao trong 24 giờ (Ngoại thành / Tỉnh lân cận)"
-            logic_desc = f"Khoảng cách {dist:.1f} km (Bán kính 15 - 50km)"
+            logic_desc = f"Khoảng cách {dist:.1f} km (Bán kính 15 - 50km - Ước tính đường chim bay)"
         else:
             base_fee = 45000.0
             eta = "Dự kiến giao tiêu chuẩn 24 - 48 giờ (Chuyển phát liên tỉnh)"
-            logic_desc = f"Khoảng cách {dist:.1f} km (Liên tỉnh > 50km)"
+            logic_desc = f"Khoảng cách {dist:.1f} km (Liên tỉnh > 50km - Ước tính đường chim bay)"
 
         is_free = order_total >= cls.FREE_SHIPPING_THRESHOLD
         final_fee = 0.0 if is_free else base_fee

@@ -72,7 +72,7 @@ class Settings(BaseSettings):
             "http://127.0.0.1:5173",
         ]
     )
-    cors_origin_regex: str | None = None
+    cors_origin_regex: str | None = r"^https?:\/\/(localhost|127\.0\.0\.1|.*\.vercel\.app|.*\.onrender\.com)(:\d+)?$"
     public_api_min_score: int = 85
     storage_root: Path = Path("storage")
     max_upload_mb: int = 20
@@ -131,7 +131,11 @@ class Settings(BaseSettings):
     sepay_bank_id: str = "MB"
     sepay_account_number: str = ""
     sepay_account_holder: str = ""
-    sepay_webhook_secret: str = "" 
+    sepay_webhook_secret: str = ""
+
+    # Cấu hình Dịch vụ Bản đồ Google Maps Platform (Places Autocomplete, Geocoding, Routes)
+    google_maps_api_key: str = ""
+    google_maps_routes_enabled: bool = False 
 
     # Cơ chế kiểm soát Payment Simulator (Mặc định TẮT hoàn toàn - Fail Closed)
     enable_payment_simulator: bool = False
@@ -254,6 +258,12 @@ class Settings(BaseSettings):
             and self.sepay_account_holder
             and self.sepay_account_holder.strip()
         )
+
+    @property
+    def is_google_maps_configured(self) -> bool:
+        """Kiểm tra xem Google Maps API Key đã được cấu hình hợp lệ hay chưa."""
+        key = (self.google_maps_api_key or "").strip()
+        return bool(key and len(key) >= 15 and not key.startswith("your_"))
 
     @property
     def is_simulator_permitted(self) -> bool:

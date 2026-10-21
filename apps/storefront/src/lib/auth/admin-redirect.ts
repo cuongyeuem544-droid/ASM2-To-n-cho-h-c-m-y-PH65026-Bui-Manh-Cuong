@@ -8,6 +8,13 @@ export function getAdminPortalBaseUrl(): string {
   if (typeof process !== "undefined" && process.env.NEXT_PUBLIC_ADMIN_URL) {
     return process.env.NEXT_PUBLIC_ADMIN_URL.replace(/\/+$/, "");
   }
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if (host !== "localhost" && host !== "127.0.0.1") {
+      // Trên môi trường Internet: Không trỏ về localhost, trỏ về domain Admin Vercel chính thức
+      return "https://h4care-admin.vercel.app";
+    }
+  }
   return "http://localhost:5173";
 }
 

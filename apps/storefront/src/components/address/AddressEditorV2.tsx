@@ -110,9 +110,20 @@ export default function AddressEditorV2({
   // Coordinates
   const [lat, setLat] = useState<number>(initialData?.lat || 10.7769);
   const [lng, setLng] = useState<number>(initialData?.lng || 106.7009);
+  const [hasRealCoordinates, setHasRealCoordinates] = useState<boolean>(
+    Boolean(initialData?.lat && initialData?.lng && !(Math.abs(initialData.lat - 10.7769) < 0.0001 && Math.abs(initialData.lng - 106.7009) < 0.0001))
+  );
 
-  // Verification state (Requirement 18: Invalidate upon any edit)
-  const [isVerified, setIsVerified] = useState<boolean>(initialData?.is_verified || false);
+  // Verification state (Chỉ true khi tọa độ thực tế được xác minh từ Google Maps, GPS hoặc Ghim bản đồ)
+  const [isVerified, setIsVerified] = useState<boolean>(
+    Boolean(initialData?.is_verified && initialData?.lat && initialData?.lng && !(Math.abs(initialData.lat - 10.7769) < 0.0001 && Math.abs(initialData.lng - 106.7009) < 0.0001))
+  );
+
+  // Session Token Google Places để tối ưu chi phí API
+  const sessionTokenRef = useRef<string>("");
+  useEffect(() => {
+    sessionTokenRef.current = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2);
+  }, []);
 
   // Place Autocomplete search
   const [searchQuery, setSearchQuery] = useState("");
@@ -207,6 +218,7 @@ export default function AddressEditorV2({
       try {
         const results = await placesService.searchPlaces(clean, {
           limit: 8,
+          sessionToken: sessionTokenRef.current,
         });
         setSuggestions(results);
         setIsSuggestionsOpen(true);
@@ -257,10 +269,38 @@ export default function AddressEditorV2({
     setErrorMessage(null);
     setIsVerified(false); // Invalidate per Requirement 18
 
-    // 1. Coordinates
-    if (item.lat && item.lng) {
+    // 1. Coordinates & Google Place Details
+    if (item.lat && item.lng && (Math.abs(item.lat) > 0.0001 || Math.abs(item.lng) > 0.0001)) {
       setLat(item.lat);
       setLng(item.lng);
+      setHasRealCoordinates(true);
+      setIsVerified(true);
+    } else if (item.place_id) {
+      // Gọi chi tiết Place Details để lấy tọa độ hình học (geometry)
+      placesService.getPlaceDetails(item.place_id, sessionTokenRef.current).then((detail) => {
+        if (detail && detail.lat && detail.lng && (Math.abs(detail.lat) > 0.0001 || Math.abs(detail.lng) > 0.0001)) {
+          setLat(detail.lat);
+          setLng(detail.lng);
+          setHasRealCoordinates(true);
+          setIsVerified(true);
+          if (detail.formatted_address) setFormattedAddress(detail.formatted_address);
+          if (detail.street_address) setStreetAddress(detail.street_address);
+          if (detail.province_code) {
+            const p = administrativeService.getProvinceByCode(detail.province_code);
+            if (p) setSelectedProvince(p);
+          }
+          if (detail.commune_code) {
+            const c = administrativeService.getCommuneByCode(detail.commune_code);
+            if (c) setSelectedCommune(c);
+          }
+        } else {
+          setHasRealCoordinates(false);
+          setIsVerified(false);
+          setLocationNotice("Không tìm thấy tọa độ chi tiết cho địa điểm này. Vui lòng kéo ghim trên bản đồ để xác minh.");
+        }
+      });
+      // Tạo session token mới cho lượt tìm kiếm tiếp theo
+      sessionTokenRef.current = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2);
     }
 
     // 2. Map administrative components
@@ -286,7 +326,8 @@ export default function AddressEditorV2({
   const handleMapLocationChange = async (newLat: number, newLng: number) => {
     setLat(newLat);
     setLng(newLng);
-    setIsVerified(false); // Invalidate per Requirement 18
+    setHasRealCoordinates(true);
+    setIsVerified(true); // Người dùng trực tiếp kéo ghim định vị thật trên bản đồ
     setLocationNotice("Vị trí giao hàng đã được điều chỉnh trên bản đồ. Đang cập nhật địa chỉ...");
 
     try {
@@ -477,12 +518,11 @@ export default function AddressEditorV2({
       place_id: `geo_${selectedProvince.code}_${selectedCommune.code}`,
       delivery_note: deliveryNote.trim() || undefined,
       is_default: isDefault,
-      is_verified: true,
+      is_verified: Boolean(hasRealCoordinates && isVerified),
     };
 
     setIsSubmitting(true);
     try {
-      setIsVerified(true);
       await onSave(payloadData);
       return payloadData;
     } catch (err: any) {
