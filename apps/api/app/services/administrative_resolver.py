@@ -75,7 +75,11 @@ class VietnamAdministrativeResolver:
     @classmethod
     def initialize(cls, json_path: Optional[str] = None):
         if not json_path:
+            current_file_dir = Path(__file__).resolve().parent
             candidates = [
+                current_file_dir.parent.parent / "data" / "vietnam-administrative-units.json",
+                current_file_dir.parent / "data" / "vietnam-administrative-units.json",
+                Path("/app/data/vietnam-administrative-units.json"),
                 Path("data/vietnam-administrative-units.json"),
                 Path("../data/vietnam-administrative-units.json"),
                 Path("../../data/vietnam-administrative-units.json"),

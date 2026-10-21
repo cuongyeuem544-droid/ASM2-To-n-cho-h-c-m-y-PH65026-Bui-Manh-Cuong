@@ -35,8 +35,11 @@ class AdministrativeDataService:
             # Tìm đường dẫn tương đối từ vị trí file service hoặc gốc project
             current_file_dir = Path(__file__).resolve().parent
             candidates = [
+                current_file_dir.parent.parent / "data" / "vietnam-administrative-units.json",
+                current_file_dir.parent / "data" / "vietnam-administrative-units.json",
                 current_file_dir.parent.parent.parent / "data" / "vietnam-administrative-units.json",
                 current_file_dir.parent.parent.parent.parent / "data" / "vietnam-administrative-units.json",
+                Path("/app/data/vietnam-administrative-units.json"),
                 Path("data/vietnam-administrative-units.json"),
                 Path("../data/vietnam-administrative-units.json"),
                 Path("../../data/vietnam-administrative-units.json"),
