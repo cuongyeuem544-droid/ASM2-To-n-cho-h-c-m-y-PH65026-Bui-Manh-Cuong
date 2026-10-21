@@ -286,10 +286,27 @@ def test_bug1_return_multi_batch_restock(client, manager_hcm_headers):
         b1_id, b2_id = batch1.id, batch2.id
         wh_id = wh.id
 
-    res = client.post(
+    # 1. Gọi không truyền batch_allocations khi có nhiều lô -> Phải từ chối 422
+    res_no_alloc = client.post(
         f"/api/v1/warehouse/me/returns/{case_code}/stock-disposition",
         headers=manager_hcm_headers,
         json={"disposition": "RESTOCK", "note": "Hoàn về 2 lô"},
+    )
+    assert res_no_alloc.status_code == 422
+    assert "từng được xuất từ nhiều lô" in res_no_alloc.json()["detail"]
+
+    # 2. Gọi kèm danh sách phân bổ lô rõ ràng -> Thành công 200
+    res = client.post(
+        f"/api/v1/warehouse/me/returns/{case_code}/stock-disposition",
+        headers=manager_hcm_headers,
+        json={
+            "disposition": "RESTOCK",
+            "note": "Hoàn về 2 lô",
+            "batch_allocations": [
+                {"batch_id": b1_id, "quantity": 1},
+                {"batch_id": b2_id, "quantity": 2},
+            ],
+        },
     )
     assert res.status_code == 200, res.json()
 
@@ -612,6 +629,7 @@ def test_bug3_inspection_validation_and_restock_safety_block(client, staff_hcm_h
                 {
                     "return_item_id": item_id,
                     "received_quantity": 1,
+                    "condition": "DAMAGED",
                     "package_condition": "DAMAGED",
                     "seal_intact": False,
                     "batch_matched": True,
@@ -624,8 +642,8 @@ def test_bug3_inspection_validation_and_restock_safety_block(client, staff_hcm_h
             ]
         },
     )
-    assert res_unsafe.status_code == 400
-    assert "Tuyệt đối không được đề xuất hoặc nhập lại kho bán (RESTOCK)" in res_unsafe.json()["detail"]
+    assert res_unsafe.status_code in (400, 422)
+    assert "Tuyệt đối không được đề xuất hoặc nhập lại kho bán (RESTOCK)" in str(res_unsafe.json())
 
     # 3. Toàn bộ tiêu chí đạt chuẩn -> RESTOCK thành công
     res_valid = client.post(
@@ -636,6 +654,7 @@ def test_bug3_inspection_validation_and_restock_safety_block(client, staff_hcm_h
                 {
                     "return_item_id": item_id,
                     "received_quantity": 1,
+                    "condition": "GOOD_CONDITION",
                     "package_condition": "SEALED",
                     "seal_intact": True,
                     "batch_matched": True,

@@ -17,7 +17,7 @@ from app.models.inventory import (
     Warehouse,
     WarehouseBatchStock,
 )
-from app.models.returns import ReturnItem, ReturnRequest, ReturnStatus, WarehouseReturnCase
+from app.models.returns import ReturnInspection, ReturnItem, ReturnRequest, ReturnStatus, WarehouseReturnCase
 from app.api.admin_returns import ItemInspectionPayload
 from app.api.warehouse_orders_returns import ItemInspectionItem
 from app.services.return_service import ReturnService
@@ -41,14 +41,48 @@ def test_dline16_pydantic_schema_missing_fields_fail_422():
             "restock_quantity": 1,
         })
 
-    # 2. Thiếu package_condition và condition -> ValidationError (422)
+    # 2. Thiếu condition (khi có package_condition) -> Không tự fallback, bắt buộc báo lỗi ValidationError (422)
     with pytest.raises(ValidationError):
         ItemInspectionItem.model_validate({
             "return_item_id": 1,
+            "package_condition": "SEALED",
+            # thiếu condition
             "received_quantity": 1,
             "accepted_quantity": 1,
             "rejected_quantity": 0,
             "seal_intact": True,
+            "batch_matched": True,
+            "expiry_matched": True,
+            "storage_condition_ok": True,
+            "suggested_action": "RESTOCK",
+        })
+
+    # 2b. condition là chuỗi rỗng -> ValidationError (422)
+    with pytest.raises(ValidationError):
+        ItemInspectionItem.model_validate({
+            "return_item_id": 1,
+            "condition": "",
+            "package_condition": "SEALED",
+            "received_quantity": 1,
+            "accepted_quantity": 1,
+            "rejected_quantity": 0,
+            "seal_intact": True,
+            "batch_matched": True,
+            "expiry_matched": True,
+            "storage_condition_ok": True,
+            "suggested_action": "RESTOCK",
+        })
+
+    # 2c. Boolean string không hợp lệ -> ValidationError (422)
+    with pytest.raises(ValidationError):
+        ItemInspectionItem.model_validate({
+            "return_item_id": 1,
+            "condition": "GOOD_CONDITION",
+            "package_condition": "SEALED",
+            "received_quantity": 1,
+            "accepted_quantity": 1,
+            "rejected_quantity": 0,
+            "seal_intact": "maybe",  # Không hợp lệ
             "batch_matched": True,
             "expiry_matched": True,
             "storage_condition_ok": True,
@@ -214,4 +248,141 @@ def test_dline16_technical_inspection_does_not_approve_or_refund():
 
         # 2. approved_quantity KHÔNG được tự ý gán bởi kiểm định kỹ thuật (phải là 0 cho đến khi Quản lý duyệt)
         assert ri.approved_quantity == 0
+
+
+def test_dline16_restock_disposition_blocked_when_inspection_failed():
+    """Kiểm tra phân luồng RESTOCK bị từ chối 400 nếu có bất kỳ tiêu chí kiểm định nào không đạt (100% rule)."""
+    with SessionLocal() as db:
+        uid = uuid.uuid4().hex[:6].upper()
+        now = datetime.now(UTC)
+
+        wh = Warehouse(name=f"Kho D16 Safe {uid}", code=f"WH-D16-SAFE-{uid}", address="123 Đội Cấn", is_active=True)
+        db.add(wh)
+        db.commit()
+
+        manager = User(
+            email=f"mgr_safe_{uid}@pharmatrust.vn",
+            full_name=f"Manager Safe {uid}",
+            role=UserRole.WAREHOUSE_MANAGER,
+            warehouse_id=wh.id,
+            is_active=True,
+            password_hash="test",
+        )
+        db.add(manager)
+        db.commit()
+
+        prod = CanonicalProduct(canonical_name=f"SP D16 Safe {uid}")
+        db.add(prod)
+        db.commit()
+
+        sku = ProductSku(canonical_product_id=prod.id, sku_code=f"SKU-SAFE-{uid}", uom="Hộp", base_price=Decimal("100000"))
+        db.add(sku)
+        db.commit()
+
+        batch = InventoryBatch(
+            sku_id=sku.id,
+            batch_number=f"BAT-SAFE-{uid}",
+            expiry_date=date.today() + timedelta(days=365),
+            initial_quantity=10,
+        )
+        db.add(batch)
+        db.commit()
+
+        order = Order(
+            order_code=f"ORD-SAFE-{uid}",
+            customer_name="Customer Safe",
+            customer_phone="0911223344",
+            shipping_address="HN",
+            total_amount=Decimal("100000"),
+        )
+        db.add(order)
+        db.commit()
+
+        oi = OrderItem(
+            order_id=order.id,
+            product_id=prod.id,
+            product_sku=sku.sku_code,
+            product_name=prod.canonical_name,
+            quantity=1,
+            price=Decimal("100000"),
+            subtotal=Decimal("100000"),
+        )
+        db.add(oi)
+        db.commit()
+
+        db.add(OrderItemBatchAllocation(
+            order_item_id=oi.id,
+            batch_id=batch.id,
+            warehouse_id=wh.id,
+            allocated_quantity=1,
+        ))
+        db.commit()
+
+        ret = ReturnRequest(
+            return_code=f"RET-SAFE-{uid}",
+            order_id=order.id,
+            customer_name="Cust",
+            customer_phone="0911223344",
+            reason_code="DAMAGED",
+            reason_text="Bị hỏng",
+            status=ReturnStatus.APPROVED.value,
+        )
+        db.add(ret)
+        db.commit()
+
+        case = WarehouseReturnCase(
+            case_code=f"WRC-SAFE-{uid}",
+            return_request_id=ret.id,
+            warehouse_id=wh.id,
+            status=ReturnStatus.APPROVED.value,
+        )
+        db.add(case)
+        db.commit()
+
+        ri = ReturnItem(
+            return_request_id=ret.id,
+            warehouse_return_case_id=case.id,
+            order_item_id=oi.id,
+            product_id=prod.id,
+            product_name=prod.canonical_name,
+            original_quantity=1,
+            requested_quantity=1,
+            accepted_quantity=1,
+            approved_quantity=1,
+            unit_price_at_purchase=Decimal("100000"),
+            net_paid_amount=Decimal("100000"),
+            requested_refund_amount=Decimal("100000"),
+        )
+        db.add(ri)
+        db.commit()
+
+        # Tạo bản ghi kiểm định có seal_intact = False (không đạt 100% tiêu chí)
+        insp = ReturnInspection(
+            case_id=case.id,
+            return_item_id=ri.id,
+            received_quantity=1,
+            accepted_quantity=1,
+            rejected_quantity=0,
+            package_condition="DAMAGED",
+            seal_intact=False,  # Vi phạm tiêu chí an toàn
+            batch_matched=True,
+            expiry_matched=True,
+            storage_condition_ok=True,
+            suggested_action="DISPOSE",
+        )
+        db.add(insp)
+        db.commit()
+
+        # Cố phân luồng RESTOCK -> Phải bị từ chối HTTP 400
+        with pytest.raises(HTTPException) as exc_info:
+            WarehouseReturnService.manager_stock_disposition(
+                db=db,
+                case_code=case.case_code,
+                manager_user=manager,
+                warehouse_id=wh.id,
+                disposition="RESTOCK",
+            )
+        assert exc_info.value.status_code == 400
+        assert "không đạt chuẩn an toàn dược phẩm" in exc_info.value.detail
+
         assert ri.approved_refund_amount == Decimal("0.0")

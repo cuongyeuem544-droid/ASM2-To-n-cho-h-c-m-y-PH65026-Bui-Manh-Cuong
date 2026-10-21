@@ -64,6 +64,26 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
+  const baseTextRef = useRef<string>("");
+  const finalTranscriptRef = useRef<string>("");
+
+  // Dọn dẹp listener nhận diện giọng nói khi unmount
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.onstart = null;
+        recognitionRef.current.onresult = null;
+        recognitionRef.current.onerror = null;
+        recognitionRef.current.onend = null;
+        try {
+          recognitionRef.current.abort();
+        } catch {
+          // ignore
+        }
+        recognitionRef.current = null;
+      }
+    };
+  }, []);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -246,16 +266,36 @@ export const ChatInput: React.FC<ChatInputProps> = ({
       recognition.onstart = () => {
         setIsListening(true);
         setSpeechNotice(null);
+        baseTextRef.current = text.trim() ? `${text.trim()} ` : "";
+        finalTranscriptRef.current = "";
       };
 
       recognition.onresult = (event: any) => {
-        let transcript = "";
+        let interimTranscript = "";
         for (let i = event.resultIndex; i < event.results.length; i++) {
-          transcript += event.results[i][0].transcript;
+          const item = event.results[i];
+          if (item.isFinal) {
+            const finalChunk = item[0]?.transcript?.trim();
+            if (finalChunk) {
+              finalTranscriptRef.current = finalTranscriptRef.current
+                ? `${finalTranscriptRef.current} ${finalChunk}`
+                : finalChunk;
+            }
+          } else {
+            interimTranscript += item[0]?.transcript || "";
+          }
         }
-        if (transcript) {
-          setText((prev) => (prev ? `${prev.trim()} ${transcript}` : transcript));
-        }
+
+        const committed = [baseTextRef.current, finalTranscriptRef.current]
+          .filter(Boolean)
+          .join("")
+          .trim();
+
+        const currentFull = interimTranscript.trim()
+          ? (committed ? `${committed} ${interimTranscript.trim()}` : interimTranscript.trim())
+          : committed;
+
+        setText(currentFull);
       };
 
       recognition.onerror = (event: any) => {
@@ -268,11 +308,25 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           setSpeechNotice(`Lỗi micro: ${event.error}`);
         }
         setIsListening(false);
+        const finalCommitted = [baseTextRef.current, finalTranscriptRef.current]
+          .filter(Boolean)
+          .join("")
+          .trim();
+        if (finalCommitted) {
+          setText(finalCommitted);
+        }
         setTimeout(() => setSpeechNotice(null), 4000);
       };
 
       recognition.onend = () => {
         setIsListening(false);
+        const finalCommitted = [baseTextRef.current, finalTranscriptRef.current]
+          .filter(Boolean)
+          .join("")
+          .trim();
+        if (finalCommitted) {
+          setText(finalCommitted);
+        }
       };
 
       recognitionRef.current = recognition;

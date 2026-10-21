@@ -175,14 +175,19 @@ export function NotificationBell({ viewAllUrl, bellColor }: NotificationBellProp
     setIsOpen(false)
     if (notif.action_url) {
       let targetUrl = notif.action_url
+      // Gỡ bỏ điều hướng tới các route đã bị xóa khỏi hệ thống
+      const deletedRoutes = ['/inventory/receipts', '/inventory/transfers', '/warehouse/receipts', '/warehouse/transfers', '/staff/receipts', '/staff/transfers', '/candidates', '/conflicts', '/exchanges']
+      if (deletedRoutes.some(r => targetUrl.startsWith(r))) {
+        return
+      }
       if (user?.role === 'WAREHOUSE_STAFF') {
         if (targetUrl.startsWith('/warehouse/orders')) {
           const orderId = notif.entity_id || new URLSearchParams(targetUrl.split('?')[1] || '').get('order_id')
           targetUrl = orderId ? `/staff/picking-packing?order_id=${orderId}` : '/staff/picking-packing'
         } else if (targetUrl.startsWith('/warehouse/returns')) {
           targetUrl = '/staff/returns'
-        } else if (targetUrl.startsWith('/warehouse/transfers')) {
-          targetUrl = '/inventory/transfers'
+        } else if (targetUrl.startsWith('/warehouse/transfers') || targetUrl.startsWith('/inventory/transfers') || targetUrl.startsWith('/staff/transfers')) {
+          return
         } else if (targetUrl.startsWith('/warehouse/stock') || targetUrl.startsWith('/warehouse/batches')) {
           targetUrl = '/inventory/batches'
         }
@@ -192,8 +197,8 @@ export function NotificationBell({ viewAllUrl, bellColor }: NotificationBellProp
           targetUrl = orderId ? `/orders?order_id=${orderId}` : '/orders'
         } else if (targetUrl.startsWith('/warehouse/returns')) {
           targetUrl = '/returns'
-        } else if (targetUrl.startsWith('/warehouse/transfers')) {
-          targetUrl = '/inventory/transfers'
+        } else if (targetUrl.startsWith('/warehouse/transfers') || targetUrl.startsWith('/inventory/transfers') || targetUrl.startsWith('/staff/transfers')) {
+          return
         } else if (targetUrl.startsWith('/warehouse/stock') || targetUrl.startsWith('/warehouse/batches')) {
           targetUrl = '/inventory/batches'
         }

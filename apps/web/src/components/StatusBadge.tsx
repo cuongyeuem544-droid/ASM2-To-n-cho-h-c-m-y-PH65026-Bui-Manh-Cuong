@@ -5,7 +5,7 @@ export type BadgeTone = 'success' | 'warning' | 'danger' | 'info' | 'neutral'
 
 const labels: Record<string, string> = {
   // Confidence & Verification
-  HIGH_OFFICIAL_MATCH: 'Khớp chuẩn',
+  HIGH_OFFICIAL_MATCH: 'Khớp chính thức',
   REVIEW_REQUIRED: 'Cần kiểm tra',
   INSUFFICIENT_EVIDENCE: 'Chưa đủ chứng cứ',
   BLOCKED: 'Đã tạm khóa',

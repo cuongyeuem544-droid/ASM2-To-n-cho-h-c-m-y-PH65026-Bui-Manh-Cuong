@@ -1,3 +1,13 @@
+from __future__ import annotations
+def mask_account_number(acc: str | None) -> str:
+    if not acc:
+        return ""
+    acc = acc.strip()
+    if len(acc) <= 4:
+        return "****"
+    return f"{acc[:2]}****{acc[-3:]}" if len(acc) >= 6 else f"****{acc[-3:]}"
+
+
 """
 apps/api/app/services/warehouse_return_service.py
 
@@ -12,7 +22,6 @@ Dịch vụ Quản lý Ca Hoàn Hàng Theo Kho (Warehouse Return Case Service) H
 - Phân luồng kho GSP: Restock (tăng tồn đúng 1 lần), Quarantine, Dispose.
 """
 
-from __future__ import annotations
 
 import logging
 import uuid
@@ -181,7 +190,7 @@ class WarehouseReturnService:
         for c in cases_created:
             try:
                 from app.services.warehouse_notification_service import WarehouseNotificationService
-                WarehouseNotificationService.notify_return_new(db, return_request, c.warehouse_id)
+                WarehouseNotificationService.notify_return_new(db, return_req=return_request, warehouse_id=c.warehouse_id, case=c)
             except Exception as ex:
                 logger.warning(f"Failed to create RETURN_NEW notification for case {c.case_code}: {ex}")
 
@@ -257,7 +266,17 @@ class WarehouseReturnService:
         """
         case = cls.get_case_by_identifier(db, case_code, warehouse_id)
 
-        # Kiểm tra nhân viên có thuộc cùng kho không
+        staff_user = db.get(User, staff_id)
+        if not staff_user:
+            raise HTTPException(status_code=404, detail="Không tìm thấy nhân viên.")
+        if not staff_user.is_active:
+            raise HTTPException(status_code=400, detail="Tài khoản nhân viên đang bị khóa hoặc không hoạt động.")
+        if getattr(staff_user, "role", "") not in ["WAREHOUSE_STAFF", getattr(User, "role", None)]:
+            # Check role strictly
+            staff_role = staff_user.role.value if hasattr(staff_user.role, "value") else str(staff_user.role)
+            if staff_role != "WAREHOUSE_STAFF":
+                raise HTTPException(status_code=400, detail="Chỉ được phân công cho nhân viên kho (WAREHOUSE_STAFF).")
+
         from app.models.inventory import UserWarehouseMembership
         membership = db.scalar(
             select(UserWarehouseMembership).where(
@@ -266,15 +285,11 @@ class WarehouseReturnService:
                 UserWarehouseMembership.is_active.is_(True),
             )
         )
-        if not membership and manager_user.role != "ADMIN":
+        if not membership:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Nhân viên được phân công không thuộc kho này hoặc tài khoản không hoạt động.",
+                detail="Nhân viên được phân công không thuộc kho này hoặc không có quyền hoạt động tại kho.",
             )
-
-        staff_user = db.get(User, staff_id)
-        if not staff_user:
-            raise HTTPException(status_code=404, detail="Không tìm thấy nhân viên.")
 
         case.assigned_staff_id = staff_id
         case.updated_at = utcnow()
@@ -298,6 +313,25 @@ class WarehouseReturnService:
             details=f"Gán nhân viên ID {staff_id} ({staff_user.full_name}) xử lý ca hoàn {case.case_code}",
         )
 
+        # Tạo thông báo riêng cho nhân viên được giao
+        try:
+            from app.services.warehouse_notification_service import WarehouseNotificationService
+            WarehouseNotificationService.create_notification(
+                db,
+                warehouse_id=case.warehouse_id,
+                notification_type="RETURN_ASSIGNED",
+                title=f"Phân công ca hoàn hàng: {case.case_code}",
+                message=f"Bạn được phân công tiếp nhận và thẩm định hàng cho ca hoàn {case.case_code}.",
+                severity="INFO",
+                recipient_user_id=staff_id,
+                entity_type="WarehouseReturnCase",
+                entity_id=str(case.id),
+                action_url=f"/staff/returns?case_code={case.case_code}",
+                deduplication_key=f"RETURN_ASSIGNED_{case.id}_{staff_id}",
+            )
+        except Exception as ex:
+            logger.warning(f"Failed to create RETURN_ASSIGNED notification: {ex}")
+
         db.commit()
         db.refresh(case)
         return case
@@ -307,15 +341,19 @@ class WarehouseReturnService:
         cls,
         db: Session,
         case_code: str,
-        staff_user: User,
-        warehouse_id: int | None,
+        user: User | None = None,
+        staff_user: User | None = None,
+        warehouse_id: int | None = None,
         carrier_name: str | None = None,
         tracking_code: str | None = None,
         package_condition: str | None = None,
         note: str | None = None,
     ) -> WarehouseReturnCase:
+        actual_user = user or staff_user
+        if not actual_user:
+            raise HTTPException(status_code=400, detail="Thiếu thông tin người tiếp nhận kiện hàng.")
         """
-        Nhân viên kho tiếp nhận gói hàng từ bưu tá / đơn vị vận chuyển.
+        Quản lý kho hoặc Nhân viên kho được phân công tiếp nhận gói hàng từ bưu tá / đơn vị vận chuyển.
         Trạng thái chuyển sang: RECEIVED.
         """
         if not package_condition or not str(package_condition).strip():
@@ -326,35 +364,46 @@ class WarehouseReturnService:
 
         case = cls.get_case_by_identifier(db, case_code, warehouse_id)
 
+        user_role_str = actual_user.role.value if hasattr(actual_user.role, "value") else str(actual_user.role)
+        is_manager = user_role_str in ["WAREHOUSE_MANAGER", "ADMIN"]
+        if not is_manager:
+            if case.assigned_staff_id != actual_user.id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Bạn chưa được phân công xử lý ca hoàn này.",
+                )
+
         valid_prev = [
-            ReturnStatus.REQUESTED.value,
             ReturnStatus.ASSIGNED_TO_WAREHOUSE.value,
             ReturnStatus.WAITING_CUSTOMER_SHIPMENT.value,
-            ReturnStatus.WAITING_CUSTOMER_RETURN.value,
             ReturnStatus.IN_TRANSIT.value,
             ReturnStatus.RETURN_IN_TRANSIT.value,
+            ReturnStatus.REQUESTED.value,
+            ReturnStatus.WAITING_CUSTOMER_RETURN.value,
         ]
         if case.status not in valid_prev:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Ca hoàn đang ở trạng thái '{case.status}', không thể tiếp nhận lại.",
+                detail=f"Ca hoàn đang ở trạng thái '{case.status}', không thể tiếp nhận từ bưu tá (chỉ cho phép khi ở: ASSIGNED_TO_WAREHOUSE, WAITING_CUSTOMER_SHIPMENT, IN_TRANSIT, RETURN_IN_TRANSIT).",
             )
 
         old_status = case.status
         case.status = ReturnStatus.RECEIVED.value
         case.carrier_name = carrier_name or case.carrier_name
         case.tracking_code = tracking_code or case.tracking_code
-        case.package_condition = package_condition
+        case.package_condition = package_condition.strip()
+        case.received_at = utcnow()
         case.updated_at = utcnow()
 
+        actor_title = "Quản lý kho" if is_manager else "Nhân viên kho"
         cls._add_case_history(
             db=db,
             case=case,
             from_status=old_status,
             to_status=ReturnStatus.RECEIVED.value,
-            actor=staff_user,
-            actor_role=staff_user.role,
-            note=note or f"Nhân viên kho nhận kiện hàng từ bưu tá ({carrier_name or 'ĐVVC'}). Tình trạng bao bì: {package_condition}",
+            actor=actual_user,
+            actor_role=actual_user.role,
+            note=note or f"{actor_title} nhận kiện hàng từ bưu tá ({carrier_name or 'ĐVVC'}). Tình trạng bao bì: {package_condition}",
         )
 
         write_audit(
@@ -362,8 +411,8 @@ class WarehouseReturnService:
             action="RECEIVE_RETURN_PACKAGE",
             entity_type="WAREHOUSE_RETURN_CASE",
             entity_id=case.case_code,
-            user=staff_user,
-            details=f"Tiếp nhận hàng hoàn {case.case_code}, vận đơn: {tracking_code}, bao bì: {package_condition}",
+            user=actual_user,
+            details=f"{actor_title} ({actual_user.full_name}) tiếp nhận hàng hoàn {case.case_code}, vận đơn: {tracking_code}, bao bì: {package_condition}",
         )
 
         db.commit()
@@ -509,15 +558,36 @@ class WarehouseReturnService:
                     detail="Thiếu trường kiểm định bắt buộc: package_condition",
                 )
 
-            seal_intact = bool(insp_in["seal_intact"])
-            batch_matched = bool(insp_in["batch_matched"])
-            expiry_matched = bool(insp_in["expiry_matched"])
-            storage_condition_ok = bool(insp_in["storage_condition_ok"])
-            sug_action = str(insp_in["suggested_action"]).strip().upper()
-            if not sug_action:
+            def _parse_bool_strict(val: Any, field_name: str) -> bool:
+                if val is None or (isinstance(val, str) and not val.strip()):
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=f"Trường kiểm định '{field_name}' không được để trống.",
+                    )
+                if isinstance(val, bool):
+                    return val
+                if isinstance(val, (int, float)) and val in (0, 1):
+                    return bool(val)
+                if isinstance(val, str):
+                    v = val.strip().lower()
+                    if v in ("true", "1", "yes", "t"):
+                        return True
+                    if v in ("false", "0", "no", "f"):
+                        return False
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="Thiếu trường kiểm định bắt buộc: suggested_action",
+                    detail=f"Trường '{field_name}' phải là giá trị boolean hợp lệ (True/False), nhận: {val!r}",
+                )
+
+            seal_intact = _parse_bool_strict(insp_in.get("seal_intact"), "seal_intact")
+            batch_matched = _parse_bool_strict(insp_in.get("batch_matched"), "batch_matched")
+            expiry_matched = _parse_bool_strict(insp_in.get("expiry_matched"), "expiry_matched")
+            storage_condition_ok = _parse_bool_strict(insp_in.get("storage_condition_ok"), "storage_condition_ok")
+            sug_action = str(insp_in.get("suggested_action") or "").strip().upper()
+            if not sug_action or sug_action not in ["RESTOCK", "QUARANTINE", "DISPOSE", "SELLABLE_STOCK"]:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Thiếu hoặc sai trường kiểm định bắt buộc: suggested_action (chỉ chấp nhận RESTOCK, QUARANTINE, DISPOSE)",
                 )
 
             # Kiểm tra bắt buộc có lý do từ chối nếu có sản phẩm bị loại bỏ
@@ -804,12 +874,18 @@ class WarehouseReturnService:
                 )
             acc_q = int(app_in["approved_quantity"])
             raw_rej = app_in.get("rejected_quantity")
+
+            rec_q = ret_item.received_quantity
+            insp_match = next((ins for ins in case.inspections if ins.return_item_id == ret_item.id), None)
+            if insp_match and insp_match.received_quantity is not None:
+                rec_q = insp_match.received_quantity
+            if rec_q is None or (rec_q == 0 and not case.inspections):
+                rec_q = getattr(ret_item, "accepted_quantity", None) or ret_item.requested_quantity or 0
+
             if raw_rej is None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Vui lòng chỉ định rõ số lượng từ chối (rejected_quantity) cho sản phẩm '{ret_item.product_name}'.",
-                )
-            rej_q = int(raw_rej)
+                rej_q = max(0, rec_q - acc_q)
+            else:
+                rej_q = int(raw_rej)
 
             if acc_q < 0 or rej_q < 0:
                 raise HTTPException(
@@ -817,18 +893,17 @@ class WarehouseReturnService:
                     detail=f"Số lượng duyệt ({acc_q}) và từ chối ({rej_q}) của '{ret_item.product_name}' không được âm.",
                 )
 
-            rec_q = ret_item.received_quantity
-            insp_match = next((ins for ins in case.inspections if ins.return_item_id == ret_item.id), None)
-            if insp_match and insp_match.received_quantity is not None:
-                rec_q = insp_match.received_quantity
-            if rec_q is None:
-                rec_q = 0
+            if acc_q > ret_item.requested_quantity:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Số lượng duyệt ({acc_q}) vượt quá số lượng yêu cầu hoàn ({ret_item.requested_quantity}) cho sản phẩm '{ret_item.product_name}' (không hợp lệ).",
+                )
 
             # Ràng buộc: Nếu received_quantity == 0 thì approved_quantity bắt buộc = 0
             if rec_q == 0 and acc_q > 0:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Sản phẩm '{ret_item.product_name}' có số lượng thực nhận là 0, số lượng duyệt (approved_quantity) bắt buộc phải bằng 0.",
+                    detail=f"Sản phẩm '{ret_item.product_name}' có số lượng thực nhận là 0, số lượng duyệt (approved_quantity) bắt buộc phải bằng 0 (không hợp lệ).",
                 )
 
             # Ràng buộc: approved_quantity <= received_quantity
@@ -1091,6 +1166,23 @@ class WarehouseReturnService:
         case.updated_at = utcnow()
         db.flush()
 
+        # Lấy thông tin tài khoản thụ hưởng đã lưu an toàn trong ReturnRequest (không cho client override)
+        ret_req = case.return_request
+        stored_bank = getattr(ret_req, "refund_bank_name", None)
+        stored_acc_num = getattr(ret_req, "refund_account_number", None)
+        stored_acc_name = getattr(ret_req, "refund_account_name", None)
+
+        effective_bank = stored_bank or beneficiary_bank
+        effective_acc_num = stored_acc_num or beneficiary_account_number
+        effective_acc_name = stored_acc_name or beneficiary_account_name or (ret_req.customer_name if ret_req else "Khách hàng")
+
+        if refund_method in [RefundMethod.BANK_TRANSFER.value, "BANK_TRANSFER"]:
+            if not effective_acc_num or not effective_bank:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Yêu cầu hoàn tiền chuyển khoản nhưng thiếu thông tin tài khoản thụ hưởng của khách hàng.",
+                )
+
         # Tạo bản ghi Refund
         refund_record = Refund(
             refund_code=refund_code,
@@ -1104,9 +1196,9 @@ class WarehouseReturnService:
             status=RefundStatus.PROCESSING.value,
             reason=f"Hoàn tiền ca đổi trả chi nhánh {case.case_code}",
             idempotency_key=effective_idempotency,
-            beneficiary_bank_name=beneficiary_bank or case.return_request.refunds[0].beneficiary_bank_name if case.return_request.refunds else beneficiary_bank,
-            beneficiary_account_number=beneficiary_account_number,
-            beneficiary_account_name=beneficiary_account_name,
+            beneficiary_bank_name=effective_bank,
+            beneficiary_account_number=effective_acc_num,
+            beneficiary_account_name=effective_acc_name,
             manual_reference_number=manual_reference_number,
             manual_proof_storage_key=manual_proof_storage_key,
             approved_by=manager_user.id,
@@ -1215,6 +1307,7 @@ class WarehouseReturnService:
         warehouse_id: int | None,
         disposition: str,  # RESTOCK | QUARANTINE | DISPOSE
         note: str | None = None,
+        batch_allocations: list[dict[str, Any]] | None = None,
     ) -> WarehouseReturnCase:
         """
         Quản lý kho phân luồng xử lý hàng sau khi hoàn tất hoàn tiền:
@@ -1250,6 +1343,26 @@ class WarehouseReturnService:
             case_items = list(case.return_request.items)
 
         if disposition == "RESTOCK":
+            # 1. Kiểm tra 100% tiêu chí kiểm định an toàn dược phẩm
+            for insp in case.inspections:
+                failed = []
+                if insp.seal_intact is not True:
+                    failed.append("tem niêm phong không nguyên vẹn (seal_intact=False)")
+                if insp.batch_matched is not True:
+                    failed.append("số lô không khớp đã xuất (batch_matched=False)")
+                if insp.expiry_matched is not True:
+                    failed.append("hạn sử dụng không khớp hoặc đã hết hạn (expiry_matched=False)")
+                if insp.storage_condition_ok is not True:
+                    failed.append("điều kiện bảo quản không đạt chuẩn GSP (storage_condition_ok=False)")
+                pkg = (insp.package_condition or "").lower()
+                if any(bad in pkg for bad in ["rách", "móp", "vỡ", "hỏng", "damaged", "broken", "torn", "dập", "hở"]):
+                    failed.append(f"bao bì bị hư hại ({insp.package_condition})")
+                if failed:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Sản phẩm #{insp.return_item_id} không đạt chuẩn an toàn dược phẩm ({', '.join(failed)}). Tuyệt đối không thể phân luồng nhập lại kho bán (RESTOCK).",
+                    )
+
             linked_codes = [case.case_code]
             if case.return_request:
                 linked_codes.append(case.return_request.return_code)
@@ -1280,7 +1393,7 @@ class WarehouseReturnService:
 
             items_to_restock = []
             for ret_item in case_items:
-                qty_restock = ret_item.approved_quantity or ret_item.restock_quantity or ret_item.accepted_quantity or 0
+                qty_restock = ret_item.approved_quantity if ret_item.approved_quantity is not None else 0
                 if qty_restock > 0:
                     items_to_restock.append({
                         "order_item_id": ret_item.order_item_id,
@@ -1305,6 +1418,7 @@ class WarehouseReturnService:
                 actor_user_id=manager_user.id,
                 audit_note=note or f"Nhập lại kho từ ca hoàn {case.case_code}",
                 linked_reference_codes=linked_codes,
+                batch_allocations=batch_allocations,
             )
 
             for ret_item in case_items:

@@ -879,7 +879,7 @@ export const PRODUCTS_DATA: Product[] = [
     isBestSeller: false,
     createdAt: "2026-02-16",
   },
-  // ================= 7. DƯỢC PHẨM CHUẨN HÓA TỪ HỆ THỐNG PHARMATRUST DATA HUB (98+ SẢN PHẨM THẬT) =================
+  // ================= 7. DƯỢC PHẨM CHÍNH THỨC TỪ HỆ THỐNG PHARMATRUST DATA HUB (98+ SẢN PHẨM THẬT) =================
   {
     "id": "pt-16",
     "dbId": 16,

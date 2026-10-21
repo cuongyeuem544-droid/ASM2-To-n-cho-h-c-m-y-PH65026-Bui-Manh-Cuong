@@ -81,6 +81,11 @@ export function ReturnWizardModal({
   const [createdReturnCode, setCreatedReturnCode] = useState<string | null>(null);
   const [uploadErrors, setUploadErrors] = useState<string[]>([]);
   const [failedFiles, setFailedFiles] = useState<File[]>([]);
+  const [refundBankCode, setRefundBankCode] = useState<string>("VCB");
+  const [refundBankName, setRefundBankName] = useState<string>("Vietcombank (Ngoại Thương Việt Nam)");
+  const [refundAccountNumber, setRefundAccountNumber] = useState<string>("");
+  const [refundAccountName, setRefundAccountName] = useState<string>("");
+  const [bankError, setBankError] = useState<string>("");
 
   useEffect(() => {
     const token = typeof window !== "undefined" ? localStorage.getItem("pharmatrust_token") || localStorage.getItem("h4care_auth_token") : null;

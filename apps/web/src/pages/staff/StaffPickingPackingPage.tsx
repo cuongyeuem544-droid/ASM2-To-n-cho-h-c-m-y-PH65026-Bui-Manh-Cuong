@@ -10,8 +10,10 @@ import {
   Search,
   X,
   Layers,
+  ShieldCheck,
 } from 'lucide-react'
 import { api } from '../../services/api'
+import { useAuth } from '../../services/auth'
 
 interface OrderItem {
   id: number
@@ -51,7 +53,9 @@ interface PickDetailResponse {
 }
 
 export function StaffPickingPackingPage() {
+  const { user } = useAuth()
   const [searchParams] = useSearchParams()
+  const warehouseCode = searchParams.get('warehouse_code') || (user?.role === 'ADMIN' ? 'KHO-HCM-01' : '')
   const [orders, setOrders] = useState<OrderItem[]>([])
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null)
   const [detail, setDetail] = useState<PickDetailResponse | null>(null)
@@ -67,7 +71,8 @@ export function StaffPickingPackingPage() {
 
   const fetchOrders = () => {
     setLoading(true)
-    api<{ items: OrderItem[] }>('/warehouse-portal/orders?page_size=50')
+    const whParam = warehouseCode ? `&warehouse_code=${encodeURIComponent(warehouseCode)}` : ''
+    api<{ items: OrderItem[] }>(`/warehouse-portal/orders?page_size=50${whParam}`)
       .then((res) => {
         setOrders(res.items || [])
         const queryOrderId = searchParams.get('order_id')
@@ -86,7 +91,8 @@ export function StaffPickingPackingPage() {
     setLoadingDetail(true)
     setCheckedItems({})
     try {
-      const res = await api<PickDetailResponse>(`/warehouse-portal/orders/${orderId}/pick-details`)
+      const whParam = warehouseCode ? `?warehouse_code=${encodeURIComponent(warehouseCode)}` : ''
+      const res = await api<PickDetailResponse>(`/warehouse-portal/orders/${orderId}/pick-details${whParam}`)
       setDetail(res)
     } catch (err: any) {
       alert(err?.message || 'Không thể tải chi tiết đơn hàng')
@@ -97,7 +103,7 @@ export function StaffPickingPackingPage() {
 
   useEffect(() => {
     fetchOrders()
-  }, [])
+  }, [warehouseCode])
 
   const handleToggleCheck = (itemId: number) => {
     setCheckedItems((prev) => ({ ...prev, [itemId]: !prev[itemId] }))
@@ -108,7 +114,10 @@ export function StaffPickingPackingPage() {
     try {
       await api(`/warehouse-portal/orders/${selectedOrderId}/fulfillment`, {
         method: 'PATCH',
-        body: JSON.stringify({ fulfillment_status: newStatus }),
+        body: JSON.stringify({
+          fulfillment_status: newStatus,
+          warehouse_code: warehouseCode || undefined,
+        }),
       })
       alert(`Đã cập nhật đơn sang trạng thái: ${newStatus}`)
       loadOrderDetail(selectedOrderId)
@@ -146,6 +155,23 @@ export function StaffPickingPackingPage() {
 
   return (
     <div className="space-y-4 max-w-7xl mx-auto">
+      {user?.role === 'ADMIN' && (
+        <div className="bg-emerald-800 text-white px-4 py-3 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-sm">
+          <div className="flex items-center gap-2">
+            <ShieldCheck size={20} className="text-emerald-300 shrink-0" />
+            <div>
+              <span className="font-bold">Phiên làm việc Quản trị viên (Admin):</span>
+              <span className="ml-1 text-emerald-100 text-xs">
+                Trực tiếp điều phối & soạn hàng tại Kho HCM ({warehouseCode || 'KHO-HCM-01'}). Mọi thao tác đều được ghi nhật ký kiểm toán (audit log) với danh tính Admin.
+              </span>
+            </div>
+          </div>
+          <span className="bg-emerald-900/80 px-2.5 py-1 rounded text-[11px] font-mono text-emerald-200 uppercase self-start sm:self-auto shrink-0">
+            Admin Active • Kho HCM
+          </span>
+        </div>
+      )}
+
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white p-4 rounded-xl border border-slate-200">
         <div>

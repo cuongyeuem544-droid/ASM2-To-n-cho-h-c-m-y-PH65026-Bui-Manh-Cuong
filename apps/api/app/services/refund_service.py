@@ -98,54 +98,59 @@ class RefundService:
         if not order:
             raise HTTPException(status_code=404, detail=f"Không tìm thấy đơn hàng ID {order_id}.")
 
-        # 3. Nếu phiếu hoàn tiền liên quan đến ReturnRequest, bắt buộc tuân thủ Quản lý kho phê duyệt
-        if return_request_id:
-            ret = db.get(ReturnRequest, return_request_id)
-            if not ret:
-                raise HTTPException(status_code=404, detail=f"Không tìm thấy yêu cầu đổi/trả ID {return_request_id}.")
+        # 3. Bắt buộc phiếu hoàn tiền phải liên kết với ReturnRequest đã được Quản lý kho phê duyệt
+        if not return_request_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tạo phiếu hoàn tiền bắt buộc phải gắn liền với yêu cầu đổi/trả đã được Quản lý kho phê duyệt hợp lệ (thiếu return_request_id).",
+            )
 
-            cases = list(ret.warehouse_cases)
-            if not cases:
+        ret = db.get(ReturnRequest, return_request_id)
+        if not ret:
+            raise HTTPException(status_code=404, detail=f"Không tìm thấy yêu cầu đổi/trả ID {return_request_id}.")
+
+        cases = list(ret.warehouse_cases)
+        if not cases:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Yêu cầu đổi/trả '{ret.return_code}' chưa được phân ca kho xử lý.",
+            )
+
+        for c in cases:
+            if not c.approved_by_user_id:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Yêu cầu đổi/trả '{ret.return_code}' chưa được phân ca kho xử lý.",
+                    detail=f"Ca hoàn {c.case_code} chưa có quyết định phê duyệt rõ ràng từ Quản lý kho (thiếu approved_by_user_id). Không thể tạo phiếu hoàn tiền.",
                 )
-
-            for c in cases:
-                if not c.approved_by_user_id:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Ca hoàn {c.case_code} chưa có quyết định phê duyệt rõ ràng từ Quản lý kho (thiếu approved_by_user_id). Không thể tạo phiếu hoàn tiền.",
-                    )
-                if c.status not in [ReturnStatus.APPROVED.value, ReturnStatus.REFUND_PENDING.value, ReturnStatus.REFUNDED.value, ReturnStatus.CLOSED.value]:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Ca hoàn {c.case_code} đang ở trạng thái '{c.status}', chưa sẵn sàng hoàn tiền.",
-                    )
-
-            # Backend tự động tính lại số tiền hoàn từ các item đã được Quản lý kho duyệt
-            calculated_refund = Decimal("0.0")
-            for item in ret.items:
-                app_qty = item.approved_quantity or 0
-                if app_qty > 0:
-                    net_unit = RefundCalculationService.calculate_net_unit_price(order, item.order_item)
-                    calculated_refund += net_unit * Decimal(str(app_qty))
-
-            if calculated_refund <= 0:
+            if c.status not in [ReturnStatus.APPROVED.value, ReturnStatus.REFUND_PENDING.value, ReturnStatus.REFUNDED.value, ReturnStatus.CLOSED.value]:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Tổng số tiền hoàn được duyệt từ Quản lý kho cho phiếu '{ret.return_code}' là 0đ. Không có sản phẩm nào được duyệt để hoàn tiền.",
+                    detail=f"Ca hoàn {c.case_code} đang ở trạng thái '{c.status}', chưa sẵn sàng hoàn tiền.",
                 )
 
-            if abs(refund_amount - calculated_refund) >= Decimal("1.0"):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=(
-                        f"Số tiền yêu cầu hoàn ({int(refund_amount):,} đ) không khớp với số tiền đã được "
-                        f"Quản lý kho phê duyệt ({int(calculated_refund):,} đ). Tuyệt đối không được hoàn tiền sai lệch."
-                    ),
-                )
-            refund_amount = calculated_refund
+        # Backend tự động tính lại số tiền hoàn từ các item đã được Quản lý kho duyệt
+        calculated_refund = Decimal("0.0")
+        for item in ret.items:
+            app_qty = item.approved_quantity if item.approved_quantity is not None else 0
+            if app_qty > 0:
+                net_unit = RefundCalculationService.calculate_net_unit_price(order, item.order_item)
+                calculated_refund += net_unit * Decimal(str(app_qty))
+
+        if calculated_refund <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Tổng số tiền hoàn được duyệt từ Quản lý kho cho phiếu '{ret.return_code}' là 0đ. Không có sản phẩm nào được duyệt để hoàn tiền.",
+            )
+
+        if abs(refund_amount - calculated_refund) >= Decimal("1.0"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Số tiền yêu cầu hoàn ({int(refund_amount):,} đ) không khớp với số tiền đã được "
+                    f"Quản lý kho phê duyệt ({int(calculated_refund):,} đ). Tuyệt đối không được hoàn tiền sai lệch."
+                ),
+            )
+        refund_amount = calculated_refund
 
         # 4. Xác thực số tiền hoàn không vượt quá hạn mức tối đa của đơn hàng
         is_valid, err_msg = RefundCalculationService.validate_refund_amount(

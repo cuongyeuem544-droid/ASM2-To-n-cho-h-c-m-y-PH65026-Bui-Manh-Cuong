@@ -77,6 +77,8 @@ export default function AccountPage() {
   const [isSwitchingCod, setIsSwitchingCod] = useState<boolean>(false);
   const [isCancellingOrder, setIsCancellingOrder] = useState<boolean>(false);
   const [returnWizardOrderCode, setReturnWizardOrderCode] = useState<string | null>(null);
+  const [returnRefreshKey, setReturnRefreshKey] = useState<number>(0);
+  const [selectedReturnCode, setSelectedReturnCode] = useState<string | null>(null);
   const [isEditingProfile, setIsEditingProfile] = useState<boolean>(false);
   const [editName, setEditName] = useState<string>("");
   const [editEmail, setEditEmail] = useState<string>("");
@@ -1027,8 +1029,11 @@ export default function AccountPage() {
             {activeTab === "returns" && (
               <div id="returns" className="bg-white rounded-2xl p-6 sm:p-8 border border-slate-200 shadow-xs">
                 <CustomerReturnsSection
-                  userPhone={user.phone}
-                  userName={user.fullName}
+                  userPhone={user?.phone}
+                  userName={user?.fullName}
+                  refreshKey={returnRefreshKey}
+                  initialSelectedReturnCode={selectedReturnCode}
+                  onSelectedReturnCodeChange={setSelectedReturnCode}
                 />
               </div>
             )}
@@ -1334,12 +1339,13 @@ export default function AccountPage() {
       {returnWizardOrderCode && (
         <ReturnWizardModal
           orderCode={returnWizardOrderCode}
-          customerPhone={user.phone}
+          customerPhone={user?.phone}
           onClose={() => setReturnWizardOrderCode(null)}
-          onSuccess={() => {
+          onSuccess={(returnCode) => {
             setReturnWizardOrderCode(null);
-            // Auto reload to see new return in CustomerReturnsSection
-            window.location.hash = "returns";
+            setActiveTab("returns");
+            setReturnRefreshKey((prev) => prev + 1);
+            setSelectedReturnCode(returnCode);
           }}
         />
       )}

@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import {
   CheckSquare,
   PackageCheck,
-  ArrowLeftRight,
   ArrowRight,
   Clock,
   CheckCircle2,
@@ -76,7 +75,7 @@ export function StaffTodayPage() {
       </div>
 
       {/* Task Summary Touch Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         {/* Card 1: Don can soan */}
         <div
           onClick={() => navigate('/staff/picking-packing')}
@@ -121,28 +120,7 @@ export function StaffTodayPage() {
           </div>
         </div>
 
-        {/* Card 3: Kien hang dieu chuyen den */}
-        <div
-          onClick={() => navigate('/staff/transfers')}
-          className="bg-white p-6 rounded-2xl border-2 border-blue-200 hover:border-blue-400 cursor-pointer shadow-sm transition hover:shadow-md space-y-4"
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-black uppercase text-blue-800 bg-blue-100 px-3 py-1 rounded-full">
-              3. KIỆN HÀNG ĐẾN
-            </span>
-            <ArrowLeftRight className="text-blue-600" size={26} />
-          </div>
-          <div>
-            <div className="text-4xl font-black text-blue-600">
-              {data.inbound_transfers.length}
-            </div>
-            <div className="text-xs font-bold text-slate-500 mt-1">Kiện điều chuyển từ kho khác đang đến</div>
-          </div>
-          <div className="text-xs font-bold text-blue-700 flex items-center gap-1 pt-2 border-t">
-            Kiểm đếm & Tiếp nhận <ArrowRight size={14} />
-          </div>
-        </div>
-      </div>
+              </div>
 
       {/* Immediate Pick Task List */}
       <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">

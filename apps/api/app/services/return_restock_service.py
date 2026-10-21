@@ -50,9 +50,24 @@ class ReturnRestockService:
         actor_user_id: int,
         audit_note: str | None = None,
         linked_reference_codes: list[str] | None = None,
+        batch_allocations: list[dict[str, Any]] | None = None,
     ) -> list[StockMovement]:
         if not items_to_restock:
             return []
+
+        # Index danh sách phân bổ lô được truyền ở cấp cao nhất (nếu có)
+        allocations_by_order_item: dict[int, list[dict[str, Any]]] = {}
+        allocations_by_return_item: dict[int, list[dict[str, Any]]] = {}
+        single_order_item_id = items_to_restock[0].get("order_item_id") if len(items_to_restock) == 1 else None
+        if batch_allocations:
+            for ba in batch_allocations:
+                ba_dict = ba if isinstance(ba, dict) else (ba.model_dump() if hasattr(ba, "model_dump") else dict(ba))
+                o_id = ba_dict.get("order_item_id") or single_order_item_id
+                r_id = ba_dict.get("return_item_id")
+                if o_id:
+                    allocations_by_order_item.setdefault(int(o_id), []).append(ba_dict)
+                if r_id:
+                    allocations_by_return_item.setdefault(int(r_id), []).append(ba_dict)
 
         # 1. Xác định canonical_return_code và danh sách mã đối soát chéo (Admin / Kho)
         canonical_return_code = source_code
@@ -122,6 +137,7 @@ class ReturnRestockService:
                 continue
 
             order_item_id = it.get("order_item_id")
+            return_item_id = it.get("return_item_id")
             product_id = it.get("product_id")
             product_name = it.get("product_name") or f"Sản phẩm #{product_id}"
 
@@ -234,28 +250,102 @@ class ReturnRestockService:
                     ),
                 )
 
-            # Phân bổ tuần tự theo các allocation còn dung lượng (không quay lại lô đầu nếu đã hoàn đủ)
-            remaining_qty = qty_restock
-            batch_plans: list[dict[str, Any]] = []
-            for g in grouped_allocations:
-                if remaining_qty <= 0:
-                    break
-                avail = g["available_to_return"]
-                if avail <= 0:
-                    continue
-                portion = min(remaining_qty, avail)
-                remaining_qty -= portion
-                batch_plans.append({
-                    "batch_id": g["batch_id"],
-                    "warehouse_id": g["warehouse_id"],
-                    "portion": portion,
-                })
+            # Xác định danh sách phân bổ lô cụ thể cho item này
+            explicit_item_allocs: list[dict[str, Any]] = it.get("batch_allocations") or []
+            if not explicit_item_allocs and order_item_id in allocations_by_order_item:
+                explicit_item_allocs = allocations_by_order_item[order_item_id]
+            if not explicit_item_allocs and return_item_id and return_item_id in allocations_by_return_item:
+                explicit_item_allocs = allocations_by_return_item[return_item_id]
 
-            if remaining_qty > 0:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Không thể phân bổ đủ số lượng hoàn cho '{product_name}'. Thiếu {remaining_qty} đơn vị.",
-                )
+            batch_plans: list[dict[str, Any]] = []
+
+            if explicit_item_allocs:
+                # Kiểm tra không được gửi trùng lô trong cùng payload của mặt hàng
+                seen_item_bids = set()
+                total_explicit_qty = 0
+                grouped_by_bid = {g["batch_id"]: g for g in grouped_allocations}
+
+                for ba in explicit_item_allocs:
+                    ba_dict = ba if isinstance(ba, dict) else (ba.model_dump() if hasattr(ba, "model_dump") else dict(ba))
+                    b_id = ba_dict.get("batch_id")
+                    b_qty = ba_dict.get("quantity") or 0
+
+                    if not b_id:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Phân bổ lô của sản phẩm '{product_name}' thiếu batch_id.",
+                        )
+                    if b_id in seen_item_bids:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Trùng lặp lô #{b_id} trong danh sách phân bổ lô của sản phẩm '{product_name}'. Mỗi lô chỉ được xuất hiện một lần trong danh sách phân bổ.",
+                        )
+                    seen_item_bids.add(b_id)
+
+                    if b_qty <= 0:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Số lượng phân bổ cho lô #{b_id} của sản phẩm '{product_name}' phải lớn hơn 0 (nhận: {b_qty}).",
+                        )
+
+                    if b_id not in grouped_by_bid:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Lô #{b_id} không thuộc danh sách lô đã xuất gốc của sản phẩm '{product_name}' (order_item #{order_item_id}).",
+                        )
+
+                    avail = grouped_by_bid[b_id]["available_to_return"]
+                    if b_qty > avail:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=(
+                                f"Số lượng nhập hoàn cho lô #{b_id} ({b_qty}) vượt quá số lượng còn có thể hoàn của lô đó ({avail}) "
+                                f"cho sản phẩm '{product_name}'."
+                            ),
+                        )
+
+                    total_explicit_qty += b_qty
+                    batch_plans.append({
+                        "batch_id": b_id,
+                        "warehouse_id": grouped_by_bid[b_id]["warehouse_id"],
+                        "portion": b_qty,
+                    })
+
+                if total_explicit_qty != qty_restock:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            f"Tổng số lượng phân bổ các lô ({total_explicit_qty}) không khớp với số lượng cần nhập lại kho ({qty_restock}) "
+                            f"của sản phẩm '{product_name}'."
+                        ),
+                    )
+            else:
+                # Không truyền explicit batch_allocations:
+                # 1. Nếu chỉ xuất từ duy nhất 1 lô -> Tự suy ra
+                # 2. Nếu xuất từ nhiều lô -> Bắt buộc phải truyền, báo lỗi 422 rõ ràng!
+                distinct_batch_ids = [g["batch_id"] for g in grouped_allocations]
+                if len(distinct_batch_ids) == 1:
+                    single_bid = distinct_batch_ids[0]
+                    single_avail = grouped_allocations[0]["available_to_return"]
+                    if qty_restock > single_avail:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Số lượng hoàn ({qty_restock}) vượt quá số lượng còn có thể hoàn ({single_avail}) của lô #{single_bid}.",
+                        )
+                    batch_plans.append({
+                        "batch_id": single_bid,
+                        "warehouse_id": grouped_allocations[0]["warehouse_id"],
+                        "portion": qty_restock,
+                    })
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=(
+                            f"Mặt hàng '{product_name}' (order_item #{order_item_id}) từng được xuất từ nhiều lô "
+                            f"({distinct_batch_ids}). Nhân viên kho bắt buộc phải chọn hoặc quét đúng lô thực tế nhận lại "
+                            f"và truyền danh sách phân bổ lô hoàn (batch_allocations) gồm batch_id và quantity tương ứng."
+                        ),
+                    )
 
             plans.append({
                 "it": it,
@@ -309,6 +399,7 @@ class ReturnRestockService:
                         reference_type=source_type,
                         reference_id=source_code,
                         note=audit_note or f"Nhập lại kho bán {portion} hộp thuốc từ hoàn trả ({source_code}) [order_item_id:{order_item_id}]",
+                        idempotency_key=f"RETURN_RESTOCK:{canonical_return_code}:{order_item_id}:{batch_id}",
                         created_by=actor_user_id,
                         created_at=utcnow(),
                     )

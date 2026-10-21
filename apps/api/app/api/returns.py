@@ -1,3 +1,14 @@
+from __future__ import annotations
+def mask_account_number(acc: str | None) -> str:
+    if not acc:
+        return ""
+    acc = acc.strip()
+    if len(acc) <= 4:
+        return "****"
+    return f"{acc[:2]}****{acc[-3:]}" if len(acc) >= 6 else f"****{acc[-3:]}"
+
+
+import re
 """
 apps/api/app/api/returns.py
 
@@ -11,7 +22,6 @@ API Khách hàng phục vụ Đổi trả (Customer Return & Exchange Endpoints)
 7. Tải lên hình ảnh bằng chứng hàng lỗi/hỏng (POST /api/v1/returns/upload-evidence).
 """
 
-from __future__ import annotations
 
 import os
 import shutil
@@ -24,7 +34,7 @@ from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, select
+from sqlalchemy import desc, or_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_optional_current_user
@@ -76,7 +86,7 @@ class ReturnRequestCreate(BaseModel):
     order_code: str
     request_type: str = "RETURN"  # RETURN hoặc EXCHANGE
     reason_code: str
-    reason_text: str
+    reason_text: Optional[str] = "Yêu cầu đổi trả"
     customer_note: Optional[str] = None
     return_method: str = "CUSTOMER_SHIP"
     items: List[ReturnItemCreate]
@@ -84,6 +94,10 @@ class ReturnRequestCreate(BaseModel):
     customer_phone_verify: Optional[str] = None
     customer_email_verify: Optional[str] = None
     order_token: Optional[str] = None
+    refund_bank_code: Optional[str] = None
+    refund_bank_name: Optional[str] = None
+    refund_account_number: Optional[str] = None
+    refund_account_name: Optional[str] = None
 
 
 class ShippingUpdate(BaseModel):
@@ -189,6 +203,7 @@ def check_order_eligibility(
         "order_code": eligibility.order_code,
         "order_status": eligibility.order_status,
         "payment_status": eligibility.payment_status,
+        "payment_method": order.payment_method,
         "total_amount": float(order.total_amount),
         "shipping_fee": float(order.shipping_fee or 0),
         "already_refunded": float(already_refunded),
@@ -250,6 +265,19 @@ def create_return_request(
         for url in payload.evidence_urls:
             evidences_data.append({"file_url": url, "file_name": os.path.basename(url)})
 
+    # Bắt buộc thông tin tài khoản thụ hưởng cho đơn hoàn tiền trực tuyến / chuyển khoản
+    is_prepaid = order.payment_method in ["PAYOS", "BANK_TRANSFER", "MOMO"] or (order.payment_method != "COD" and order.payment_status == "PAID")
+    if payload.request_type == "RETURN" and is_prepaid:
+        if not payload.refund_bank_name or not str(payload.refund_bank_name).strip():
+            raise HTTPException(status_code=400, detail="Vui lòng cung cấp tên ngân hàng nhận tiền hoàn.")
+        if not payload.refund_account_number or not str(payload.refund_account_number).strip():
+            raise HTTPException(status_code=400, detail="Vui lòng cung cấp số tài khoản nhận tiền hoàn.")
+        clean_acc = str(payload.refund_account_number).strip()
+        if not re.match(r"^\d{6,20}$", clean_acc):
+            raise HTTPException(status_code=400, detail="Số tài khoản ngân hàng không hợp lệ (yêu cầu từ 6 đến 20 chữ số).")
+        if not payload.refund_account_name or not str(payload.refund_account_name).strip():
+            raise HTTPException(status_code=400, detail="Vui lòng cung cấp họ và tên chủ tài khoản thụ hưởng.")
+
     ret = ReturnService.create_return_request(
         db=db,
         order_code=payload.order_code,
@@ -263,6 +291,10 @@ def create_return_request(
         current_user=current_user,
         customer_phone_verify=payload.customer_phone_verify or (order.customer_phone if is_token_valid else None),
         customer_email_verify=payload.customer_email_verify,
+        refund_bank_code=payload.refund_bank_code,
+        refund_bank_name=payload.refund_bank_name,
+        refund_account_number=payload.refund_account_number,
+        refund_account_name=payload.refund_account_name,
     )
 
     return {
@@ -331,6 +363,9 @@ def get_my_return_requests(
             "tracking_code": r.tracking_code,
             "requested_at": r.requested_at.isoformat() if r.requested_at else None,
             "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            "refund_bank_name": r.refund_bank_name,
+            "refund_account_name": r.refund_account_name,
+            "refund_account_number_masked": mask_account_number(r.refund_account_number),
         })
     return {"returns": out}
 
@@ -504,6 +539,11 @@ def get_return_detail(
         "tracking_code": ret.tracking_code,
         "return_address_snapshot": ret.return_address_snapshot,
         "customer_visible_note": ret.customer_visible_note,
+        "refund_bank_code": ret.refund_bank_code,
+        "refund_bank_name": ret.refund_bank_name,
+        "refund_account_name": ret.refund_account_name,
+        "refund_account_number_masked": mask_account_number(ret.refund_account_number),
+        "refund_beneficiary_submitted_at": ret.refund_beneficiary_submitted_at.isoformat() if ret.refund_beneficiary_submitted_at else None,
         "rejection_reason": ret.rejection_reason,
         "requested_at": ret.requested_at.isoformat() if ret.requested_at else None,
         "reviewed_at": ret.reviewed_at.isoformat() if ret.reviewed_at else None,

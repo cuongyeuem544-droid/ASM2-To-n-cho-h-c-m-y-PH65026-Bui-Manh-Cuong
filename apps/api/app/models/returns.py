@@ -175,6 +175,13 @@ class ReturnRequest(Base):
     received_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     inspected_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
+    # Beneficiary bank account details for refunds
+    refund_bank_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    refund_bank_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    refund_account_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    refund_account_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    refund_beneficiary_submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

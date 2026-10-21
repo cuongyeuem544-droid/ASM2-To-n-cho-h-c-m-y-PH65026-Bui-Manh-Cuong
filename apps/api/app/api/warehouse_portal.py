@@ -72,29 +72,75 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-def _resolve_caller_warehouse(user: User, db: Session, warehouse_id_override: Optional[int] = None) -> Warehouse:
+def _resolve_caller_warehouse(
+    user: User,
+    db: Session,
+    warehouse_id_override: Optional[int] = None,
+    warehouse_code_override: Optional[str] = None,
+) -> Warehouse:
     """
     Xác định kho hợp lệ của người dùng:
-    - Nếu là ADMIN: có thể truyền warehouse_id_override để xem theo kho hoặc mặc định kho trung tâm.
+    - Nếu là ADMIN: có thể truyền warehouse_code_override hoặc warehouse_id_override để chọn kho cụ thể.
+      Nếu không truyền, xác định duy nhất kho HCM qua mã kho/slug ổn định 'KHO-HCM-01' (hoặc mã chứa 'HCM').
+      Nếu tìm thấy nhiều kho HCM hoặc không tìm thấy kho HCM, trả lỗi rõ ràng (không tự chọn kho đầu tiên).
     - Nếu là WAREHOUSE_MANAGER / WAREHOUSE_STAFF: bắt buộc theo membership đã được gán.
-    - PHÒNG THỦ IDOR: nếu non-admin cố tình truyền warehouse_id_override khác kho của mình -> 403 Forbidden ngay lập tức.
+    - PHÒNG THỦ IDOR: nếu non-admin cố tình truyền warehouse_id_override hoặc warehouse_code_override khác kho của mình -> 403 Forbidden ngay lập tức.
     """
     if user.role == UserRole.ADMIN:
-        if warehouse_id_override:
+        if warehouse_code_override and str(warehouse_code_override).strip():
+            code_clean = str(warehouse_code_override).strip().upper()
+            # 1. Tìm chính xác mã kho
+            matches = db.scalars(
+                select(Warehouse).where(
+                    func.upper(Warehouse.code) == code_clean,
+                    Warehouse.is_active == True,
+                )
+            ).all()
+            if not matches:
+                # 2. Tìm theo pattern
+                matches = db.scalars(
+                    select(Warehouse).where(
+                        func.upper(Warehouse.code).like(f"%{code_clean}%"),
+                        Warehouse.is_active == True,
+                    )
+                ).all()
+            if len(matches) == 0:
+                raise HTTPException(status_code=404, detail=f"Không tìm thấy kho hàng khớp với mã '{warehouse_code_override}'.")
+            if len(matches) > 1:
+                raise HTTPException(status_code=400, detail=f"Mã kho '{warehouse_code_override}' không xác định duy nhất (tìm thấy {len(matches)} kho).")
+            return matches[0]
+
+        if warehouse_id_override is not None:
             wh = db.get(Warehouse, warehouse_id_override)
-            if wh:
-                return wh
-        central = db.scalar(select(Warehouse).where(Warehouse.is_central == True).limit(1))
-        if central:
-            return central
-        first_wh = db.scalar(select(Warehouse).order_by(Warehouse.id.asc()).limit(1))
-        if first_wh:
-            return first_wh
-        raise HTTPException(status_code=404, detail="Không tìm thấy kho hàng trong hệ thống")
+            if not wh or not wh.is_active:
+                raise HTTPException(status_code=404, detail=f"Không tìm thấy kho hàng ID {warehouse_id_override} hoặc kho đang ngừng hoạt động.")
+            return wh
+
+        # Khi Admin không truyền override, xác định duy nhất kho HCM bằng pattern mã kho ổn định 'HCM'
+        hcm_matches = db.scalars(
+            select(Warehouse).where(
+                or_(
+                    func.upper(Warehouse.code).like("%HCM%"),
+                    func.upper(Warehouse.name).like("%HỒ CHÍ MINH%"),
+                    func.upper(Warehouse.name).like("%TP. HCM%"),
+                    func.upper(Warehouse.name).like("%TP.HCM%"),
+                ),
+                Warehouse.is_active == True,
+            )
+        ).all()
+        if len(hcm_matches) == 1:
+            return hcm_matches[0]
+        if len(hcm_matches) > 1:
+            raise HTTPException(status_code=400, detail=f"Hệ thống có {len(hcm_matches)} kho khớp với khu vực HCM, vui lòng chỉ định rõ warehouse_code.")
+        raise HTTPException(status_code=404, detail="Không tìm thấy kho HCM đang hoạt động trong hệ thống.")
 
     membership = get_user_warehouse_membership(user, db)
     if not membership:
         raise HTTPException(status_code=403, detail="Tài khoản chưa được gán vào kho hàng cụ thể")
+
+    user_wh = db.get(Warehouse, membership.warehouse_id)
+    if not user_wh or not user_wh.is_active:
+        raise HTTPException(status_code=403, detail="Kho hàng được gán hiện không hoạt động")
 
     # Kiểm tra phòng thủ IDOR
     if warehouse_id_override is not None and int(warehouse_id_override) != int(membership.warehouse_id):
@@ -103,10 +149,15 @@ def _resolve_caller_warehouse(user: User, db: Session, warehouse_id_override: Op
             detail="Truy cập bị từ chối: Vi phạm phân quyền kho (IDOR violation) - Bạn không thể truy cập dữ liệu của kho khác",
         )
 
-    wh = db.get(Warehouse, membership.warehouse_id)
-    if not wh or not wh.is_active:
-        raise HTTPException(status_code=403, detail="Kho hàng được gán hiện không hoạt động")
-    return wh
+    if warehouse_code_override and str(warehouse_code_override).strip():
+        code_input = str(warehouse_code_override).strip().upper()
+        if user_wh.code.upper() != code_input and code_input not in user_wh.code.upper():
+            raise HTTPException(
+                status_code=403,
+                detail="Truy cập bị từ chối: Vi phạm phân quyền kho (IDOR violation) - Bạn không thể truy cập dữ liệu của kho khác",
+            )
+
+    return user_wh
 
 
 # ==============================================================================
@@ -118,6 +169,8 @@ class FulfillmentTransitionPayload(BaseModel):
     status: Optional[str] = None
     note: Optional[str] = None
     fulfillment_id: Optional[int] = None
+    warehouse_code: Optional[str] = None
+    warehouse_id: Optional[int] = None
 
 
 class StaffCreatePayload(BaseModel):
@@ -177,6 +230,7 @@ class OrderIssuePayload(BaseModel):
 @router.get("/me/dashboard")
 def get_my_warehouse_info(
     warehouse_id: Optional[int] = None,
+    warehouse_code: Optional[str] = None,
     time_range: Optional[str] = Query("30days", description="today | 7days | 30days | custom"),
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
@@ -190,7 +244,7 @@ def get_my_warehouse_info(
     - Phạm vi dữ liệu gắn chặt vào warehouse_id của tài khoản đăng nhập
     """
     user, _ = current_user
-    wh = _resolve_caller_warehouse(user, db, warehouse_id)
+    wh = _resolve_caller_warehouse(user, db, warehouse_id_override=warehouse_id, warehouse_code_override=warehouse_code)
 
     today = date.today()
     now = datetime.now(UTC)
@@ -391,6 +445,7 @@ def get_warehouse_orders(
     fulfillment_status: Optional[str] = None,
     order_status: Optional[str] = None,
     warehouse_id: Optional[int] = None,
+    warehouse_code: Optional[str] = None,
     search: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -402,7 +457,7 @@ def get_warehouse_orders(
     Bảo vệ chống IDOR: nhân viên hoặc quản lý chỉ xem được đơn thuộc kho mình.
     """
     user, _ = current_user
-    wh = _resolve_caller_warehouse(user, db, warehouse_id)
+    wh = _resolve_caller_warehouse(user, db, warehouse_id_override=warehouse_id, warehouse_code_override=warehouse_code)
 
     query = select(Order).options(selectinload(Order.items)).where(Order.assigned_warehouse_id == wh.id)
 
@@ -470,6 +525,8 @@ def get_warehouse_orders(
 @router.get("/orders/{order_id}/pick-details")
 def get_order_picking_details(
     order_id: int,
+    warehouse_code: Optional[str] = None,
+    warehouse_id: Optional[int] = None,
     current_user: User = Depends(require_warehouse_staff_or_manager),
     db: Session = Depends(get_db),
 ):
@@ -480,16 +537,16 @@ def get_order_picking_details(
     - Đề xuất mã lô thuốc theo tiêu chuẩn FEFO (ưu tiên lô cận hạn nhất còn hiệu lực)
     """
     user, _ = current_user
+    wh = _resolve_caller_warehouse(user, db, warehouse_id_override=warehouse_id, warehouse_code_override=warehouse_code)
+
     order = db.scalar(
         select(Order).options(selectinload(Order.items)).where(Order.id == order_id)
     )
     if not order:
         raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng")
 
-    if not check_warehouse_permission(user, order.assigned_warehouse_id or -1, db):
-        raise HTTPException(status_code=403, detail="Đơn hàng không thuộc phạm vi xử lý của kho bạn")
-
-    wh = db.get(Warehouse, order.assigned_warehouse_id)
+    if order.assigned_warehouse_id != wh.id:
+        raise HTTPException(status_code=403, detail=f"Đơn hàng #{order.order_code} không thuộc phạm vi xử lý của kho {wh.name} ({wh.code})")
     today = date.today()
 
     order_lines = []
@@ -608,18 +665,18 @@ def update_order_fulfillment_status(
             detail="Đơn hàng có nhiều kiện hàng fulfillment. Vui lòng chỉ định rõ 'fulfillment_id' cần cập nhật tiến trình.",
         )
 
+    wh = _resolve_caller_warehouse(user, db, warehouse_id_override=payload.warehouse_id, warehouse_code_override=payload.warehouse_code)
     if payload.fulfillment_id:
         target_ff = next((ff for ff in fulfillments if ff.id == payload.fulfillment_id), None)
         if not target_ff:
             raise HTTPException(status_code=404, detail=f"Không tìm thấy kiện hàng #{payload.fulfillment_id} trong đơn hàng.")
-        # Kiểm tra quyền sở hữu kho
-        if user.role != UserRole.ADMIN and target_ff.warehouse_id != user.warehouse_id:
-            raise HTTPException(status_code=403, detail="Kiện hàng này không thuộc phạm vi kho của bạn.")
+        if target_ff.warehouse_id != wh.id:
+            raise HTTPException(status_code=403, detail=f"Kiện hàng #{payload.fulfillment_id} không thuộc phạm vi xử lý của kho bạn ({wh.name} - {wh.code}).")
         target_ffs = [target_ff]
     else:
         single_ff = fulfillments[0]
-        if user.role != UserRole.ADMIN and single_ff.warehouse_id != user.warehouse_id:
-            raise HTTPException(status_code=403, detail="Đơn hàng này không có kiện hàng thuộc phạm vi xử lý của kho bạn.")
+        if single_ff.warehouse_id != wh.id:
+            raise HTTPException(status_code=403, detail=f"Đơn hàng này không có kiện hàng thuộc phạm vi xử lý của kho bạn ({wh.name} - {wh.code}).")
         target_ffs = [single_ff]
 
     before_status = order.fulfillment_status
@@ -643,7 +700,13 @@ def update_order_fulfillment_status(
         user=user,
         request=request,
         before={"fulfillment_status": before_status},
-        after={"fulfillment_status": order.fulfillment_status, "note": payload.note},
+        after={
+            "fulfillment_status": order.fulfillment_status,
+            "note": payload.note,
+            "warehouse_id": wh.id,
+            "warehouse_code": wh.code,
+            "operator_role": user.role,
+        },
     )
     db.commit()
     db.refresh(order)
@@ -1459,7 +1522,16 @@ def list_warehouse_staff(
         )
     ).all()
 
-    return db.scalars(select(User).where(User.id.in_(staff_ids)).order_by(User.created_at.desc())).all()
+    if not staff_ids:
+        return []
+
+    return db.scalars(
+        select(User).where(
+            User.id.in_(staff_ids),
+            User.role == UserRole.WAREHOUSE_STAFF,
+            User.is_active == True,
+        ).order_by(User.full_name.asc())
+    ).all()
 
 
 @router.post("/staff", response_model=UserOut, status_code=201)
