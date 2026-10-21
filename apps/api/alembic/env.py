@@ -57,8 +57,43 @@ def _canonicalize_url(url: str) -> str:
     return url
 
 
-raw_url = config.get_main_option("sqlalchemy.url") or settings.database_url
-eff_url = _canonicalize_url(raw_url)
+def _determine_effective_url() -> str:
+    """Xác định database URL chính xác cho Alembic migration.
+
+    Quy tắc ưu tiên:
+    1. Trên môi trường staging hoặc production: BẮT BUỘC sử dụng settings.database_url (đọc từ biến
+       môi trường Render DATABASE_URL). Nghiêm cấm tuyệt đối việc fallback về SQLite làm mất dữ liệu.
+    2. Trên môi trường development/testing:
+       - Nếu test runner/fixture đã cấu hình URL tường minh vào config (ví dụ temp db trong pytest),
+         thì tôn trọng URL đó.
+       - Nếu không có URL từ test runner, ưu tiên settings.database_url.
+       - Cuối cùng mới fallback về SQLite cục bộ cho dev máy cá nhân.
+    """
+    app_env = (settings.app_env or "").lower().strip()
+
+    # 1. Chốt chặn an toàn cho Staging & Production
+    if app_env in {"production", "prod", "staging"}:
+        target_url = settings.database_url
+        if not target_url or target_url.lower().startswith("sqlite"):
+            raise RuntimeError(
+                f"BẢO MẬT & TOÀN VẸN CSDL: Môi trường {app_env} bắt buộc phải dùng PostgreSQL (Neon). "
+                "Tuyệt đối không được chạy migration trên SQLite cục bộ vì nguy cơ mất dữ liệu và chia tách worker!"
+            )
+        return _canonicalize_url(target_url)
+
+    # 2. Môi trường Development / Testing
+    # Kiểm tra xem có URL được set tường minh bởi test runner
+    cfg_url = config.get_main_option("sqlalchemy.url")
+    if cfg_url and cfg_url.strip() and not cfg_url.strip().startswith("%("):
+        return _canonicalize_url(cfg_url.strip())
+
+    if settings.database_url and settings.database_url.strip():
+        return _canonicalize_url(settings.database_url.strip())
+
+    return "sqlite:///./pharmatrust.db"
+
+
+eff_url = _determine_effective_url()
 config.set_main_option("sqlalchemy.url", eff_url)
 
 if config.config_file_name:
