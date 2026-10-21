@@ -407,6 +407,19 @@ def main():
 
     source_path = Path(args.source_db)
     target_url = args.target_url or os.environ.get("NEON_DATABASE_URL") or os.environ.get("TARGET_DATABASE_URL")
+    if not target_url:
+        for env_path in [Path(".env.neon"), Path(".env.staging"), Path("apps/api/.env.neon")]:
+            if env_path.exists():
+                with open(env_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith("NEON_DATABASE_URL=") or line.startswith("DATABASE_URL="):
+                            val = line.split("=", 1)[1].strip().strip('"').strip("'")
+                            if val:
+                                target_url = val
+                                break
+            if target_url:
+                break
 
     # Mặc định an toàn: dry_run = True trừ khi có cờ --commit
     dry_run = not args.commit

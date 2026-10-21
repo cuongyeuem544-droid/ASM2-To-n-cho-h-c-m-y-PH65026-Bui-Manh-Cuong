@@ -1,4 +1,7 @@
 .env
+.env.*
+*.bak*
+*.backup*
 .env*.local
 .env.local
 .venv/
