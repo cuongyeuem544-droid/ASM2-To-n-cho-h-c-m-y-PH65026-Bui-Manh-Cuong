@@ -258,6 +258,13 @@ def serialize_product(
     }
 
 
+def _unwrap_param(val: Any, fallback: Any = None) -> Any:
+    if hasattr(val, "default"):
+        res = val.default
+        return fallback if res is ... else res
+    return val if val is not None else fallback
+
+
 @router.get("/categories/tree")
 def get_store_category_tree(db: Session = Depends(get_db)):
     """Lấy cây danh mục dược phẩm chuẩn hóa 6 nhóm cho MegaMenu Storefront."""
@@ -271,12 +278,14 @@ def get_category_products(
     sort: str = "popular",
     limit: int = Query(24, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    search: str | None = Query(None, max_length=100),
     db: Session = Depends(get_db),
 ):
     """Lấy danh sách sản phẩm theo slug danh mục (hỗ trợ cả nhóm cấp 1 và nhóm con)."""
     return get_store_products(
         category=slug,
         prescriptionType=prescriptionType,
+        search=search,
         sort=sort,
         limit=limit,
         offset=offset,
@@ -309,19 +318,33 @@ def get_store_products(
         )
     )
 
-    if prescriptionType == "rx":
+    # Defensive unwrapping in case called internally without FastAPI dependency resolution
+    rx_type = str(_unwrap_param(prescriptionType, "all"))
+    raw_search = _unwrap_param(search, None)
+    search_term = str(raw_search).strip() if (raw_search and str(raw_search).strip()) else None
+    sort_mode = str(_unwrap_param(sort, "popular"))
+    try:
+        limit_num = int(_unwrap_param(limit, 150))
+    except (TypeError, ValueError):
+        limit_num = 150
+    try:
+        offset_num = int(_unwrap_param(offset, 0))
+    except (TypeError, ValueError):
+        offset_num = 0
+
+    if rx_type == "rx":
         query = query.where(CanonicalProduct.rx_otc_status == RxOtcStatus.PRESCRIPTION)
-    elif prescriptionType == "otc":
+    elif rx_type == "otc":
         query = query.where(CanonicalProduct.rx_otc_status == RxOtcStatus.OTC)
 
     fts_ids = None
-    if search and search.strip():
+    if search_term:
         from app.services.search_service import search_product_ids_fts
-        fts_ids = search_product_ids_fts(db, search.strip(), limit=limit * 2)
+        fts_ids = search_product_ids_fts(db, search_term, limit=limit_num * 2)
         if fts_ids:
             query = query.where(CanonicalProduct.id.in_(fts_ids))
         else:
-            term = f"%{search.strip()}%"
+            term = f"%{search_term}%"
             query = query.where(
                 or_(
                     CanonicalProduct.canonical_name.ilike(term),
@@ -374,6 +397,15 @@ def get_store_products(
         for pid, s_qty in stock_rows:
             stocks_map[pid] = int(s_qty)
 
+    # Pre-resolve category matching slugs once before iteration (eliminates N+1 queries)
+    matching_slugs: set[str] | None = None
+    if category and isinstance(category, str):
+        matching_slugs = {category}
+        cat_obj = db.scalar(select(Category).where(Category.slug == category))
+        if cat_obj and cat_obj.parent_id is None:
+            ch_slugs = db.scalars(select(Category.slug).where(Category.parent_id == cat_obj.id)).all()
+            matching_slugs.update(ch_slugs)
+
     serialized = []
     for p in products:
         r_val, r_cnt = reviews_map.get(p.id, (0.0, 0))
@@ -386,13 +418,7 @@ def get_store_products(
         )
         
         # Category matching: support matching root category or subcategories
-        if category:
-            matching_slugs = {category}
-            cat_obj = db.scalar(select(Category).where(Category.slug == category))
-            if cat_obj and cat_obj.parent_id is None:
-                ch_slugs = db.scalars(select(Category.slug).where(Category.parent_id == cat_obj.id)).all()
-                matching_slugs.update(ch_slugs)
-
+        if matching_slugs is not None:
             if item["category"] not in matching_slugs and item["subCategory"] not in matching_slugs:
                 continue
 
@@ -418,28 +444,28 @@ def get_store_products(
         serialized.append(item)
 
     # Sort
-    if search and search.strip() and fts_ids and sort == "popular":
+    if search_term and fts_ids and sort_mode == "popular":
         rank_dict = {pid: idx for idx, pid in enumerate(fts_ids)}
         serialized.sort(key=lambda x: rank_dict.get(x["dbId"], 9999))
-    elif sort == "newest":
+    elif sort_mode == "newest":
         serialized.sort(key=lambda x: x["dbId"], reverse=True)
-    elif sort == "price-asc":
+    elif sort_mode == "price-asc":
         serialized.sort(key=lambda x: x["price"])
-    elif sort == "price-desc":
+    elif sort_mode == "price-desc":
         serialized.sort(key=lambda x: x["price"], reverse=True)
-    elif sort == "rating":
+    elif sort_mode == "rating":
         serialized.sort(key=lambda x: x["rating"], reverse=True)
     else:  # popular / default
         serialized.sort(key=lambda x: (not x["isBestSeller"], not x["isFeatured"], x["dbId"]))
 
     total = len(serialized)
-    paged_items = serialized[offset : offset + limit]
+    paged_items = serialized[offset_num : offset_num + limit_num]
 
     return {
         "items": paged_items,
         "total": total,
-        "limit": limit,
-        "offset": offset,
+        "limit": limit_num,
+        "offset": offset_num,
     }
 
 
