@@ -28,6 +28,7 @@ import OrderSuccessView, {
 } from "@/components/checkout/OrderSuccessView";
 import MobileStickyCheckoutBar from "@/components/checkout/MobileStickyCheckoutBar";
 import SepayVietQrModal from "@/components/checkout/SepayVietQrModal";
+import { placesService } from "@/services/placesService";
 
 
 export default function CartPage() {
@@ -99,6 +100,21 @@ export default function CartPage() {
     type: "warning" | "error";
     message: string;
   } | null>(null);
+
+  // Tự động đồng bộ tọa độ và mã tỉnh vào state tính cước khi địa chỉ được xác nhận
+  useEffect(() => {
+    if (verifiedAddress) {
+      if (verifiedAddress.provinceCode && verifiedAddress.provinceCode !== selectedProvinceCode) {
+        setSelectedProvinceCode(verifiedAddress.provinceCode);
+      }
+      if (verifiedAddress.communeCode && verifiedAddress.communeCode !== selectedDistrictCode) {
+        setSelectedDistrictCode(verifiedAddress.communeCode);
+      }
+      if (verifiedAddress.lat && verifiedAddress.lng) {
+        setCoords({ lat: verifiedAddress.lat, lng: verifiedAddress.lng });
+      }
+    }
+  }, [verifiedAddress]);
 
   useEffect(() => {
     if (!idempotencyKeyRef.current) {
@@ -273,27 +289,47 @@ export default function CartPage() {
     localStorage.removeItem("pharmatrust_cart");
   };
 
-  // GPS locator
-  const handleGetLocation = () => {
-    if (typeof window === "undefined" || !navigator.geolocation) {
-      alert("Trình duyệt không hỗ trợ định vị GPS.");
-      return;
-    }
+  // GPS locator & VIETMAP Auto-fill
+  const handleGetLocation = async () => {
     setIsLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setIsLocating(false);
-        setCoords({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-        });
-      },
-      (err) => {
-        setIsLocating(false);
-        console.warn("Geolocation warning:", err);
-      },
-      { timeout: 8000 }
-    );
+    try {
+      const loc = await placesService.getCurrentLocation();
+      setCoords({
+        lat: loc.lat,
+        lng: loc.lng,
+      });
+
+      const rev = await placesService.reverseGeocode(loc.lat, loc.lng);
+      if (rev) {
+        if (rev.province_code) setSelectedProvinceCode(rev.province_code);
+        if (rev.commune_code) setSelectedDistrictCode(rev.commune_code);
+        if (rev.street_address) setStreetAddress(rev.street_address);
+
+        // Tự động thiết lập địa chỉ xác minh
+        const autoStructured: StructuredAddress = {
+          provinceCode: rev.province_code || "",
+          provinceName: rev.province_name || "",
+          communeCode: rev.commune_code || "",
+          communeName: rev.commune_name || "",
+          communeType: "ward",
+          streetAddress: rev.street_address || "",
+          fullAddress: rev.formatted_address,
+          lat: loc.lat,
+          lng: loc.lng,
+          isVerified: true,
+          placeId: rev.place_id,
+          wardCode: rev.commune_code || undefined,
+          wardName: rev.commune_name || undefined,
+        };
+        setVerifiedAddress(autoStructured);
+        setIsAddressVerified(true);
+      }
+    } catch (e: any) {
+      console.warn("Geolocation warning:", e);
+      alert(e.message || "Không thể truy cập cảm biến GPS của thiết bị.");
+    } finally {
+      setIsLocating(false);
+    }
   };
 
   const [dynamicShippingFee, setDynamicShippingFee] = useState<number>(25000);

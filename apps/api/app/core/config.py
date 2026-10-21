@@ -135,7 +135,11 @@ class Settings(BaseSettings):
 
     # Cấu hình Dịch vụ Bản đồ Google Maps Platform (Places Autocomplete, Geocoding, Routes)
     google_maps_api_key: str = ""
-    google_maps_routes_enabled: bool = False 
+    google_maps_routes_enabled: bool = False
+
+    # Cấu hình Dịch vụ Bản đồ VIETMAP (Reverse Geocoding v4, Services Key)
+    vietmap_api_key: str = ""
+    vietmap_services_key: str = "" 
 
     # Cơ chế kiểm soát Payment Simulator (Mặc định TẮT hoàn toàn - Fail Closed)
     enable_payment_simulator: bool = False
@@ -264,6 +268,17 @@ class Settings(BaseSettings):
         """Kiểm tra xem Google Maps API Key đã được cấu hình hợp lệ hay chưa."""
         key = (self.google_maps_api_key or "").strip()
         return bool(key and len(key) >= 15 and not key.startswith("your_"))
+
+    @property
+    def is_vietmap_configured(self) -> bool:
+        """Kiểm tra xem VIETMAP API Key (Services Key) đã được cấu hình hợp lệ hay chưa."""
+        key = (self.vietmap_services_key or self.vietmap_api_key or "").strip()
+        return bool(key and len(key) >= 10 and not key.startswith("your_"))
+
+    @property
+    def active_vietmap_key(self) -> str:
+        """Lấy VIETMAP Services Key hiệu lực (hỗ trợ cả VIETMAP_SERVICES_KEY và VIETMAP_API_KEY)."""
+        return (self.vietmap_services_key or self.vietmap_api_key or "").strip()
 
     @property
     def is_simulator_permitted(self) -> bool:

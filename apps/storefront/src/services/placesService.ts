@@ -29,6 +29,8 @@ export interface ReverseGeocodeResult {
   place_id: string;
   formatted_address: string;
   street_address: string;
+  house_number?: string | null;
+  road?: string | null;
   lat: number;
   lng: number;
   province_code?: string | null;
@@ -38,9 +40,11 @@ export interface ReverseGeocodeResult {
   district_name?: string | null;
   provider: string;
   is_verified: boolean;
+  requires_house_number?: boolean;
 }
 
 export interface ProviderStatus {
+  vietmap_configured?: boolean;
   google_configured: boolean;
   active_provider: string;
   fallback_provider: string;
@@ -163,7 +167,20 @@ export const placesService = {
   getCurrentLocation(): Promise<CurrentLocationResult> {
     return new Promise((resolve, reject) => {
       if (typeof window === "undefined" || !navigator.geolocation) {
-        reject(new Error("Trình duyệt của bạn không hỗ trợ định vị GPS toàn cầu."));
+        reject(new Error("Trình duyệt hoặc thiết bị của bạn không hỗ trợ cảm biến định vị GPS."));
+        return;
+      }
+
+      // Kiểm tra Secure Context (Geolocation yêu cầu kết nối HTTPS trên môi trường Internet)
+      if (
+        typeof window !== "undefined" &&
+        !window.isSecureContext &&
+        window.location.hostname !== "localhost" &&
+        window.location.hostname !== "127.0.0.1"
+      ) {
+        reject(
+          new Error("Trình duyệt yêu cầu kết nối bảo mật HTTPS để có thể truy cập cảm biến GPS của thiết bị.")
+        );
         return;
       }
 
@@ -174,24 +191,24 @@ export const placesService = {
             lat: pos.coords.latitude,
             lng: pos.coords.longitude,
             accuracy: acc,
-            isLowAccuracy: acc > 100, // Cảnh báo nếu độ lệch lớn hơn 100m
+            isLowAccuracy: acc > 150, // Cảnh báo nếu độ lệch lớn hơn 150m
           });
         },
         (err) => {
           let msg = "Không thể lấy vị trí hiện tại.";
           if (err.code === err.PERMISSION_DENIED) {
-            msg = "Bạn đã từ chối quyền truy cập vị trí GPS. Vui lòng cho phép quyền định vị trong cài đặt trình duyệt.";
+            msg = "Bạn đã từ chối quyền truy cập vị trí GPS. Vui lòng bật quyền 'Vị trí (Location)' trong cài đặt trình duyệt để tự động điền địa chỉ.";
           } else if (err.code === err.TIMEOUT) {
-            msg = "Quá thời gian chờ phản hồi từ cảm biến GPS. Vui lòng thử lại.";
+            msg = "Quá thời gian chờ phản hồi từ cảm biến GPS (Timeout). Vui lòng thử lại hoặc kéo ghim trực tiếp trên bản đồ.";
           } else if (err.code === err.POSITION_UNAVAILABLE) {
-            msg = "Tín hiệu định vị hiện tại không khả dụng. Bạn có thể kéo ghim trên bản đồ để chọn vị trí.";
+            msg = "Tín hiệu định vị GPS hiện không khả dụng. Bạn có thể kéo ghim trên bản đồ để chọn vị trí.";
           }
           reject(new Error(msg));
         },
         {
           enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 30000,
+          timeout: 12000,
+          maximumAge: 0, // Bắt buộc đọc tọa độ thực tế mới nhất từ cảm biến, không dùng cache cũ
         }
       );
     });

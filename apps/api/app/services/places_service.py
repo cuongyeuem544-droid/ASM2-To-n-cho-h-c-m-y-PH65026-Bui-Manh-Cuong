@@ -425,22 +425,36 @@ class PlacesService:
     @classmethod
     def get_provider_status(cls) -> dict[str, Any]:
         """
-        Báo cáo trạng thái nhà cung cấp Geocoding theo yêu cầu:
+        Báo cáo trạng thái nhà cung cấp Geocoding:
+        VIETMAP REVERSE: CONFIGURED / NOT CONFIGURED
         GOOGLE PLACES: CONFIGURED / NOT CONFIGURED
-        FALLBACK: OpenStreetMap / Nominatim + Photon + Curated National POIs + Internal 2-Tier GeoService
+        FALLBACK: OpenStreetMap / Photon + Curated National POIs + Internal 2-Tier GeoService
         """
-        google_key = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
-        is_google_configured = bool(google_key and len(google_key) > 10)
+        vm_key = (os.getenv("VIETMAP_SERVICES_KEY") or os.getenv("VIETMAP_API_KEY") or getattr(settings, "active_vietmap_key", "")).strip()
+        is_vietmap_configured = bool(vm_key and len(vm_key) >= 10 and not vm_key.startswith("your_"))
+
+        google_key = (os.getenv("GOOGLE_MAPS_API_KEY") or getattr(settings, "google_maps_api_key", "")).strip()
+        is_google_configured = bool(google_key and len(google_key) >= 15 and not google_key.startswith("your_"))
+
+        if is_vietmap_configured:
+            active = "vietmap"
+        elif is_google_configured:
+            active = "google_places"
+        else:
+            active = "osm_photon"
+
+        rep_parts = []
+        rep_parts.append(f"VIETMAP: {'CONFIGURED' if is_vietmap_configured else 'NOT CONFIGURED'}")
+        rep_parts.append(f"GOOGLE: {'CONFIGURED' if is_google_configured else 'NOT CONFIGURED'}")
+        rep_parts.append("FALLBACK: OpenStreetMap / Photon + Internal 2-Tier GeoService")
+
         return {
+            "vietmap_configured": is_vietmap_configured,
             "google_configured": is_google_configured,
-            "active_provider": "google_places" if is_google_configured else "osm_photon",
-            "fallback_provider": "curated_national_pois_and_administrative",
+            "active_provider": active,
+            "fallback_provider": "osm_photon_internal",
             "cache_entries": len(_PLACES_AUTOCOMPLETE_CACHE),
-            "report": (
-                "GOOGLE PLACES: CONFIGURED"
-                if is_google_configured
-                else "GOOGLE PLACES: NOT CONFIGURED | FALLBACK: OpenStreetMap / Photon + Curated National POIs + Internal 2-Tier GeoService"
-            ),
+            "report": " | ".join(rep_parts),
         }
 
     @classmethod
@@ -1166,12 +1180,43 @@ class PlacesService:
 
         return results
 
+    @staticmethod
+    def _parse_house_and_road(candidate: str, full_display: str = "") -> tuple[Optional[str], Optional[str], str, bool]:
+        """
+        Bóc tách số nhà (house_number) và tên đường (road) chuẩn xác từ chuỗi địa chỉ Việt Nam.
+        Trả về: (house_number, road, street_address, requires_house_number)
+        """
+        raw = (candidate or "").strip()
+        if not raw and full_display:
+            raw = full_display.split(",")[0].strip()
+
+        if not raw:
+            return None, None, "", True
+
+        # Regex tìm số nhà: ví dụ "12", "12A", "12/4", "12-14", "Số 12", "Số 45B", "Ngõ 10", "Hẻm 45/2"
+        match = re.search(
+            r"^(?:số\s+)?([0-9]+[A-Za-z0-9\/\-\.]*)\s+(?:đường\s+|phố\s+|ngõ\s+|hẻm\s+)?(.+)$",
+            raw,
+            re.IGNORECASE,
+        )
+        if match:
+            h_num = match.group(1).strip()
+            r_name = match.group(2).strip()
+            # Làm sạch tiền tố dư nếu có
+            r_clean = re.sub(r"^(đường|phố)\s+", "", r_name, flags=re.IGNORECASE).strip()
+            return h_num, r_name, f"Số {h_num} Đường {r_clean}" if not r_name.lower().startswith(("đường", "phố", "ngõ", "hẻm")) else f"Số {h_num} {r_name}", False
+
+        # Trường hợp chỉ có tên đường hoặc địa danh POI
+        is_street_prefix = bool(re.search(r"^(đường|phố|ngõ|hẻm|đại lộ|ql|quốc lộ)\s+", raw, re.IGNORECASE))
+        return None, raw, raw, True
+
     @classmethod
     async def reverse_geocode(cls, lat: float, lng: float) -> dict[str, Any]:
         """
         Reverse Geocoding: Tọa độ GPS -> Địa chỉ & Thành phần hành chính 2 cấp 2025.
-        Dùng khi: kéo pin, click bản đồ, bấm 'Vị trí hiện tại của tôi'.
-        100% dữ liệu thực từ geocoding provider (không hardcode).
+        Tự động gọi VIETMAP Reverse Geocoding v4 bằng Services Key trên Backend.
+        Nếu VIETMAP chưa cấu hình hoặc lỗi -> Fallback Google Geocoding -> Photon OSM -> Internal BBox.
+        Tự động phân tách: tỉnh/thành, phường/xã, tên đường, số nhà (nếu có), formatted_address.
         """
         # 0. Kiểm tra cache
         cache_key = f"{round(lat, 4)}:{round(lng, 4)}"
@@ -1180,15 +1225,29 @@ class PlacesService:
             return cached
 
         res = None
-        # 1. Thử Google Geocoding API nếu có key
-        google_key = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
-        if google_key and len(google_key) > 10:
-            try:
-                res = await cls._reverse_google(lat, lng, google_key)
-            except Exception as e:
-                logger.warning("Google reverse geocode error: %s", e)
 
-        # 2. Thử Photon Reverse Geocoding trực tiếp
+        # 1. Ưu tiên hàng đầu: VIETMAP Reverse Geocoding v4 (Services Key)
+        vm_key = (os.getenv("VIETMAP_SERVICES_KEY") or os.getenv("VIETMAP_API_KEY") or getattr(settings, "active_vietmap_key", "")).strip()
+        if vm_key and len(vm_key) >= 10 and not vm_key.startswith("your_"):
+            try:
+                res_vm = await cls._reverse_vietmap(lat, lng, vm_key)
+                if res_vm and (res_vm.get("province_code") or res_vm.get("formatted_address")):
+                    res = res_vm
+            except Exception as e:
+                logger.warning("VIETMAP reverse geocode error: %s", e)
+
+        # 2. Thử Google Geocoding API nếu VIETMAP chưa có hoặc không trả kết quả
+        if not res or not (res.get("province_code") or res.get("formatted_address")):
+            google_key = (os.getenv("GOOGLE_MAPS_API_KEY") or getattr(settings, "google_maps_api_key", "")).strip()
+            if google_key and len(google_key) > 10 and not google_key.startswith("your_"):
+                try:
+                    res_google = await cls._reverse_google(lat, lng, google_key)
+                    if res_google and (res_google.get("province_code") or res_google.get("formatted_address")):
+                        res = res_google
+                except Exception as e:
+                    logger.warning("Google reverse geocode error: %s", e)
+
+        # 3. Thử Photon Reverse Geocoding trực tiếp
         if not res or not (res.get("province_code") or res.get("formatted_address")):
             try:
                 res_photon = await cls._reverse_photon_osm(lat, lng)
@@ -1197,7 +1256,7 @@ class PlacesService:
             except Exception as e:
                 logger.warning("Photon reverse geocode error: %s", e)
 
-        # 3. Fallback tính toán nội bộ theo Bounding Box và khoảng cách
+        # 4. Fallback tính toán nội bộ theo Bounding Box và khoảng cách
         if not res:
             prov, comm = cls._match_administrative_units(lat=lat, lng=lng)
             p_name = prov["fullName"] if prov else "Việt Nam"
@@ -1207,6 +1266,8 @@ class PlacesService:
                 "place_id": f"rev_{round(lat, 4)}_{round(lng, 4)}",
                 "formatted_address": formatted,
                 "street_address": f"Vị trí ghim ({lat:.4f}, {lng:.4f})",
+                "house_number": None,
+                "road": None,
                 "lat": round(lat, 6),
                 "lng": round(lng, 6),
                 "province_code": prov["code"] if prov else None,
@@ -1216,10 +1277,121 @@ class PlacesService:
                 "district_name": comm.get("legacyDistrictName") if comm else None,
                 "provider": "internal_bbox",
                 "is_verified": True,
+                "requires_house_number": True,
             }
 
         cls._set_reverse_cache(cache_key, res)
         return res
+
+    @classmethod
+    async def _reverse_vietmap(cls, lat: float, lng: float, api_key: str) -> Optional[dict[str, Any]]:
+        """
+        Gọi VIETMAP Reverse Geocoding API v4 chính thức bằng Services Key:
+        Endpoint: https://maps.vietmap.vn/api/reverse/v4
+        Tham số: apikey={SERVICES_KEY}&lat={lat}&lng={lng}&display_type=6
+        """
+        timeout_config = httpx.Timeout(connect=2.5, read=4.5, write=3.0, pool=5.0)
+        async with httpx.AsyncClient(timeout=timeout_config) as client:
+            resp = await client.get(
+                "https://maps.vietmap.vn/api/reverse/v4",
+                params={
+                    "apikey": api_key,
+                    "lat": lat,
+                    "lng": lng,
+                    "display_type": 6,
+                },
+                headers={"User-Agent": USER_AGENT},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                item = None
+                if isinstance(data, list) and len(data) > 0:
+                    item = data[0]
+                elif isinstance(data, dict):
+                    if "data" in data and isinstance(data["data"], list) and len(data["data"]) > 0:
+                        item = data["data"][0]
+                    elif "data" in data and isinstance(data["data"], dict):
+                        item = data["data"]
+                    else:
+                        item = data
+
+                if not item or not isinstance(item, dict):
+                    return None
+
+                display = (item.get("display") or item.get("address") or "").strip()
+                name = (item.get("name") or "").strip()
+                ref_id = item.get("ref_id") or ""
+
+                # 1. Trích xuất thành phần hành chính từ boundaries / data_new / data_old
+                ward_name = None
+                district_name = None
+                city_name = None
+
+                boundaries = item.get("boundaries") or []
+                if isinstance(boundaries, list):
+                    for b in boundaries:
+                        if not isinstance(b, dict):
+                            continue
+                        b_type = (b.get("type") or "").lower()
+                        b_name = (b.get("name") or "").strip()
+                        if b_type == "ward":
+                            ward_name = b_name
+                        elif b_type in ["district", "county"]:
+                            district_name = b_name
+                        elif b_type in ["city", "province", "state"]:
+                            city_name = b_name
+
+                data_new = item.get("data_new") or {}
+                data_old = item.get("data_old") or {}
+                if not ward_name:
+                    ward_name = data_new.get("ward") or data_old.get("ward")
+                if not district_name:
+                    district_name = data_old.get("district")
+                if not city_name:
+                    city_name = data_new.get("city") or data_old.get("city") or data_new.get("province")
+
+                # 2. Bóc tách số nhà (house_number) và tên đường (road)
+                candidate_street = name or (display.split(",")[0].strip() if "," in display else display)
+                h_num, r_name, st_addr, req_h = cls._parse_house_and_road(candidate_street, full_display=display)
+
+                # 3. Đối chiếu địa giới hành chính hiện hành qua AdministrativeResolver & AdministrativeDataService
+                prov, comm = cls._match_administrative_units(
+                    lat=lat,
+                    lng=lng,
+                    city_hint=city_name,
+                    district_hint=district_name,
+                    state_hint=city_name,
+                    full_text=display,
+                )
+
+                if not display:
+                    p_text = prov["fullName"] if prov else (city_name or "Việt Nam")
+                    c_text = comm["fullName"] if comm else (ward_name or "")
+                    display = f"{st_addr}, {c_text}, {p_text}".strip(", ")
+
+                return {
+                    "place_id": ref_id or f"vm_{round(lat, 4)}_{round(lng, 4)}",
+                    "formatted_address": display,
+                    "street_address": st_addr,
+                    "house_number": h_num,
+                    "road": r_name,
+                    "lat": round(lat, 6),
+                    "lng": round(lng, 6),
+                    "province_code": prov["code"] if prov else None,
+                    "province_name": prov["fullName"] if prov else (city_name or None),
+                    "commune_code": comm["code"] if comm else None,
+                    "commune_name": comm["fullName"] if comm else (ward_name or None),
+                    "district_name": comm.get("legacyDistrictName") if comm else district_name,
+                    "provider": "vietmap",
+                    "is_verified": True,
+                    "requires_house_number": req_h,
+                }
+            elif resp.status_code in [401, 403, 423]:
+                logger.warning("VIETMAP Reverse Geocoding auth/quota error: HTTP %d (%s)", resp.status_code, resp.text[:200])
+                return None
+            else:
+                logger.warning("VIETMAP Reverse Geocoding returned HTTP %d", resp.status_code)
+                return None
 
     @classmethod
     async def _reverse_google(cls, lat: float, lng: float, api_key: str) -> Optional[dict[str, Any]]:
@@ -1243,6 +1415,22 @@ class PlacesService:
                     formatted = first.get("formatted_address", "")
                     place_id = first.get("place_id", "")
 
+                    # Bóc tách house_number và route từ components
+                    h_num = None
+                    r_name = None
+                    for comp in first.get("address_components", []):
+                        types = comp.get("types", [])
+                        if "street_number" in types:
+                            h_num = comp.get("long_name")
+                        elif "route" in types:
+                            r_name = comp.get("long_name")
+
+                    cand_st = f"Số {h_num} {r_name}" if h_num and r_name else (r_name or (formatted.split(",")[0].strip() if "," in formatted else formatted))
+                    parsed_h, parsed_r, st_addr, req_h = cls._parse_house_and_road(cand_st, full_display=formatted)
+                    if h_num:
+                        parsed_h = h_num
+                        req_h = False
+
                     prov, comm = cls._match_administrative_units(
                         lat=lat,
                         lng=lng,
@@ -1252,7 +1440,9 @@ class PlacesService:
                     return {
                         "place_id": place_id,
                         "formatted_address": formatted,
-                        "street_address": formatted.split(",")[0].strip() if "," in formatted else formatted,
+                        "street_address": st_addr,
+                        "house_number": parsed_h,
+                        "road": parsed_r or r_name,
                         "lat": round(lat, 6),
                         "lng": round(lng, 6),
                         "province_code": prov["code"] if prov else None,
@@ -1262,6 +1452,7 @@ class PlacesService:
                         "district_name": comm.get("legacyDistrictName") if comm else None,
                         "provider": "google",
                         "is_verified": True,
+                        "requires_house_number": req_h,
                     }
         return None
 
@@ -1274,6 +1465,7 @@ class PlacesService:
         formatted = ""
         street = ""
         name = ""
+        housenumber = ""
         district = ""
         city = ""
 
@@ -1292,10 +1484,12 @@ class PlacesService:
                         props = features[0].get("properties", {})
                         name = props.get("name", "")
                         street = props.get("street", "")
+                        housenumber = props.get("housenumber", "")
                         district = props.get("district", props.get("locality", ""))
                         city = props.get("city", props.get("state", ""))
 
-                        parts = [p for p in [name, street, district, city] if p]
+                        st_combined = f"{housenumber} {street}".strip() if housenumber and street else (street or name)
+                        parts = [p for p in [st_combined, district, city] if p]
                         formatted = ", ".join(parts)
                     else:
                         return None
@@ -1314,15 +1508,21 @@ class PlacesService:
 
         p_name = prov["fullName"] if prov else (city or "Việt Nam")
         c_name = comm["fullName"] if comm else (district or "")
-        st_name = street or name or f"Vị trí ({lat:.4f}, {lng:.4f})"
+        cand_st = f"Số {housenumber} {street}".strip() if housenumber and street else (street or name or f"Vị trí ({lat:.4f}, {lng:.4f})")
+        h_num, r_name, st_addr, req_h = cls._parse_house_and_road(cand_st, full_display=formatted)
+        if housenumber:
+            h_num = housenumber
+            req_h = False
 
         if not formatted:
-            formatted = f"{st_name}, {c_name}, {p_name}".strip(", ")
+            formatted = f"{st_addr}, {c_name}, {p_name}".strip(", ")
 
         return {
             "place_id": f"rev_{round(lat, 4)}_{round(lng, 4)}",
             "formatted_address": formatted,
-            "street_address": st_name,
+            "street_address": st_addr,
+            "house_number": h_num,
+            "road": r_name,
             "lat": round(lat, 6),
             "lng": round(lng, 6),
             "province_code": prov["code"] if prov else None,
@@ -1332,4 +1532,5 @@ class PlacesService:
             "district_name": comm.get("legacyDistrictName") if comm else None,
             "provider": "osm_photon",
             "is_verified": True,
+            "requires_house_number": req_h,
         }

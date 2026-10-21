@@ -459,11 +459,11 @@ export default function DeliveryRealMap({
               type="button"
               onClick={onGetGps}
               disabled={isLocating}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-brand-blue-50 hover:bg-brand-blue-100 text-brand-blue-700 text-[11px] font-bold transition-all border border-brand-blue-200"
-              title="Định vị tọa độ GPS của thiết bị"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-xs border border-emerald-700 disabled:bg-slate-300"
+              title="Tự động lấy vị trí GPS và điền đầy đủ địa chỉ"
             >
-              <Crosshair className={`w-3.5 h-3.5 ${isLocating ? "animate-spin text-rose-500" : ""}`} />
-              <span>{isLocating ? "Đang định vị..." : "Lấy vị trí GPS"}</span>
+              <Crosshair className={`w-3.5 h-3.5 ${isLocating ? "animate-spin text-white" : ""}`} />
+              <span>{isLocating ? "Đang dò GPS..." : "Lấy vị trí của tôi"}</span>
             </button>
           )}
 

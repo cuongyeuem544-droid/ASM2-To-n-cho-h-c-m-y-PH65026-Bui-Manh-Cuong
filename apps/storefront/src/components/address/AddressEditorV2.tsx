@@ -141,6 +141,7 @@ export default function AddressEditorV2({
 
   // Geolocation & UI notifications
   const [isLocatingGps, setIsLocatingGps] = useState(false);
+  const [requiresHouseNumberHint, setRequiresHouseNumberHint] = useState<boolean>(false);
   const [gpsAccuracyNotice, setGpsAccuracyNotice] = useState<string | null>(null);
   const [locationNotice, setLocationNotice] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -322,13 +323,13 @@ export default function AddressEditorV2({
     setTimeout(() => setLocationNotice(null), 4000);
   };
 
-  // Handle Map Click or Marker Drag End (Requirement 5, 6, 7)
+  // Handle Map Click or Marker Drag End (Requirement 5, 6, 7, 8)
   const handleMapLocationChange = async (newLat: number, newLng: number) => {
     setLat(newLat);
     setLng(newLng);
     setHasRealCoordinates(true);
     setIsVerified(true); // Người dùng trực tiếp kéo ghim định vị thật trên bản đồ
-    setLocationNotice("Vị trí giao hàng đã được điều chỉnh trên bản đồ. Đang cập nhật địa chỉ...");
+    setLocationNotice("Đang giải mã địa chỉ vị trí ghim mới...");
 
     try {
       const rev = await placesService.reverseGeocode(newLat, newLng);
@@ -340,7 +341,8 @@ export default function AddressEditorV2({
             setSelectedProvince(p);
             currentProv = p;
           }
-        } else if (rev.province_name) {
+        }
+        if (!currentProv && rev.province_name) {
           const provs = administrativeService.getProvinces(rev.province_name);
           if (provs.length > 0) {
             setSelectedProvince(provs[0]);
@@ -370,8 +372,9 @@ export default function AddressEditorV2({
           setStreetAddress(rev.street_address);
         }
         setFormattedAddress(rev.formatted_address);
-        setLocationNotice(`Vị trí giao hàng đã được điều chỉnh: ${rev.formatted_address}`);
-        setTimeout(() => setLocationNotice(null), 4000);
+        setRequiresHouseNumberHint(Boolean(rev.requires_house_number));
+        setLocationNotice(`Vị trí giao hàng đã được cập nhật: ${rev.formatted_address}`);
+        setTimeout(() => setLocationNotice(null), 5000);
       }
     } catch {
       setLocationNotice("Đã định vị lại vị trí trên bản đồ.");
@@ -379,21 +382,23 @@ export default function AddressEditorV2({
     }
   };
 
-  // Handle "Vị trí hiện tại của tôi" (Requirement 8 & 9)
+  // Handle "Lấy vị trí của tôi" - Tự động điền đầy đủ địa chỉ qua VIETMAP
   const handleGetCurrentLocation = async () => {
     setIsLocatingGps(true);
     setErrorMessage(null);
     setGpsAccuracyNotice(null);
+    setLocationNotice("Đang truy cập cảm biến GPS và nhận diện địa chỉ qua VIETMAP...");
 
     try {
       const loc = await placesService.getCurrentLocation();
       setLat(loc.lat);
       setLng(loc.lng);
-      setIsVerified(false); // Invalidate per Requirement 18
+      setHasRealCoordinates(true);
+      setIsVerified(true); // Tọa độ GPS thực tế từ cảm biến thiết bị
 
       if (loc.isLowAccuracy) {
         setGpsAccuracyNotice(
-          `Vị trí hiện tại chưa đủ chính xác (sai số ±${Math.round(loc.accuracy)}m). Bạn có thể điều chỉnh ghim trên bản đồ.`
+          `Độ chính xác GPS hiện tại sai số ±${Math.round(loc.accuracy)}m. Bạn có thể kéo ghim trên bản đồ để tinh chỉnh vị trí.`
         );
       }
 
@@ -406,7 +411,8 @@ export default function AddressEditorV2({
             setSelectedProvince(p);
             currentProv = p;
           }
-        } else if (rev.province_name) {
+        }
+        if (!currentProv && rev.province_name) {
           const provs = administrativeService.getProvinces(rev.province_name);
           if (provs.length > 0) {
             setSelectedProvince(provs[0]);
@@ -431,15 +437,27 @@ export default function AddressEditorV2({
             setSelectedCommune(matched);
           }
         }
+
         if (rev.street_address) {
           setStreetAddress(rev.street_address);
         }
         setFormattedAddress(rev.formatted_address);
-        setLocationNotice(`Đã lấy vị trí GPS hiện tại: ${rev.formatted_address}`);
-        setTimeout(() => setLocationNotice(null), 4000);
+        setRequiresHouseNumberHint(Boolean(rev.requires_house_number));
+
+        if (rev.requires_house_number) {
+          setLocationNotice(
+            `Đã định vị: ${rev.formatted_address}. Vui lòng bổ sung số nhà/số phòng (nếu có).`
+          );
+        } else {
+          setLocationNotice(
+            `Đã tự động xác định đầy đủ địa chỉ: ${rev.formatted_address}. Vui lòng kiểm tra và bấm "Xác nhận địa chỉ này".`
+          );
+        }
+        setTimeout(() => setLocationNotice(null), 6000);
       }
     } catch (err: any) {
       setErrorMessage(err.message || "Không thể truy cập cảm biến GPS của thiết bị.");
+      setLocationNotice(null);
     } finally {
       setIsLocatingGps(false);
     }
@@ -591,15 +609,20 @@ export default function AddressEditorV2({
             type="button"
             onClick={handleGetCurrentLocation}
             disabled={isLocatingGps}
-            title="Định vị GPS vị trí hiện tại của tôi"
-            className="absolute right-1.5 top-1.5 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-brand-blue-50 text-slate-700 hover:text-brand-blue-600 text-xs font-semibold flex items-center gap-1 transition-colors border border-slate-200"
+            title="Tự động lấy vị trí GPS và điền đầy đủ địa chỉ"
+            className="absolute right-1.5 top-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs disabled:bg-slate-300"
           >
             {isLocatingGps ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-brand-blue-600" />
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span className="text-[11px]">Đang dò GPS...</span>
+              </>
             ) : (
-              <Crosshair className="w-3.5 h-3.5 text-brand-blue-600" />
+              <>
+                <Crosshair className="w-3.5 h-3.5" />
+                <span className="text-[11px]">Lấy vị trí của tôi</span>
+              </>
             )}
-            <span className="hidden sm:inline">Vị trí tôi</span>
           </button>
         </div>
 
@@ -870,14 +893,23 @@ export default function AddressEditorV2({
             type="text"
             value={streetAddress}
             onChange={(e) => {
-              setStreetAddress(e.target.value);
-              setIsVerified(false); // Invalidate per Requirement 18
+              const val = e.target.value;
+              setStreetAddress(val);
+              if (/\d/.test(val)) {
+                setRequiresHouseNumberHint(false);
+              }
             }}
             placeholder="Ví dụ: Số 25 Lê Duẩn, Số 72 Trần Duy Hưng hoặc Tòa nhà Landmark..."
             className="w-full pl-9 pr-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-hidden focus:ring-2 focus:ring-brand-blue-500/20 focus:border-brand-blue-600 transition-all text-slate-800 placeholder:text-slate-400"
           />
           <Building className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
         </div>
+        {requiresHouseNumberHint && (
+          <div className="mt-1.5 flex items-center gap-1.5 text-xs text-amber-800 bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-200">
+            <Info className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+            <span>VIETMAP đã nhận diện đường. Vui lòng bổ sung số nhà, ngõ hoặc số căn hộ (nếu có).</span>
+          </div>
+        )}
       </div>
 
       {/* 5. RECIPIENT INFORMATION (If enabled) */}
