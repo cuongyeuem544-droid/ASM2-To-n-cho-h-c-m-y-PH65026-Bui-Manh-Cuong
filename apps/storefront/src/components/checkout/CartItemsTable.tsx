@@ -90,7 +90,7 @@ export default function CartItemsTable({
                   className="w-full h-full object-contain"
                   onError={(e) => {
                     (e.target as HTMLImageElement).src =
-                      "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=300&auto=format&fit=crop&q=80";
+                      "/images/placeholder-medicine.svg";
                   }}
                 />
               </div>

@@ -113,7 +113,8 @@ def serialize_product(
     if eligibility and eligibility.get("selected_sku") and eligibility["selected_sku"].get("base_price"):
         final_price = eligibility["selected_sku"]["base_price"]
     
-    sale_price = int(final_price * 0.95) if (final_price and final_price > 80000) else None
+    # Giá khuyến mãi thực tế (chỉ thiết lập khi có chương trình phê duyệt; không tự sinh giả mạo)
+    sale_price = None
 
     # Ingredients string
     ing_names = []
@@ -131,8 +132,8 @@ def serialize_product(
     base_slug = slugify(product.canonical_name)
     slug = f"{base_slug}-{product.id}"
 
-    # Priority for product image: local optimized WebP -> original remote image -> fallback
-    fallback_img = "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=800&auto=format&fit=crop&q=80"
+    # Priority for product image: local optimized WebP -> original remote image -> neutral placeholder
+    fallback_img = "/images/placeholder-medicine.svg"
     if product.local_image_url:
         image_url = product.local_image_url
     elif product.image_url and product.image_url.startswith("http"):
@@ -143,8 +144,8 @@ def serialize_product(
     thumbnail_url = product.local_thumbnail_url or image_url
 
     is_rx = product.rx_otc_status == RxOtcStatus.PRESCRIPTION
-    featured_ids = {16, 56, 57, 58, 59, 60, 61, 62, 63, 65, 66, 67, 68, 70, 71}
-    bestseller_ids = {16, 57, 59, 63, 66, 68, 70, 71}
+    is_featured = bool(getattr(product, "is_featured", False))
+    is_bestseller = False
 
     # Extract eligibility parameters if provided
     is_sale_eligible = False
@@ -242,8 +243,8 @@ def serialize_product(
         "rating": rating,
         "reviewCount": review_count,
         "isPrescription": is_rx,
-        "isFeatured": product.id in featured_ids,
-        "isBestSeller": product.id in bestseller_ids,
+        "isFeatured": is_featured,
+        "isBestSeller": is_bestseller,
         "catalogTier": eligibility_tier,
         "isSaleEligible": is_sale_eligible,
         "canAddToCart": can_add_to_cart,

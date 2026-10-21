@@ -219,7 +219,7 @@ export default function ChinhSachDoiTraPage() {
                 <h3 className="font-extrabold text-base">Địa chỉ tiếp nhận hàng đổi trả H4Care:</h3>
               </div>
               <p className="text-xs text-slate-300">
-                Kho Trung Tâm Dược Phẩm H4Care: 123 Đường Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh
+                Kho Tổng Tiếp Nhận Hoàn Hàng: Số 12 Nguyễn Thị Minh Khai, Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh (hoặc Chi nhánh Kho gần nhất ghi trên Phiếu giao hàng của quý khách).
               </p>
               <p className="text-xs text-slate-400 mt-1">
                 Kênh hỗ trợ đổi trả Dược khoa: <strong className="text-white">duocsi@h4care.vn</strong> (Phản hồi 8h00 - 21h00 hàng ngày)

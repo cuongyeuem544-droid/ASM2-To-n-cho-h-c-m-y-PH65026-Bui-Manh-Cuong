@@ -4,7 +4,6 @@ import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { Header } from "@/components/layout/Header";
-import { PRODUCTS_DATA } from "@/data/products";
 import { Product, ProductSkuItem } from "@/types";
 import { ProductCard } from "@/components/product/ProductCard";
 import { RxConsultModal } from "@/components/product/RxConsultModal";
@@ -45,28 +44,17 @@ import {
   MessageSquare,
 } from "lucide-react";
 
-const FALLBACK_MEDICINE_IMAGE =
-  "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=800&auto=format&fit=crop&q=80";
+const FALLBACK_MEDICINE_IMAGE = "/images/placeholder-medicine.svg";
 
 export default function ProductDetailPage() {
   const params = useParams();
   const slug = params?.slug as string;
   const router = useRouter();
 
-  // Local fallback / initial load
-  const [product, setProduct] = useState<Product | null>(() => {
-    return (
-      PRODUCTS_DATA.find(
-        (p) =>
-          p.slug === slug ||
-          p.id === slug ||
-          (p.dbId && String(p.dbId) === slug) ||
-          (slug && slug.endsWith(`-${p.dbId}`))
-      ) || null
-    );
-  });
-
-  const [isLoading, setIsLoading] = useState(false);
+  // Dữ liệu sản phẩm thực tế từ Neon PostgreSQL Core API (không dùng mock offline)
+  const [product, setProduct] = useState<Product | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
   const [selectedSku, setSelectedSku] = useState<ProductSkuItem | null>(null);
   const [selectedImgIdx, setSelectedImgIdx] = useState(0);
   const [imgErrorMap, setImgErrorMap] = useState<Record<number, boolean>>({});
@@ -99,10 +87,27 @@ export default function ProductDetailPage() {
           if (data.skus && data.skus.length > 0) {
             setSelectedSku(data.selectedSku || data.skus[0]);
           }
+          // Tải sản phẩm liên quan thực tế từ Neon DB theo danh mục
+          if (data.category) {
+            fetch(`/api/v1/store/products?category=${encodeURIComponent(data.category)}&limit=5`)
+              .then((r) => (r.ok ? r.json() : null))
+              .then((catData) => {
+                const items = catData?.items || (Array.isArray(catData) ? catData : []);
+                setRelatedProducts(
+                  items
+                    .filter((p: Product) => p.id !== data.id && p.catalogTier !== "INTERNAL_TEST")
+                    .slice(0, 4)
+                );
+              })
+              .catch(() => {});
+          }
+        } else {
+          setProduct(null);
         }
       })
       .catch((err) => {
-        console.warn("Using offline catalog fallback:", err);
+        console.error("Lỗi khi tải thông tin sản phẩm từ máy chủ:", err);
+        setProduct(null);
       })
       .finally(() => {
         setIsLoading(false);
@@ -294,14 +299,6 @@ export default function ProductDetailPage() {
       </div>
     );
   }
-
-  // Related products based on category, strictly filtering out demo/internal products
-  const relatedProducts = PRODUCTS_DATA.filter(
-    (p) =>
-      p.id !== product.id &&
-      p.category === product.category &&
-      p.catalogTier !== "INTERNAL_TEST"
-  ).slice(0, 4);
 
   // Images setup
   const galleryImages = product.images && product.images.length > 0

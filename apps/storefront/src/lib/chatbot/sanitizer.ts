@@ -130,10 +130,10 @@ export function sanitizeProduct(p: Product): ChatProductItem {
     categoryName: cleanMedicalText(p.categoryName) || "Dược phẩm",
     price: typeof p.price === "number" ? p.price : 0,
     salePrice: typeof p.salePrice === "number" ? p.salePrice : null,
-    image: p.images && p.images.length > 0 ? p.images[0] : "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=800",
+    image: p.images && p.images.length > 0 ? p.images[0] : "/images/placeholder-medicine.svg",
     activeIngredient: cleanActive,
     dosageForm: cleanMedicalText(p.dosageForm) || "Viên nén",
-    stock: typeof p.stock === "number" ? p.stock : 100,
+    stock: typeof p.stock === "number" ? p.stock : 0,
     isPrescription: !!p.isPrescription,
     shortDescription: cleanDesc || "Sản phẩm chăm sóc sức khỏe chính hãng tại H4CARE.",
   };

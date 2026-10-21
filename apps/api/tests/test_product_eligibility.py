@@ -109,23 +109,49 @@ class TestProductEligibility(unittest.TestCase):
 
     def test_expired_batches_excluded_from_available_stock(self):
         """Các lô hàng đã hết hạn sử dụng tuyệt đối không được tính vào tồn khả dụng."""
-        # Tìm hoặc tạo một sản phẩm test trong isolated DB có lô hết hạn
         prod = self.db.query(CanonicalProduct).filter(
             CanonicalProduct.id == 99770, # Prospan có lô expired 2026-09-20 trong DB
         ).first()
         self.assertIsNotNone(prod)
 
         res = ProductEligibilityService.evaluate_product_eligibility(prod, self.db)
-        # Kiểm tra rằng tồn khả dụng không bao gồm lô hết hạn
-        # Lô 2: LOT-8802-EXP-36798 có expiry 2026-09-20 và qty=100. Vì đã hết hạn, qty của nó phải bị loại bỏ!
         today = date.today()
-        expired_batches = self.db.query(InventoryBatch).filter(
-            InventoryBatch.batch_number == "LOT-8802-EXP-36798",
-            InventoryBatch.expiry_date < today,
-        ).all()
-        if expired_batches:
-            # Chứng minh tồn kho của Prospan không cộng dồn 100 của lô hết hạn này
-            self.assertLess(res.available_stock, 100 + 10)
+        from sqlalchemy import func
+        sku = self.db.query(ProductSku).filter(ProductSku.canonical_product_id == prod.id).first()
+        total_all_batches = self.db.query(func.coalesce(func.sum(WarehouseBatchStock.quantity_available), 0)).join(
+            InventoryBatch, WarehouseBatchStock.batch_id == InventoryBatch.id
+        ).filter(InventoryBatch.sku_id == sku.id).scalar()
+
+        expired_qty = self.db.query(func.coalesce(func.sum(WarehouseBatchStock.quantity_available), 0)).join(
+            InventoryBatch, WarehouseBatchStock.batch_id == InventoryBatch.id
+        ).filter(
+            InventoryBatch.sku_id == sku.id,
+            InventoryBatch.expiry_date <= today,
+        ).scalar()
+
+        # res.available_stock must equal total_all_batches - expired_qty
+        self.assertEqual(res.available_stock, total_all_batches - expired_qty)
+        self.assertGreater(expired_qty, 0)
+
+    def test_product_without_sku_is_locked(self):
+        """Sản phẩm không có SKU trong database phải bị khóa (LOCKED), stock = 0, can_add_to_cart = False."""
+        no_sku_prod = CanonicalProduct(
+            canonical_name="Thuốc Thử Nghiệm Không SKU",
+            registration_number="VD-99999-25",
+            publish_status=PublishStatus.PUBLISHED,
+            publish_mode="SALE_ELIGIBLE",
+            rx_otc_status=RxOtcStatus.OTC,
+            is_demo=False,
+        )
+        self.db.add(no_sku_prod)
+        self.db.commit()
+
+        res = ProductEligibilityService.evaluate_product_eligibility(no_sku_prod, self.db)
+        self.assertFalse(res.is_eligible_for_sale)
+        self.assertFalse(res.can_add_to_cart)
+        self.assertEqual(res.available_stock, 0)
+        self.assertEqual(res.cta_type, "LOCKED")
+        self.assertEqual(res.eligibility_tier, "UNVERIFIED_DATA")
 
     def test_transparency_score_and_data_provenance(self):
         """Hồ sơ minh bạch cung cấp điểm số, nguồn đối chiếu và tuyên bố trách nhiệm y khoa."""

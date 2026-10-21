@@ -4,6 +4,7 @@ H4CARE Core Backend - Commercial Product Eligibility Engine
 Tuân thủ Luật Dược 2016, Thông tư 02/2018/TT-BYT, quy chế GPP/GSP và thuật toán FEFO.
 """
 from datetime import date, datetime
+import re
 from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -57,15 +58,36 @@ class ProductEligibilityResult:
 
 
 class ProductEligibilityService:
-    @staticmethod
-    def calculate_transparency_score(product: CanonicalProduct) -> tuple[int, list[str]]:
+    # Chuẩn số đăng ký lưu hành Cục Quản lý Dược (Bộ Y Tế)
+    DAV_REG_REGEX = re.compile(
+        r"^(VD|VD3|VN|VN2|VN3|QLĐB|GC)-\d+-\d{2}$"
+        r"|^V\d{2,4}-[A-Z]\d{2}-\d{2}$"
+        r"|^\d+/\d{4}/(ĐKSP|ATTP-XNCB|ATTP-TNCB)$"
+        r"|^\d{2,5}/(BYT-TB-CT|ĐKLT-BYT)$"
+        r"|^[A-Z0-9\-\.\/]{6,30}$",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def is_verified_registration(cls, reg_num: str | None) -> bool:
+        if not reg_num or not isinstance(reg_num, str):
+            return False
+        clean = reg_num.strip().upper()
+        if len(clean) < 6:
+            return False
+        if any(clean.startswith(prefix) for prefix in ("DEMO", "REF-", "TEST", "SAMPLE", "DRAFT", "TEMP")):
+            return False
+        return bool(cls.DAV_REG_REGEX.match(clean))
+
+    @classmethod
+    def calculate_transparency_score(cls, product: CanonicalProduct) -> tuple[int, list[str]]:
         """
         Tính điểm mức độ minh bạch và đầy đủ của hồ sơ dược khoa.
         Điểm số phản ánh mức độ đối chiếu dữ liệu, KHÔNG phải chất lượng hay an toàn tuyệt đối của thuốc.
         """
         checklist = [
             ("canonical_name", bool(product.canonical_name), 10),
-            ("registration_number", bool(product.registration_number and not product.registration_number.startswith("DEMO")), 20),
+            ("registration_number", cls.is_verified_registration(product.registration_number), 20),
             ("manufacturer", bool(product.manufacturer), 10),
             ("dosage_form", bool(product.dosage_form), 10),
             ("indications", bool(product.indications), 10),
@@ -131,11 +153,7 @@ class ProductEligibilityService:
 
         # 2. Tính toán điểm minh bạch dữ liệu H4CARE
         comp_score, missing_fields = cls.calculate_transparency_score(product)
-        is_verified_reg = bool(
-            product.registration_number
-            and not product.registration_number.startswith("DEMO")
-            and not product.registration_number.startswith("REF-")
-        )
+        is_verified_reg = cls.is_verified_registration(product.registration_number)
         source_name = (
             "Dữ liệu Cục Quản lý Dược (Bộ Y Tế) & Hồ sơ nhà sản xuất"
             if is_verified_reg
@@ -231,29 +249,32 @@ class ProductEligibilityService:
             )
 
         # Pillar 5: Kiểm tra SKU và Giá bán
-        if not selected_sku_dict or selected_sku_dict["base_price"] <= 0:
+        if not selected_sku_dict:
+            reasons.append("Sản phẩm chưa có quy cách đóng gói (SKU) được phê duyệt mở bán.")
+            return ProductEligibilityResult(
+                is_eligible_for_sale=False,
+                eligibility_tier="UNVERIFIED_DATA",
+                can_add_to_cart=False,
+                cta_type="LOCKED",
+                cta_label="Chưa Có Quy Cách / Giá",
+                available_stock=0,
+                primary_reason="Sản phẩm chưa có quy cách đóng gói (SKU) hợp lệ trong hệ thống.",
+                reasons=reasons,
+                transparency_info=transparency_info,
+                skus=sku_list,
+                selected_sku=None,
+            )
+
+        if selected_sku_dict.get("base_price", 0) <= 0:
             from app.models import PriceObservation
             price_row = db.query(PriceObservation.observed_price).filter(
                 PriceObservation.product_id == product.id
             ).first()
             if price_row and price_row[0] and price_row[0] > 0:
-                obs_price = int(price_row[0])
-                if not selected_sku_dict:
-                    selected_sku_dict = {
-                        "id": 0,
-                        "sku_code": product.registration_number or f"SKU-{product.id}",
-                        "uom": product.package_description or "Hộp",
-                        "conversion_rate": 1,
-                        "base_price": obs_price,
-                        "is_default": True,
-                        "available_stock": 50,
-                    }
-                    sku_list.append(selected_sku_dict)
-                else:
-                    selected_sku_dict["base_price"] = obs_price
+                selected_sku_dict["base_price"] = int(price_row[0])
 
-        if not selected_sku_dict or selected_sku_dict["base_price"] <= 0:
-            reasons.append("Sản phẩm chưa có quy cách đóng gói (SKU) hoặc chưa có giá bán thương mại niêm yết hợp lệ.")
+        if selected_sku_dict.get("base_price", 0) <= 0:
+            reasons.append("Sản phẩm chưa có giá bán thương mại niêm yết hợp lệ.")
             return ProductEligibilityResult(
                 is_eligible_for_sale=False,
                 eligibility_tier="UNVERIFIED_DATA",

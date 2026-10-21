@@ -39,6 +39,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { CustomerAddressBook } from "@/components/account/CustomerAddressBook";
+import { customerAddressService } from "@/services/customerAddressService";
 import { CustomerReturnsSection } from "@/components/returns/CustomerReturnsSection";
 import { ReturnWizardModal } from "@/components/returns/ReturnWizardModal";
 import { formatDateTimeVN } from "@/lib/dateUtils";
@@ -83,7 +84,7 @@ export default function AccountPage() {
   const [isEditingProfile, setIsEditingProfile] = useState<boolean>(false);
   const [editName, setEditName] = useState<string>("");
   const [editEmail, setEditEmail] = useState<string>("");
-  const [editAddress, setEditAddress] = useState<string>("123 Đường Nguyễn Huệ, Quận 1, TP. Hồ Chí Minh");
+  const [editAddress, setEditAddress] = useState<string>("");
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
 
   useEffect(() => {
@@ -96,6 +97,16 @@ export default function AccountPage() {
     if (user) {
       setEditName(user.fullName);
       setEditEmail(user.email || "");
+      // Nạp địa chỉ giao nhận chính thức từ cơ sở dữ liệu Neon
+      customerAddressService
+        .listAddresses()
+        .then((addrs) => {
+          if (addrs && addrs.length > 0) {
+            const def = addrs.find((a) => a.is_default) || addrs[0];
+            setEditAddress(def.formatted_address || def.address_line || "");
+          }
+        })
+        .catch(() => {});
     }
   }, [user]);
 

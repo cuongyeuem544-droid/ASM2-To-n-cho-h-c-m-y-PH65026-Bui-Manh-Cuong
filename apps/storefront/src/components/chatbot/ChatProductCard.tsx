@@ -11,7 +11,7 @@ interface ChatProductCardProps {
 
 export const ChatProductCard: React.FC<ChatProductCardProps> = ({ product }) => {
   const [imgSrc, setImgSrc] = useState<string>(
-    product.image || "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=800"
+    product.image || "/images/placeholder-medicine.svg"
   );
 
   const formattedPrice = (product.salePrice || product.price).toLocaleString("vi-VN");
@@ -26,7 +26,7 @@ export const ChatProductCard: React.FC<ChatProductCardProps> = ({ product }) => 
           src={imgSrc}
           alt={product.name}
           onError={() =>
-            setImgSrc("https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=800")
+            setImgSrc("/images/placeholder-medicine.svg")
           }
           className="max-h-full max-w-full object-contain group-hover:scale-105 transition-transform duration-300"
         />
