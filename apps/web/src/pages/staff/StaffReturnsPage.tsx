@@ -838,6 +838,7 @@ export function StaffReturnsPage() {
                       draft.storage_condition_ok === true
 
                     const updateField = (field: string, value: any) => {
+                      if (actionError) setActionError('')
                       const nextDraft = {
                         ...draft,
                         [field]: value,

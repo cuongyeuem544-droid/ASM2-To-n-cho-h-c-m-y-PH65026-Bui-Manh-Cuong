@@ -1743,3 +1743,88 @@ def test_46_beneficiary_cloned_to_refund_and_rejects_client_override(client, man
         refund = case.refunds[0]
         assert refund.beneficiary_account_number == "999988887777"
         assert refund.beneficiary_account_number != "HACKED_ACCOUNT_999"
+
+
+def test_47_manager_can_supplement_beneficiary_when_initially_missing(client, manager_hcm_headers):
+    """
+    Khi khách hàng tạo yêu cầu hoàn chưa có số tài khoản (ví dụ đơn COD),
+    Quản lý kho có thể điền bổ sung beneficiary_bank và beneficiary_account_number
+    để hoàn tiền chuyển khoản thành công.
+    """
+    order_id, order_code, item_id, _ = _create_test_order_with_fulfillment("KHO-HCM-01")
+    with SessionLocal() as db:
+        order = db.get(Order, order_id)
+        order.payment_method = "COD"
+        order.payment_status = "PAID"
+        db.commit()
+
+    buyer_login = client.post("/api/v1/auth/login", json={"email": "buyer@pharmatrust.vn", "password": "Buyer@123456"}).json()
+    b_headers = {"Authorization": f"Bearer {buyer_login['access_token']}"}
+
+    # Tạo return request KHÔNG có tài khoản (COD)
+    res_create = client.post(
+        "/api/v1/returns",
+        headers=b_headers,
+        json={
+            "order_code": order_code,
+            "request_type": "RETURN",
+            "reason_code": "WRONG_ITEM",
+            "reason_text": "Giao nhầm sản phẩm",
+            "items": [{"order_item_id": item_id, "requested_quantity": 1}],
+        },
+    )
+    assert res_create.status_code == 200, res_create.text
+    ret_code = res_create.json()["return_code"]
+
+    with SessionLocal() as db:
+        ret_req = db.scalar(select(ReturnRequest).where(ReturnRequest.return_code == ret_code))
+        from app.services.warehouse_return_service import WarehouseReturnService
+        cases = WarehouseReturnService.split_return_request_into_cases(db, ret_req)
+        case_code = cases[0].case_code
+        mgr = db.scalar(select(User).where(User.email == "manager.hcm@pharmatrust.vn"))
+        cases[0].status = ReturnStatus.APPROVED.value
+        cases[0].approved_by_user_id = mgr.id
+        cases[0].items[0].approved_quantity = 1
+        cases[0].items[0].received_quantity = 1
+        cases[0].items[0].accepted_quantity = 1
+        cases[0].items[0].approved_refund_amount = Decimal("50000.0")
+        db.commit()
+
+    # 1. Quản lý hoàn tiền KHÔNG gửi tài khoản -> Phải bị từ chối 400
+    res_fail = client.post(
+        f"/api/v1/warehouse/me/returns/{case_code}/refund",
+        headers=manager_hcm_headers,
+        json={
+            "password": "Warehouse@2026",
+            "refund_method": "BANK_TRANSFER",
+        },
+    )
+    assert res_fail.status_code == 400
+    assert "thiếu thông tin tài khoản thụ hưởng" in res_fail.json()["detail"]
+
+    # 2. Quản lý điền bổ sung số tài khoản ngân hàng của khách -> Thành công 200
+    res_ok = client.post(
+        f"/api/v1/warehouse/me/returns/{case_code}/refund",
+        headers=manager_hcm_headers,
+        json={
+            "password": "Warehouse@2026",
+            "refund_method": "BANK_TRANSFER",
+            "beneficiary_bank": "Vietcombank",
+            "beneficiary_account_number": "0071001234567",
+            "beneficiary_account_name": "NGUYEN DUC ANH",
+        },
+    )
+    assert res_ok.status_code == 200
+
+    # 3. Kiểm tra bản ghi Refund và ReturnRequest được cập nhật đầy đủ
+    with SessionLocal() as db:
+        case = db.scalar(select(WarehouseReturnCase).where(WarehouseReturnCase.case_code == case_code))
+        assert len(case.refunds) == 1
+        refund = case.refunds[0]
+        assert refund.beneficiary_bank_name == "Vietcombank"
+        assert refund.beneficiary_account_number == "0071001234567"
+        assert refund.beneficiary_account_name == "NGUYEN DUC ANH"
+
+        ret_after = db.scalar(select(ReturnRequest).where(ReturnRequest.return_code == ret_code))
+        assert ret_after.refund_account_number == "0071001234567"
+        assert ret_after.refund_bank_name == "Vietcombank"

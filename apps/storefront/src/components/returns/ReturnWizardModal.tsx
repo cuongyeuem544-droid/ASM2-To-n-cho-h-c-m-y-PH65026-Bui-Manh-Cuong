@@ -12,7 +12,24 @@ import {
   ShieldCheck,
   ChevronRight,
   ArrowRight,
+  CreditCard,
 } from "lucide-react";
+
+const POPULAR_BANKS = [
+  { code: "VCB", name: "Vietcombank (Ngoại Thương Việt Nam)" },
+  { code: "MB", name: "MB Bank (Quân Đội)" },
+  { code: "TCB", name: "Techcombank (Kỹ Thương)" },
+  { code: "BIDV", name: "BIDV (Đầu Tư & Phát Triển)" },
+  { code: "CTG", name: "VietinBank (Công Thương)" },
+  { code: "ACB", name: "ACB (Á Châu)" },
+  { code: "VPB", name: "VPBank (Việt Nam Thịnh Vượng)" },
+  { code: "TPB", name: "TPBank (Tiên Phong)" },
+  { code: "STB", name: "Sacombank (Sài Gòn Thương Tín)" },
+  { code: "VIB", name: "VIB (Quốc Tế)" },
+  { code: "HDB", name: "HDBank (Phát Triển TP.HCM)" },
+  { code: "AGR", name: "Agribank (Nông Nghiệp)" },
+  { code: "OTHER", name: "Ngân hàng khác..." },
+];
 
 interface EligibilityItem {
   order_item_id: number;
@@ -184,6 +201,22 @@ export function ReturnWizardModal({
     if (token) headers["Authorization"] = `Bearer ${token}`;
     if (guestToken) headers["X-Order-Token"] = guestToken;
 
+    if (requestType === "RETURN") {
+      if (!refundBankName.trim()) {
+        setBankError("Vui lòng chọn hoặc nhập tên ngân hàng nhận tiền hoàn.");
+        return;
+      }
+      const cleanAcc = refundAccountNumber.trim();
+      if (!cleanAcc || cleanAcc.length < 6 || cleanAcc.length > 20) {
+        setBankError("Số tài khoản ngân hàng không hợp lệ (yêu cầu từ 6 đến 20 chữ số).");
+        return;
+      }
+      if (!refundAccountName.trim()) {
+        setBankError("Vui lòng nhập họ và tên chủ tài khoản thụ hưởng.");
+        return;
+      }
+    }
+
     setSubmitting(true);
     setUploadErrors([]);
     try {
@@ -203,6 +236,10 @@ export function ReturnWizardModal({
             return_method: "CUSTOMER_SHIP",
             items: itemsPayload,
             customer_phone_verify: phoneVerify.trim(),
+            refund_bank_code: requestType === "RETURN" ? refundBankCode : undefined,
+            refund_bank_name: requestType === "RETURN" ? refundBankName.trim() : undefined,
+            refund_account_number: requestType === "RETURN" ? refundAccountNumber.trim() : undefined,
+            refund_account_name: requestType === "RETURN" ? refundAccountName.trim() : undefined,
           }),
         });
 
@@ -562,6 +599,100 @@ export function ReturnWizardModal({
                 <span className="text-brand-blue-600">{estimate.totalRefund.toLocaleString("vi-VN")} đ</span>
               </div>
             </div>
+
+            {/* Step 6: Thông tin tài khoản nhận tiền hoàn */}
+            {requestType === "RETURN" && (
+              <div className="p-4 rounded-2xl bg-brand-blue-50/40 border border-brand-blue-200/80 space-y-3">
+                <div className="flex items-center gap-2">
+                  <CreditCard className="w-4 h-4 text-brand-blue-600 shrink-0" />
+                  <label className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                    Thông tin tài khoản nhận tiền hoàn
+                  </label>
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Số tiền hoàn sẽ được chuyển khoản trực tiếp về tài khoản ngân hàng của bạn sau khi Dược sĩ kiểm định đạt chuẩn.
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Ngân hàng thụ hưởng <span className="text-rose-500">*</span>
+                    </label>
+                    <select
+                      value={refundBankCode}
+                      onChange={(e) => {
+                        const b = POPULAR_BANKS.find((x) => x.code === e.target.value);
+                        setRefundBankCode(e.target.value);
+                        if (b && b.code !== "OTHER") setRefundBankName(b.name);
+                        setBankError("");
+                      }}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-medium text-slate-800 bg-white focus:outline-brand-blue-600"
+                    >
+                      {POPULAR_BANKS.map((b) => (
+                        <option key={b.code} value={b.code}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {refundBankCode === "OTHER" && (
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                        Tên ngân hàng khác <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={refundBankName}
+                        onChange={(e) => {
+                          setRefundBankName(e.target.value);
+                          setBankError("");
+                        }}
+                        placeholder="Nhập tên ngân hàng của bạn..."
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-800 bg-white focus:outline-brand-blue-600"
+                      />
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Số tài khoản <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={refundAccountNumber}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/\D/g, "");
+                        setRefundAccountNumber(val);
+                        setBankError("");
+                      }}
+                      placeholder="VD: 0123456789..."
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-mono text-slate-800 bg-white focus:outline-brand-blue-600"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Tên chủ tài khoản (không dấu) <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={refundAccountName}
+                      onChange={(e) => {
+                        setRefundAccountName(e.target.value.toUpperCase());
+                        setBankError("");
+                      }}
+                      placeholder="VD: NGUYEN VAN A..."
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold uppercase text-slate-800 bg-white focus:outline-brand-blue-600"
+                    />
+                  </div>
+                </div>
+
+                {bankError && (
+                  <p className="text-[11px] text-rose-600 font-semibold">{bankError}</p>
+                )}
+              </div>
+            )}
 
             {/* Upload Errors Alert & Retry */}
             {uploadErrors.length > 0 && (

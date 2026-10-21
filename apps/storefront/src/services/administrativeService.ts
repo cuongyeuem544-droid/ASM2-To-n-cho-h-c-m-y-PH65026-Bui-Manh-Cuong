@@ -2,8 +2,8 @@
  * apps/storefront/src/services/administrativeService.ts
  *
  * Service quản lý danh mục địa giới hành chính Việt Nam theo mô hình 2 cấp hiện hành sau 2025.
- * - CẤP 1: 34 Tỉnh / Thành phố trực thuộc Trung ương (28 tỉnh, 6 TP trực thuộc TW).
- * - CẤP 2: 3.321 Xã / Phường / Đặc khu (Hỗ trợ: Xã, Phường, Đặc khu như Phú Quốc, Vân Đồn, Côn Đảo...).
+ * - CẤP 1: 63 Tỉnh / Thành phố trực thuộc Trung ương (28 tỉnh, 6 TP trực thuộc TW).
+ * - CẤP 2: 3.421 Xã / Phường / Đặc khu (Hỗ trợ: Xã, Phường, Đặc khu như Phú Quốc, Vân Đồn, Côn Đảo...).
  * - LEGACY COMPATIBILITY LAYER: Tra cứu alias quận/huyện cũ mà không bắt buộc chọn quận/huyện.
  * - KHÔNG HARD-CODE DANH SÁCH TỈNH TRONG JSX / COMPONENT.
  */

@@ -14,6 +14,7 @@ import {
   Building2,
   CheckCircle2,
   AlertCircle,
+  LocateFixed,
 } from "lucide-react";
 
 export interface WarehousePinInfo {
@@ -49,6 +50,10 @@ export default function DeliveryRealMap({
   const customerMarkerRef = useRef<L.Marker | null>(null);
   const warehouseMarkersRef = useRef<L.Marker[]>([]);
   const polylineRef = useRef<L.Polyline | null>(null);
+
+  // Flags to prevent violent auto-fitBounds on every click / drag
+  const hasInitialBoundsFitted = useRef(false);
+  const isUserActionRef = useRef(false);
 
   const [mapInitialized, setMapInitialized] = useState(false);
   const [activeAddressNotice, setActiveAddressNotice] = useState<string | null>(null);
@@ -105,9 +110,49 @@ export default function DeliveryRealMap({
       })
       .addTo(map);
 
+    // Invalidate map size to prevent gray tiles on initial container layout
+    const timer1 = setTimeout(() => {
+      try {
+        map.invalidateSize();
+      } catch {}
+    }, 150);
+    const timer2 = setTimeout(() => {
+      try {
+        map.invalidateSize();
+      } catch {}
+    }, 450);
+
+    const handleResize = () => {
+      if (mapInstanceRef.current) {
+        try {
+          mapInstanceRef.current.invalidateSize();
+        } catch {}
+      }
+    };
+    window.addEventListener("resize", handleResize);
+
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined" && mapContainerRef.current) {
+      ro = new ResizeObserver(() => {
+        if (mapInstanceRef.current) {
+          try {
+            mapInstanceRef.current.invalidateSize();
+          } catch {}
+        }
+      });
+      ro.observe(mapContainerRef.current);
+    }
+
     // Handle Click on Map to Pin Delivery Location
     map.on("click", (e: L.LeafletMouseEvent) => {
       const { lat, lng } = e.latlng;
+      isUserActionRef.current = true;
+
+      // Snappy visual feedback: immediately move or create customer marker
+      if (customerMarkerRef.current) {
+        customerMarkerRef.current.setLatLng([lat, lng]);
+      }
+
       onLocationSelect(lat, lng);
       setActiveAddressNotice(`Đã ghim tọa độ mới: ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
       setTimeout(() => setActiveAddressNotice(null), 3000);
@@ -117,6 +162,11 @@ export default function DeliveryRealMap({
     setMapInitialized(true);
 
     return () => {
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      window.removeEventListener("resize", handleResize);
+      if (ro) ro.disconnect();
+
       if (mapInstanceRef.current) {
         const m = mapInstanceRef.current as any;
         m._animatingZoom = false;
@@ -162,9 +212,16 @@ export default function DeliveryRealMap({
           title: "Vị trí nhận thuốc của bạn (Kéo thả để chỉnh sửa)",
         }).addTo(map);
 
+        marker.on("dragstart", () => {
+          isUserActionRef.current = true;
+        });
+
         marker.on("dragend", (e: any) => {
+          isUserActionRef.current = true;
           const pos = e.target.getLatLng();
           onLocationSelect(pos.lat, pos.lng);
+          setActiveAddressNotice(`Đã kéo ghim tới tọa độ: ${pos.lat.toFixed(4)}, ${pos.lng.toFixed(4)}`);
+          setTimeout(() => setActiveAddressNotice(null), 3000);
         });
 
         marker.bindPopup(`
@@ -268,7 +325,7 @@ export default function DeliveryRealMap({
       warehouseMarkersRef.current.push(whMarker);
     });
 
-    // Draw route dashed polyline if both exist
+    // Draw route dashed polyline if both customerCoords and nearestWarehouse exist
     if (customerCoords && nearestWarehouse) {
       const whLat = nearestWarehouse.lat ?? (nearestWarehouse.warehouse_code?.includes("HN") ? 21.0253 : 10.7872);
       const whLng = nearestWarehouse.lng ?? (nearestWarehouse.warehouse_code?.includes("HN") ? 105.8552 : 106.7001);
@@ -286,21 +343,73 @@ export default function DeliveryRealMap({
 
       polylineRef.current = poly;
 
-      // Fit bounds to display both customer pin & nearest warehouse comfortably
-      try {
-        const bounds = L.latLngBounds(lineCoords);
-        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16, animate: false });
-      } catch (err) {
-        // Safe fallback if container size is pending
+      // CRITICAL FIX: Fit bounds ONLY ON INITIAL MOUNT, never violently reset zoom during user clicks!
+      if (!hasInitialBoundsFitted.current) {
+        hasInitialBoundsFitted.current = true;
+        try {
+          const bounds = L.latLngBounds(lineCoords);
+          map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16, animate: false });
+        } catch (err) {
+          // Safe fallback if container size is pending
+        }
+      } else if (!isUserActionRef.current) {
+        // External coordinate update (e.g. GPS button or place suggestion clicked)
+        try {
+          map.flyTo([customerCoords.lat, customerCoords.lng], Math.max(map.getZoom(), 15), { duration: 0.8 });
+        } catch (err) {}
+      } else {
+        // Direct map click or marker drag by user: keep current zoom and user focus!
+        isUserActionRef.current = false;
       }
     } else if (customerCoords) {
-      try {
-        map.setView([customerCoords.lat, customerCoords.lng], 15, { animate: false });
-      } catch (err) {
-        // Safe fallback if container size is pending
+      if (!hasInitialBoundsFitted.current) {
+        hasInitialBoundsFitted.current = true;
+        try {
+          map.setView([customerCoords.lat, customerCoords.lng], 15, { animate: false });
+        } catch (err) {
+          // Safe fallback if container size is pending
+        }
+      } else if (!isUserActionRef.current) {
+        try {
+          map.flyTo([customerCoords.lat, customerCoords.lng], Math.max(map.getZoom(), 15), { duration: 0.8 });
+        } catch (err) {}
+      } else {
+        isUserActionRef.current = false;
       }
     }
   }, [customerCoords, nearestWarehouse, allWarehouses, mapInitialized]);
+
+  // Action: Zoom/Pan to Customer Pin
+  const handleCenterCustomer = () => {
+    if (!mapInstanceRef.current || !customerCoords) return;
+    mapInstanceRef.current.flyTo([customerCoords.lat, customerCoords.lng], 16, { duration: 0.8 });
+    setActiveAddressNotice("Đang tập trung vào điểm nhận hàng của bạn");
+    setTimeout(() => setActiveAddressNotice(null), 2500);
+  };
+
+  // Action: Fit Route between Customer & Warehouse
+  const handleFitRoute = () => {
+    if (!mapInstanceRef.current || !customerCoords || !nearestWarehouse) return;
+    const whLat = nearestWarehouse.lat ?? (nearestWarehouse.warehouse_code?.includes("HN") ? 21.0253 : 10.7872);
+    const whLng = nearestWarehouse.lng ?? (nearestWarehouse.warehouse_code?.includes("HN") ? 105.8552 : 106.7001);
+    const bounds = L.latLngBounds([
+      [customerCoords.lat, customerCoords.lng],
+      [whLat, whLng],
+    ]);
+    mapInstanceRef.current.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
+    setActiveAddressNotice("Đang hiển thị toàn cảnh tuyến giao hàng");
+    setTimeout(() => setActiveAddressNotice(null), 2500);
+  };
+
+  // Action: Center on Warehouse
+  const handleCenterWarehouse = () => {
+    if (!mapInstanceRef.current || !nearestWarehouse) return;
+    const whLat = nearestWarehouse.lat ?? (nearestWarehouse.warehouse_code?.includes("HN") ? 21.0253 : 10.7872);
+    const whLng = nearestWarehouse.lng ?? (nearestWarehouse.warehouse_code?.includes("HN") ? 105.8552 : 106.7001);
+    mapInstanceRef.current.flyTo([whLat, whLng], 15, { duration: 0.8 });
+    setActiveAddressNotice(`Đang hiển thị vị trí kho: ${nearestWarehouse.warehouse_code}`);
+    setTimeout(() => setActiveAddressNotice(null), 2500);
+  };
 
   return (
     <div className="relative w-full rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 shadow-xs">
@@ -317,7 +426,34 @@ export default function DeliveryRealMap({
           </span>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {/* Re-center Customer Pin Button */}
+          {customerCoords && (
+            <button
+              type="button"
+              onClick={handleCenterCustomer}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold transition-all border border-slate-200"
+              title="Phóng to về điểm ghim nhận hàng của bạn"
+            >
+              <LocateFixed className="w-3.5 h-3.5 text-rose-500" />
+              <span>Về điểm ghim</span>
+            </button>
+          )}
+
+          {/* Fit Entire Route Button */}
+          {customerCoords && nearestWarehouse && (
+            <button
+              type="button"
+              onClick={handleFitRoute}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-800 text-[11px] font-bold transition-all border border-sky-200"
+              title="Xem toàn cảnh tuyến giao hàng từ kho tới điểm nhận"
+            >
+              <Navigation className="w-3.5 h-3.5 text-sky-600" />
+              <span>Xem toàn cảnh</span>
+            </button>
+          )}
+
+          {/* GPS Location Button */}
           {onGetGps && (
             <button
               type="button"
@@ -331,19 +467,11 @@ export default function DeliveryRealMap({
             </button>
           )}
 
+          {/* Nearest Warehouse Focus Button */}
           {nearestWarehouse && (
             <button
               type="button"
-              onClick={() => {
-                if (mapInstanceRef.current && nearestWarehouse) {
-                  const whLat = nearestWarehouse.lat ?? (nearestWarehouse.warehouse_code?.includes("HN") ? 21.0253 : 10.7872);
-                  const whLng = nearestWarehouse.lng ?? (nearestWarehouse.warehouse_code?.includes("HN") ? 105.8552 : 106.7001);
-                  mapInstanceRef.current.flyTo(
-                    [whLat, whLng],
-                    15
-                  );
-                }
-              }}
+              onClick={handleCenterWarehouse}
               className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-[11px] font-bold transition-all border border-emerald-200"
               title="Xem vị trí kho thuốc phục vụ"
             >

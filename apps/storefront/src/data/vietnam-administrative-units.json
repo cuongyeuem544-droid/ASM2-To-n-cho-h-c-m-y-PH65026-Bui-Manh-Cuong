@@ -1,16 +1,12 @@
 {
   "metadata": {
     "country": "VN",
-    "administrativeModel": "2-tier",
-    "effectiveDate": "2025-07-01",
-    "legalBasis": "Quyết định 19/2025/QĐ-TTg & Nghị quyết 202/2025/QH15",
-    "version": "VN_ADMIN_2025_07_01",
-    "updatedAt": "2026-10-17T14:05:02.259729+00:00",
-    "totalProvinces": 34,
-    "totalCommunes": 3321,
-    "mergerGroups": 23,
-    "unchangedProvinces": 11,
-    "description": "Danh mục địa giới hành chính Việt Nam hiện hành theo mô hình 2 cấp (Tỉnh/Thành phố trực thuộc TW và Xã/Phường/Đặc khu) sau sắp xếp 2025."
+    "administrativeModel": "63-provinces-full-google-maps",
+    "effectiveDate": "2026-01-01",
+    "version": "VN_ADMIN_2026_FULL_63",
+    "totalProvinces": 63,
+    "totalCommunes": 3421,
+    "description": "Danh mục địa giới hành chính Việt Nam mới nhất 2026 đầy đủ 63 Tỉnh / Thành phố trực thuộc Trung ương chuẩn Google Maps và các Xã / Phường / Đặc khu."
   },
   "provinces": [
     {
@@ -21,76 +17,19 @@
       "aliases": [
         "Ha Noi",
         "HN",
-        "Thu Do",
-        "Hà Nội",
-        "Thủ đô Hà Nội"
+        "Thủ Đô",
+        "Thủ đô Hà Nội",
+        "Thành phố Hà Nội"
       ],
       "boundingBox": {
-        "minLat": 20.5,
-        "maxLat": 21.6,
-        "minLng": 105.2,
-        "maxLng": 106.1
-      }
-    },
-    {
-      "code": "31",
-      "name": "Hải Phòng",
-      "fullName": "Thành phố Hải Phòng",
-      "type": "municipality",
-      "aliases": [
-        "Hai Phong",
-        "HP",
-        "Thành phố Hải Phòng",
-        "Hải Dương",
-        "Hai Duong",
-        "TP Hải Dương",
-        "Chí Linh"
-      ],
-      "boundingBox": {
-        "minLat": 20.5,
-        "maxLat": 21.3,
-        "minLng": 106.1,
-        "maxLng": 107.2
-      }
-    },
-    {
-      "code": "46",
-      "name": "Huế",
-      "fullName": "Thành phố Huế",
-      "type": "municipality",
-      "aliases": [
-        "Hue",
-        "Thừa Thiên Huế",
-        "Thua Thien Hue",
-        "TP Huế",
-        "Cố đô Huế"
-      ],
-      "boundingBox": {
-        "minLat": 15.9,
-        "maxLat": 16.8,
-        "minLng": 107.0,
-        "maxLng": 108.3
-      }
-    },
-    {
-      "code": "48",
-      "name": "Đà Nẵng",
-      "fullName": "Thành phố Đà Nẵng",
-      "type": "municipality",
-      "aliases": [
-        "Da Nang",
-        "Đà Nẵng",
-        "Quảng Nam",
-        "Quang Nam",
-        "Hội An",
-        "Tam Kỳ",
-        "Hoàng Sa"
-      ],
-      "boundingBox": {
-        "minLat": 14.8,
-        "maxLat": 16.3,
-        "minLng": 107.1,
-        "maxLng": 112.5
+        "minLat": 20.53,
+        "maxLat": 21.39,
+        "minLng": 105.28,
+        "maxLng": 106.03
+      },
+      "center": {
+        "lat": 21.0285,
+        "lng": 105.8542
       }
     },
     {
@@ -102,27 +41,62 @@
         "Ho Chi Minh",
         "TPHCM",
         "TP.HCM",
-        "Sai Gon",
         "Sài Gòn",
-        "Thành phố Hồ Chí Minh",
-        "Bình Dương",
-        "Binh Duong",
-        "Thủ Dầu Một",
-        "Dĩ An",
-        "Thuận An",
-        "Bến Cát",
-        "Bà Rịa - Vũng Tàu",
-        "Bà Rịa Vũng Tàu",
-        "Ba Ria Vung Tau",
-        "Vũng Tàu",
-        "Bà Rịa",
-        "Côn Đảo"
+        "Sai Gon",
+        "Thành phố Hồ Chí Minh"
       ],
       "boundingBox": {
-        "minLat": 8.5,
-        "maxLat": 11.6,
-        "minLng": 106.3,
-        "maxLng": 107.6
+        "minLat": 10.35,
+        "maxLat": 11.15,
+        "minLng": 106.35,
+        "maxLng": 107.02
+      },
+      "center": {
+        "lat": 10.7769,
+        "lng": 106.7009
+      }
+    },
+    {
+      "code": "31",
+      "name": "Hải Phòng",
+      "fullName": "Thành phố Hải Phòng",
+      "type": "municipality",
+      "aliases": [
+        "Hai Phong",
+        "HP",
+        "Thành phố Cảng",
+        "Thành phố Hải Phòng"
+      ],
+      "boundingBox": {
+        "minLat": 20.58,
+        "maxLat": 21.02,
+        "minLng": 106.4,
+        "maxLng": 107.13
+      },
+      "center": {
+        "lat": 20.8449,
+        "lng": 106.6881
+      }
+    },
+    {
+      "code": "48",
+      "name": "Đà Nẵng",
+      "fullName": "Thành phố Đà Nẵng",
+      "type": "municipality",
+      "aliases": [
+        "Da Nang",
+        "ĐN",
+        "Thành phố Đà Nẵng"
+      ],
+      "boundingBox": {
+        "minLat": 15.92,
+        "maxLat": 16.23,
+        "minLng": 107.82,
+        "maxLng": 108.35
+      },
+      "center": {
+        "lat": 16.0544,
+        "lng": 108.2022
       }
     },
     {
@@ -132,18 +106,65 @@
       "type": "municipality",
       "aliases": [
         "Can Tho",
-        "Cần Thơ",
-        "Hậu Giang",
-        "Hau Giang",
-        "Vị Thanh",
-        "Sóc Trăng",
-        "Soc Trang"
+        "CT",
+        "Tây Đô",
+        "Thành phố Cần Thơ"
       ],
       "boundingBox": {
-        "minLat": 9.2,
-        "maxLat": 10.4,
-        "minLng": 105.2,
-        "maxLng": 106.4
+        "minLat": 9.92,
+        "maxLat": 10.32,
+        "minLng": 105.25,
+        "maxLng": 105.85
+      },
+      "center": {
+        "lat": 10.0452,
+        "lng": 105.7469
+      }
+    },
+    {
+      "code": "46",
+      "name": "Thừa Thiên Huế",
+      "fullName": "Tỉnh Thừa Thiên Huế",
+      "type": "province",
+      "aliases": [
+        "Thừa Thiên Huế",
+        "Thua Thien Hue",
+        "Huế",
+        "Hue",
+        "Cố đô Huế",
+        "Thành phố Huế"
+      ],
+      "boundingBox": {
+        "minLat": 15.98,
+        "maxLat": 16.8,
+        "minLng": 107.0,
+        "maxLng": 108.2
+      },
+      "center": {
+        "lat": 16.4637,
+        "lng": 107.5909
+      }
+    },
+    {
+      "code": "02",
+      "name": "Hà Giang",
+      "fullName": "Tỉnh Hà Giang",
+      "type": "province",
+      "aliases": [
+        "Ha Giang",
+        "Đồng Văn",
+        "Mèo Vạc",
+        "Yên Minh"
+      ],
+      "boundingBox": {
+        "minLat": 22.15,
+        "maxLat": 23.39,
+        "minLng": 104.33,
+        "maxLng": 105.52
+      },
+      "center": {
+        "lat": 22.8233,
+        "lng": 104.9839
       }
     },
     {
@@ -153,14 +174,39 @@
       "type": "province",
       "aliases": [
         "Cao Bang",
-        "TP Cao Bằng",
-        "Tỉnh Cao Bằng"
+        "Trùng Khánh",
+        "Bản Giốc"
       ],
       "boundingBox": {
-        "minLat": 22.2,
-        "maxLat": 23.1,
-        "minLng": 105.2,
-        "maxLng": 106.8
+        "minLat": 22.25,
+        "maxLat": 23.12,
+        "minLng": 105.26,
+        "maxLng": 106.84
+      },
+      "center": {
+        "lat": 22.6657,
+        "lng": 106.257
+      }
+    },
+    {
+      "code": "06",
+      "name": "Bắc Kạn",
+      "fullName": "Tỉnh Bắc Kạn",
+      "type": "province",
+      "aliases": [
+        "Bac Kan",
+        "Bắc Cạn",
+        "Ba Bể"
+      ],
+      "boundingBox": {
+        "minLat": 21.8,
+        "maxLat": 22.75,
+        "minLng": 105.43,
+        "maxLng": 106.25
+      },
+      "center": {
+        "lat": 22.147,
+        "lng": 105.8348
       }
     },
     {
@@ -170,16 +216,17 @@
       "type": "province",
       "aliases": [
         "Tuyen Quang",
-        "Hà Giang",
-        "Ha Giang",
-        "TP Hà Giang",
-        "Đồng Văn"
+        "Na Hang"
       ],
       "boundingBox": {
-        "minLat": 21.4,
-        "maxLat": 23.5,
-        "minLng": 104.3,
-        "maxLng": 105.8
+        "minLat": 21.5,
+        "maxLat": 22.67,
+        "minLng": 104.88,
+        "maxLng": 105.68
+      },
+      "center": {
+        "lat": 21.8234,
+        "lng": 105.214
       }
     },
     {
@@ -189,17 +236,19 @@
       "type": "province",
       "aliases": [
         "Lao Cai",
-        "Yên Bái",
-        "Yen Bai",
-        "TP Yên Bái",
         "Sa Pa",
-        "Nghĩa Lộ"
+        "Sapa",
+        "Fansipan"
       ],
       "boundingBox": {
-        "minLat": 21.3,
-        "maxLat": 22.9,
-        "minLng": 103.5,
-        "maxLng": 105.2
+        "minLat": 21.98,
+        "maxLat": 22.85,
+        "minLng": 103.52,
+        "maxLng": 104.64
+      },
+      "center": {
+        "lat": 22.4856,
+        "lng": 103.9707
       }
     },
     {
@@ -210,13 +259,17 @@
       "aliases": [
         "Dien Bien",
         "Điện Biên Phủ",
-        "Tỉnh Điện Biên"
+        "Mường Thanh"
       ],
       "boundingBox": {
-        "minLat": 21.0,
-        "maxLat": 22.6,
-        "minLng": 102.1,
+        "minLat": 20.9,
+        "maxLat": 22.56,
+        "minLng": 102.17,
         "maxLng": 103.6
+      },
+      "center": {
+        "lat": 21.386,
+        "lng": 103.023
       }
     },
     {
@@ -226,14 +279,17 @@
       "type": "province",
       "aliases": [
         "Lai Chau",
-        "TP Lai Châu",
-        "Tỉnh Lai Châu"
+        "Mường Tè"
       ],
       "boundingBox": {
-        "minLat": 21.6,
-        "maxLat": 22.9,
-        "minLng": 102.3,
-        "maxLng": 103.9
+        "minLat": 21.68,
+        "maxLat": 22.83,
+        "minLng": 102.32,
+        "maxLng": 103.98
+      },
+      "center": {
+        "lat": 22.3964,
+        "lng": 103.4684
       }
     },
     {
@@ -243,15 +299,60 @@
       "type": "province",
       "aliases": [
         "Son La",
-        "TP Sơn La",
         "Mộc Châu",
-        "Tỉnh Sơn La"
+        "Moc Chau"
       ],
       "boundingBox": {
-        "minLat": 20.6,
-        "maxLat": 21.9,
-        "minLng": 103.1,
+        "minLat": 20.65,
+        "maxLat": 22.04,
+        "minLng": 103.18,
+        "maxLng": 105.04
+      },
+      "center": {
+        "lat": 21.3283,
+        "lng": 103.9148
+      }
+    },
+    {
+      "code": "15",
+      "name": "Yên Bái",
+      "fullName": "Tỉnh Yên Bái",
+      "type": "province",
+      "aliases": [
+        "Yen Bai",
+        "Mù Cang Chải",
+        "Nghĩa Lộ"
+      ],
+      "boundingBox": {
+        "minLat": 21.3,
+        "maxLat": 22.29,
+        "minLng": 103.93,
         "maxLng": 105.1
+      },
+      "center": {
+        "lat": 21.7168,
+        "lng": 104.8967
+      }
+    },
+    {
+      "code": "17",
+      "name": "Hòa Bình",
+      "fullName": "Tỉnh Hòa Bình",
+      "type": "province",
+      "aliases": [
+        "Hoa Binh",
+        "Mai Châu",
+        "Lương Sơn"
+      ],
+      "boundingBox": {
+        "minLat": 20.31,
+        "maxLat": 21.14,
+        "minLng": 104.8,
+        "maxLng": 105.85
+      },
+      "center": {
+        "lat": 20.8171,
+        "lng": 105.3376
       }
     },
     {
@@ -261,16 +362,18 @@
       "type": "province",
       "aliases": [
         "Thai Nguyen",
-        "Bắc Kạn",
-        "Bac Kan",
-        "TP Bắc Kạn",
-        "Ba Bể"
+        "Sông Công",
+        "Phổ Yên"
       ],
       "boundingBox": {
-        "minLat": 21.3,
-        "maxLat": 22.8,
-        "minLng": 105.4,
-        "maxLng": 106.3
+        "minLat": 21.33,
+        "maxLat": 22.05,
+        "minLng": 105.48,
+        "maxLng": 106.25
+      },
+      "center": {
+        "lat": 21.5942,
+        "lng": 105.8482
       }
     },
     {
@@ -280,15 +383,18 @@
       "type": "province",
       "aliases": [
         "Lang Son",
-        "TP Lạng Sơn",
         "Đồng Đăng",
-        "Tỉnh Lạng Sơn"
+        "Hữu Lũng"
       ],
       "boundingBox": {
-        "minLat": 21.3,
-        "maxLat": 22.5,
+        "minLat": 21.32,
+        "maxLat": 22.45,
         "minLng": 106.1,
-        "maxLng": 107.4
+        "maxLng": 107.36
+      },
+      "center": {
+        "lat": 21.8537,
+        "lng": 106.7615
       }
     },
     {
@@ -302,15 +408,39 @@
         "Cẩm Phả",
         "Uông Bí",
         "Móng Cái",
-        "Vân Đồn",
-        "Cô Tô",
-        "Tỉnh Quảng Ninh"
+        "Vân Đồn"
       ],
       "boundingBox": {
-        "minLat": 20.6,
-        "maxLat": 21.9,
-        "minLng": 106.5,
-        "maxLng": 108.1
+        "minLat": 20.72,
+        "maxLat": 21.85,
+        "minLng": 106.43,
+        "maxLng": 108.08
+      },
+      "center": {
+        "lat": 21.0069,
+        "lng": 107.2925
+      }
+    },
+    {
+      "code": "24",
+      "name": "Bắc Giang",
+      "fullName": "Tỉnh Bắc Giang",
+      "type": "province",
+      "aliases": [
+        "Bac Giang",
+        "Việt Yên",
+        "Lục Ngạn",
+        "Hiệp Hòa"
+      ],
+      "boundingBox": {
+        "minLat": 21.12,
+        "maxLat": 21.63,
+        "minLng": 105.88,
+        "maxLng": 107.03
+      },
+      "center": {
+        "lat": 21.2731,
+        "lng": 106.1946
       }
     },
     {
@@ -321,18 +451,40 @@
       "aliases": [
         "Phu Tho",
         "Việt Trì",
-        "Vĩnh Phúc",
-        "Vinh Phuc",
-        "Vĩnh Yên",
-        "Hòa Bình",
-        "Hoa Binh",
-        "Mai Châu"
+        "Đền Hùng",
+        "Thị xã Phú Thọ"
       ],
       "boundingBox": {
-        "minLat": 20.3,
-        "maxLat": 21.8,
-        "minLng": 104.7,
-        "maxLng": 105.8
+        "minLat": 20.92,
+        "maxLat": 21.72,
+        "minLng": 104.81,
+        "maxLng": 105.45
+      },
+      "center": {
+        "lat": 21.399,
+        "lng": 105.228
+      }
+    },
+    {
+      "code": "26",
+      "name": "Vĩnh Phúc",
+      "fullName": "Tỉnh Vĩnh Phúc",
+      "type": "province",
+      "aliases": [
+        "Vinh Phuc",
+        "Vĩnh Yên",
+        "Phúc Yên",
+        "Tam Đảo"
+      ],
+      "boundingBox": {
+        "minLat": 21.15,
+        "maxLat": 21.58,
+        "minLng": 105.32,
+        "maxLng": 105.78
+      },
+      "center": {
+        "lat": 21.3089,
+        "lng": 105.6049
       }
     },
     {
@@ -343,16 +495,39 @@
       "aliases": [
         "Bac Ninh",
         "Từ Sơn",
-        "Bắc Giang",
-        "Bac Giang",
-        "TP Bắc Giang",
-        "Việt Yên"
+        "Yên Phong",
+        "Thuận Thành"
       ],
       "boundingBox": {
-        "minLat": 21.0,
-        "maxLat": 21.7,
-        "minLng": 105.9,
-        "maxLng": 107.1
+        "minLat": 20.97,
+        "maxLat": 21.26,
+        "minLng": 105.97,
+        "maxLng": 106.32
+      },
+      "center": {
+        "lat": 21.1861,
+        "lng": 106.0763
+      }
+    },
+    {
+      "code": "30",
+      "name": "Hải Dương",
+      "fullName": "Tỉnh Hải Dương",
+      "type": "province",
+      "aliases": [
+        "Hai Duong",
+        "Chí Linh",
+        "Kinh Môn"
+      ],
+      "boundingBox": {
+        "minLat": 20.72,
+        "maxLat": 21.24,
+        "minLng": 106.05,
+        "maxLng": 106.63
+      },
+      "center": {
+        "lat": 20.9373,
+        "lng": 106.315
       }
     },
     {
@@ -363,16 +538,84 @@
       "aliases": [
         "Hung Yen",
         "Mỹ Hào",
-        "Thái Bình",
-        "Thai Binh",
-        "TP Thái Bình",
-        "Tiền Hải"
+        "Văn Giang",
+        "Ecopark"
       ],
       "boundingBox": {
-        "minLat": 20.2,
+        "minLat": 20.6,
         "maxLat": 21.0,
-        "minLng": 105.8,
-        "maxLng": 106.7
+        "minLng": 105.9,
+        "maxLng": 106.33
+      },
+      "center": {
+        "lat": 20.6464,
+        "lng": 106.0511
+      }
+    },
+    {
+      "code": "34",
+      "name": "Thái Bình",
+      "fullName": "Tỉnh Thái Bình",
+      "type": "province",
+      "aliases": [
+        "Thai Binh",
+        "Tiền Hải",
+        "Đông Hưng"
+      ],
+      "boundingBox": {
+        "minLat": 20.3,
+        "maxLat": 20.73,
+        "minLng": 106.1,
+        "maxLng": 106.65
+      },
+      "center": {
+        "lat": 20.4463,
+        "lng": 106.3366
+      }
+    },
+    {
+      "code": "35",
+      "name": "Hà Nam",
+      "fullName": "Tỉnh Hà Nam",
+      "type": "province",
+      "aliases": [
+        "Ha Nam",
+        "Phủ Lý",
+        "Duy Tiên",
+        "Tam Chúc"
+      ],
+      "boundingBox": {
+        "minLat": 20.35,
+        "maxLat": 20.73,
+        "minLng": 105.75,
+        "maxLng": 106.17
+      },
+      "center": {
+        "lat": 20.5843,
+        "lng": 105.922
+      }
+    },
+    {
+      "code": "36",
+      "name": "Nam Định",
+      "fullName": "Tỉnh Nam Định",
+      "type": "province",
+      "aliases": [
+        "Nam Dinh",
+        "Thành phố Nam Định",
+        "Giao Thủy",
+        "Hải Hậu",
+        "Xuân Trường"
+      ],
+      "boundingBox": {
+        "minLat": 19.98,
+        "maxLat": 20.5,
+        "minLng": 105.95,
+        "maxLng": 106.58
+      },
+      "center": {
+        "lat": 20.4343,
+        "lng": 106.1774
       }
     },
     {
@@ -381,23 +624,20 @@
       "fullName": "Tỉnh Ninh Bình",
       "type": "province",
       "aliases": [
-        "Ninh Bình",
         "Ninh Binh",
         "Tam Điệp",
-        "Hà Nam",
-        "Ha Nam",
-        "Phủ Lý",
-        "Nam Định",
-        "Nam Dinh",
-        "Thành phố Nam Định",
-        "TP Nam Định",
-        "Tỉnh Nam Định"
+        "Tràng An",
+        "Bái Đính"
       ],
       "boundingBox": {
-        "minLat": 19.9,
-        "maxLat": 20.7,
-        "minLng": 105.5,
-        "maxLng": 106.6
+        "minLat": 20.01,
+        "maxLat": 20.46,
+        "minLng": 105.53,
+        "maxLng": 106.17
+      },
+      "center": {
+        "lat": 20.2506,
+        "lng": 105.9745
       }
     },
     {
@@ -407,16 +647,19 @@
       "type": "province",
       "aliases": [
         "Thanh Hoa",
-        "TP Thanh Hóa",
         "Sầm Sơn",
         "Bỉm Sơn",
-        "Tỉnh Thanh Hóa"
+        "Nghi Sơn"
       ],
       "boundingBox": {
-        "minLat": 19.2,
-        "maxLat": 20.7,
-        "minLng": 104.3,
-        "maxLng": 106.2
+        "minLat": 19.23,
+        "maxLat": 20.67,
+        "minLng": 104.37,
+        "maxLng": 106.07
+      },
+      "center": {
+        "lat": 19.8067,
+        "lng": 105.7852
       }
     },
     {
@@ -428,15 +671,17 @@
         "Nghe An",
         "TP Vinh",
         "Cửa Lò",
-        "Hoàng Mai",
-        "Thái Hòa",
-        "Tỉnh Nghệ An"
+        "Hoàng Mai"
       ],
       "boundingBox": {
-        "minLat": 18.5,
-        "maxLat": 20.1,
-        "minLng": 103.8,
-        "maxLng": 105.9
+        "minLat": 18.55,
+        "maxLat": 19.98,
+        "minLng": 103.88,
+        "maxLng": 105.78
+      },
+      "center": {
+        "lat": 18.6796,
+        "lng": 105.6813
       }
     },
     {
@@ -446,16 +691,40 @@
       "type": "province",
       "aliases": [
         "Ha Tinh",
-        "TP Hà Tĩnh",
         "Hồng Lĩnh",
-        "Kỳ Anh",
-        "Tỉnh Hà Tĩnh"
+        "Kỳ Anh"
       ],
       "boundingBox": {
         "minLat": 17.9,
-        "maxLat": 18.7,
+        "maxLat": 18.77,
         "minLng": 105.1,
         "maxLng": 106.5
+      },
+      "center": {
+        "lat": 18.343,
+        "lng": 105.9058
+      }
+    },
+    {
+      "code": "44",
+      "name": "Quảng Bình",
+      "fullName": "Tỉnh Quảng Bình",
+      "type": "province",
+      "aliases": [
+        "Quang Binh",
+        "Đồng Hới",
+        "Phong Nha",
+        "Ba Đồn"
+      ],
+      "boundingBox": {
+        "minLat": 16.92,
+        "maxLat": 18.08,
+        "minLng": 105.62,
+        "maxLng": 106.98
+      },
+      "center": {
+        "lat": 17.4761,
+        "lng": 106.5995
       }
     },
     {
@@ -466,16 +735,39 @@
       "aliases": [
         "Quang Tri",
         "Đông Hà",
-        "Quảng Bình",
-        "Quang Binh",
-        "Đồng Hới",
-        "Phong Nha"
+        "Thị xã Quảng Trị"
       ],
       "boundingBox": {
         "minLat": 16.3,
-        "maxLat": 18.1,
-        "minLng": 105.6,
+        "maxLat": 17.17,
+        "minLng": 106.4,
         "maxLng": 107.4
+      },
+      "center": {
+        "lat": 16.8164,
+        "lng": 107.1004
+      }
+    },
+    {
+      "code": "49",
+      "name": "Quảng Nam",
+      "fullName": "Tỉnh Quảng Nam",
+      "type": "province",
+      "aliases": [
+        "Quang Nam",
+        "Hội An",
+        "Tam Kỳ",
+        "Điện Bàn"
+      ],
+      "boundingBox": {
+        "minLat": 14.95,
+        "maxLat": 16.07,
+        "minLng": 107.2,
+        "maxLng": 108.73
+      },
+      "center": {
+        "lat": 15.5647,
+        "lng": 108.48
       }
     },
     {
@@ -485,16 +777,62 @@
       "type": "province",
       "aliases": [
         "Quang Ngai",
-        "Kon Tum",
-        "Kon Tum",
-        "Măng Đen",
+        "Dung Quất",
         "Lý Sơn"
       ],
       "boundingBox": {
-        "minLat": 14.1,
-        "maxLat": 15.4,
-        "minLng": 107.3,
-        "maxLng": 109.2
+        "minLat": 14.53,
+        "maxLat": 15.42,
+        "minLng": 108.1,
+        "maxLng": 109.13
+      },
+      "center": {
+        "lat": 15.1205,
+        "lng": 108.7923
+      }
+    },
+    {
+      "code": "52",
+      "name": "Bình Định",
+      "fullName": "Tỉnh Bình Định",
+      "type": "province",
+      "aliases": [
+        "Binh Dinh",
+        "Quy Nhơn",
+        "An Nhơn",
+        "Hoài Nhơn"
+      ],
+      "boundingBox": {
+        "minLat": 13.7,
+        "maxLat": 14.7,
+        "minLng": 108.63,
+        "maxLng": 109.35
+      },
+      "center": {
+        "lat": 13.782,
+        "lng": 109.2197
+      }
+    },
+    {
+      "code": "54",
+      "name": "Phú Yên",
+      "fullName": "Tỉnh Phú Yên",
+      "type": "province",
+      "aliases": [
+        "Phu Yen",
+        "Tuy Hòa",
+        "Sông Cầu",
+        "Đông Hòa"
+      ],
+      "boundingBox": {
+        "minLat": 12.7,
+        "maxLat": 13.7,
+        "minLng": 108.68,
+        "maxLng": 109.48
+      },
+      "center": {
+        "lat": 13.0882,
+        "lng": 109.3138
       }
     },
     {
@@ -506,16 +844,81 @@
         "Khanh Hoa",
         "Nha Trang",
         "Cam Ranh",
-        "Ninh Thuận",
-        "Ninh Thuan",
-        "Phan Rang",
-        "Trường Sa"
+        "Ninh Hòa"
       ],
       "boundingBox": {
-        "minLat": 8.5,
-        "maxLat": 12.9,
-        "minLng": 108.6,
-        "maxLng": 115.0
+        "minLat": 11.75,
+        "maxLat": 12.87,
+        "minLng": 108.67,
+        "maxLng": 109.45
+      },
+      "center": {
+        "lat": 12.2388,
+        "lng": 109.1967
+      }
+    },
+    {
+      "code": "58",
+      "name": "Ninh Thuận",
+      "fullName": "Tỉnh Ninh Thuận",
+      "type": "province",
+      "aliases": [
+        "Ninh Thuan",
+        "Phan Rang",
+        "Tháp Chàm"
+      ],
+      "boundingBox": {
+        "minLat": 11.3,
+        "maxLat": 12.17,
+        "minLng": 108.55,
+        "maxLng": 109.23
+      },
+      "center": {
+        "lat": 11.5658,
+        "lng": 108.9882
+      }
+    },
+    {
+      "code": "60",
+      "name": "Bình Thuận",
+      "fullName": "Tỉnh Bình Thuận",
+      "type": "province",
+      "aliases": [
+        "Binh Thuan",
+        "Phan Thiết",
+        "La Gi",
+        "Mũi Né"
+      ],
+      "boundingBox": {
+        "minLat": 10.55,
+        "maxLat": 11.55,
+        "minLng": 107.38,
+        "maxLng": 108.88
+      },
+      "center": {
+        "lat": 10.9333,
+        "lng": 108.1
+      }
+    },
+    {
+      "code": "62",
+      "name": "Kon Tum",
+      "fullName": "Tỉnh Kon Tum",
+      "type": "province",
+      "aliases": [
+        "Kon Tum",
+        "Măng Đen",
+        "Ngọc Hồi"
+      ],
+      "boundingBox": {
+        "minLat": 13.92,
+        "maxLat": 15.45,
+        "minLng": 107.33,
+        "maxLng": 108.53
+      },
+      "center": {
+        "lat": 14.3497,
+        "lng": 108.0005
       }
     },
     {
@@ -526,16 +929,18 @@
       "aliases": [
         "Gia Lai",
         "Pleiku",
-        "Bình Định",
-        "Binh Dinh",
-        "Quy Nhơn",
-        "An Nhơn"
+        "An Khê",
+        "Ayun Pa"
       ],
       "boundingBox": {
-        "minLat": 12.8,
-        "maxLat": 14.7,
-        "minLng": 107.4,
-        "maxLng": 109.5
+        "minLat": 13.0,
+        "maxLat": 14.6,
+        "minLng": 107.38,
+        "maxLng": 108.92
+      },
+      "center": {
+        "lat": 13.9833,
+        "lng": 108.0
       }
     },
     {
@@ -545,18 +950,40 @@
       "type": "province",
       "aliases": [
         "Dak Lak",
-        "Đắk Lắk",
+        "Đắc Lắc",
         "Buôn Ma Thuột",
-        "Phú Yên",
-        "Phu Yen",
-        "Tuy Hòa",
-        "Sông Cầu"
+        "Buon Ma Thuot"
       ],
       "boundingBox": {
-        "minLat": 12.1,
-        "maxLat": 13.7,
-        "minLng": 107.4,
-        "maxLng": 109.5
+        "minLat": 12.18,
+        "maxLat": 13.42,
+        "minLng": 107.48,
+        "maxLng": 109.1
+      },
+      "center": {
+        "lat": 12.6667,
+        "lng": 108.05
+      }
+    },
+    {
+      "code": "67",
+      "name": "Đắk Nông",
+      "fullName": "Tỉnh Đắk Nông",
+      "type": "province",
+      "aliases": [
+        "Dak Nong",
+        "Gia Nghĩa",
+        "Tà Đùng"
+      ],
+      "boundingBox": {
+        "minLat": 11.75,
+        "maxLat": 12.8,
+        "minLng": 107.2,
+        "maxLng": 108.12
+      },
+      "center": {
+        "lat": 12.004,
+        "lng": 107.687
       }
     },
     {
@@ -567,19 +994,41 @@
       "aliases": [
         "Lam Dong",
         "Đà Lạt",
+        "Da Lat",
         "Bảo Lộc",
-        "Đắk Nông",
-        "Dak Nong",
-        "Gia Nghĩa",
-        "Bình Thuận",
-        "Binh Thuan",
-        "Phan Thiết"
+        "Bao Loc"
       ],
       "boundingBox": {
-        "minLat": 10.5,
-        "maxLat": 12.6,
-        "minLng": 106.5,
-        "maxLng": 108.9
+        "minLat": 11.35,
+        "maxLat": 12.33,
+        "minLng": 107.3,
+        "maxLng": 108.75
+      },
+      "center": {
+        "lat": 11.9404,
+        "lng": 108.4583
+      }
+    },
+    {
+      "code": "70",
+      "name": "Bình Phước",
+      "fullName": "Tỉnh Bình Phước",
+      "type": "province",
+      "aliases": [
+        "Binh Phuoc",
+        "Đồng Xoài",
+        "Chơn Thành",
+        "Bình Long"
+      ],
+      "boundingBox": {
+        "minLat": 11.38,
+        "maxLat": 12.3,
+        "minLng": 106.4,
+        "maxLng": 107.45
+      },
+      "center": {
+        "lat": 11.9333,
+        "lng": 106.9167
       }
     },
     {
@@ -590,17 +1039,42 @@
       "aliases": [
         "Tay Ninh",
         "Trảng Bàng",
-        "Long An",
-        "Long An",
-        "Tân An",
-        "Bến Lức",
-        "Đức Hòa"
+        "Hòa Thành",
+        "Bà Đen"
       ],
       "boundingBox": {
-        "minLat": 10.1,
-        "maxLat": 11.8,
-        "minLng": 105.7,
-        "maxLng": 106.8
+        "minLat": 10.95,
+        "maxLat": 11.78,
+        "minLng": 105.8,
+        "maxLng": 106.5
+      },
+      "center": {
+        "lat": 11.3128,
+        "lng": 106.0989
+      }
+    },
+    {
+      "code": "74",
+      "name": "Bình Dương",
+      "fullName": "Tỉnh Bình Dương",
+      "type": "province",
+      "aliases": [
+        "Binh Duong",
+        "Thủ Dầu Một",
+        "Thuận An",
+        "Dĩ An",
+        "Tân Uyên",
+        "Bến Cát"
+      ],
+      "boundingBox": {
+        "minLat": 10.87,
+        "maxLat": 11.5,
+        "minLng": 106.35,
+        "maxLng": 106.97
+      },
+      "center": {
+        "lat": 11.1667,
+        "lng": 106.6667
       }
     },
     {
@@ -611,17 +1085,130 @@
       "aliases": [
         "Dong Nai",
         "Biên Hòa",
+        "Long Khánh",
         "Long Thành",
-        "Bình Phước",
-        "Binh Phuoc",
-        "Đồng Xoài",
-        "Bình Long"
+        "Nhơn Trạch"
       ],
       "boundingBox": {
-        "minLat": 10.6,
-        "maxLat": 12.3,
-        "minLng": 106.4,
+        "minLat": 10.5,
+        "maxLat": 11.58,
+        "minLng": 106.75,
         "maxLng": 107.6
+      },
+      "center": {
+        "lat": 10.9574,
+        "lng": 106.8427
+      }
+    },
+    {
+      "code": "77",
+      "name": "Bà Rịa - Vũng Tàu",
+      "fullName": "Tỉnh Bà Rịa - Vũng Tàu",
+      "type": "province",
+      "aliases": [
+        "Ba Ria Vung Tau",
+        "Vũng Tàu",
+        "Bà Rịa",
+        "Phú Mỹ",
+        "Côn Đảo"
+      ],
+      "boundingBox": {
+        "minLat": 10.28,
+        "maxLat": 10.75,
+        "minLng": 107.0,
+        "maxLng": 107.6
+      },
+      "center": {
+        "lat": 10.5425,
+        "lng": 107.2429
+      }
+    },
+    {
+      "code": "80",
+      "name": "Long An",
+      "fullName": "Tỉnh Long An",
+      "type": "province",
+      "aliases": [
+        "Long An",
+        "Tân An",
+        "Bến Lức",
+        "Đức Hòa",
+        "Cần Giuộc"
+      ],
+      "boundingBox": {
+        "minLat": 10.35,
+        "maxLat": 11.05,
+        "minLng": 105.8,
+        "maxLng": 106.78
+      },
+      "center": {
+        "lat": 10.5333,
+        "lng": 106.4167
+      }
+    },
+    {
+      "code": "82",
+      "name": "Tiền Giang",
+      "fullName": "Tỉnh Tiền Giang",
+      "type": "province",
+      "aliases": [
+        "Tien Giang",
+        "Mỹ Tho",
+        "Gò Công",
+        "Cai Lậy"
+      ],
+      "boundingBox": {
+        "minLat": 10.2,
+        "maxLat": 10.6,
+        "minLng": 105.8,
+        "maxLng": 106.75
+      },
+      "center": {
+        "lat": 10.36,
+        "lng": 106.36
+      }
+    },
+    {
+      "code": "83",
+      "name": "Bến Tre",
+      "fullName": "Tỉnh Bến Tre",
+      "type": "province",
+      "aliases": [
+        "Ben Tre",
+        "Xứ Dừa",
+        "Ba Tri",
+        "Châu Thành"
+      ],
+      "boundingBox": {
+        "minLat": 9.8,
+        "maxLat": 10.35,
+        "minLng": 106.0,
+        "maxLng": 106.8
+      },
+      "center": {
+        "lat": 10.2333,
+        "lng": 106.3833
+      }
+    },
+    {
+      "code": "84",
+      "name": "Trà Vinh",
+      "fullName": "Tỉnh Trà Vinh",
+      "type": "province",
+      "aliases": [
+        "Tra Vinh",
+        "Duyên Hải",
+        "Cầu Kè"
+      ],
+      "boundingBox": {
+        "minLat": 9.5,
+        "maxLat": 10.05,
+        "minLng": 106.0,
+        "maxLng": 106.65
+      },
+      "center": {
+        "lat": 9.9347,
+        "lng": 106.3455
       }
     },
     {
@@ -632,16 +1219,17 @@
       "aliases": [
         "Vinh Long",
         "Bình Minh",
-        "Bến Tre",
-        "Ben Tre",
-        "Trà Vinh",
-        "Tra Vinh"
+        "Long Hồ"
       ],
       "boundingBox": {
-        "minLat": 9.5,
-        "maxLat": 10.4,
+        "minLat": 9.9,
+        "maxLat": 10.35,
         "minLng": 105.7,
-        "maxLng": 106.8
+        "maxLng": 106.2
+      },
+      "center": {
+        "lat": 10.2537,
+        "lng": 105.9722
       }
     },
     {
@@ -653,16 +1241,17 @@
         "Dong Thap",
         "Cao Lãnh",
         "Sa Đéc",
-        "Tiền Giang",
-        "Tien Giang",
-        "Mỹ Tho",
-        "Gò Công"
+        "Hồng Ngự"
       ],
       "boundingBox": {
-        "minLat": 9.8,
-        "maxLat": 10.9,
-        "minLng": 105.1,
-        "maxLng": 106.5
+        "minLat": 10.1,
+        "maxLat": 10.95,
+        "minLng": 105.18,
+        "maxLng": 105.95
+      },
+      "center": {
+        "lat": 10.4578,
+        "lng": 105.6324
       }
     },
     {
@@ -674,17 +1263,102 @@
         "An Giang",
         "Long Xuyên",
         "Châu Đốc",
-        "Kiên Giang",
+        "Tân Châu"
+      ],
+      "boundingBox": {
+        "minLat": 10.15,
+        "maxLat": 10.95,
+        "minLng": 104.78,
+        "maxLng": 105.6
+      },
+      "center": {
+        "lat": 10.5216,
+        "lng": 105.1259
+      }
+    },
+    {
+      "code": "91",
+      "name": "Kiên Giang",
+      "fullName": "Tỉnh Kiên Giang",
+      "type": "province",
+      "aliases": [
         "Kien Giang",
         "Rạch Giá",
         "Hà Tiên",
-        "Phú Quốc"
+        "Phú Quốc",
+        "Phu Quoc"
       ],
       "boundingBox": {
-        "minLat": 9.3,
-        "maxLat": 10.9,
-        "minLng": 103.5,
-        "maxLng": 105.6
+        "minLat": 9.4,
+        "maxLat": 10.55,
+        "minLng": 104.4,
+        "maxLng": 105.55
+      },
+      "center": {
+        "lat": 10.0139,
+        "lng": 105.0809
+      }
+    },
+    {
+      "code": "93",
+      "name": "Hậu Giang",
+      "fullName": "Tỉnh Hậu Giang",
+      "type": "province",
+      "aliases": [
+        "Hau Giang",
+        "Vị Thanh",
+        "Ngã Bảy"
+      ],
+      "boundingBox": {
+        "minLat": 9.58,
+        "maxLat": 9.95,
+        "minLng": 105.2,
+        "maxLng": 105.9
+      },
+      "center": {
+        "lat": 9.7833,
+        "lng": 105.4667
+      }
+    },
+    {
+      "code": "94",
+      "name": "Sóc Trăng",
+      "fullName": "Tỉnh Sóc Trăng",
+      "type": "province",
+      "aliases": [
+        "Soc Trang",
+        "Vĩnh Châu",
+        "Ngã Năm"
+      ],
+      "boundingBox": {
+        "minLat": 9.25,
+        "maxLat": 9.92,
+        "minLng": 105.55,
+        "maxLng": 106.3
+      },
+      "center": {
+        "lat": 9.6,
+        "lng": 105.9667
+      }
+    },
+    {
+      "code": "95",
+      "name": "Bạc Liêu",
+      "fullName": "Tỉnh Bạc Liêu",
+      "type": "province",
+      "aliases": [
+        "Bac Lieu",
+        "Giá Rai"
+      ],
+      "boundingBox": {
+        "minLat": 9.0,
+        "maxLat": 9.6,
+        "minLng": 105.25,
+        "maxLng": 105.85
+      },
+      "center": {
+        "lat": 9.2833,
+        "lng": 105.7167
       }
     },
     {
@@ -695,16 +1369,17 @@
       "aliases": [
         "Ca Mau",
         "Năm Căn",
-        "Đất Mũi",
-        "Bạc Liêu",
-        "Bac Lieu",
-        "Giá Rai"
+        "Đất Mũi"
       ],
       "boundingBox": {
-        "minLat": 8.3,
-        "maxLat": 9.6,
-        "minLng": 104.6,
-        "maxLng": 105.8
+        "minLat": 8.55,
+        "maxLat": 9.55,
+        "minLng": 104.7,
+        "maxLng": 105.45
+      },
+      "center": {
+        "lat": 9.1769,
+        "lng": 105.15
       }
     }
   ],
@@ -54263,6 +54938,1406 @@
         "khu vuc do thi ca mau",
         "Cà Mau",
         "ca mau"
+      ]
+    },
+    {
+      "code": "7401",
+      "name": "Phú Hòa",
+      "fullName": "Phường Phú Hòa",
+      "type": "ward",
+      "provinceCode": "74",
+      "legacyDistrictName": "TP. Thủ Dầu Một",
+      "aliases": [
+        "Phú Hòa",
+        "Phường Phú Hòa",
+        "Bình Dương",
+        "TP. Thủ Dầu Một"
+      ]
+    },
+    {
+      "code": "7402",
+      "name": "Phú Cường",
+      "fullName": "Phường Phú Cường",
+      "type": "ward",
+      "provinceCode": "74",
+      "legacyDistrictName": "TP. Thủ Dầu Một",
+      "aliases": [
+        "Phú Cường",
+        "Phường Phú Cường",
+        "Bình Dương",
+        "TP. Thủ Dầu Một"
+      ]
+    },
+    {
+      "code": "7403",
+      "name": "Hiệp Thành",
+      "fullName": "Phường Hiệp Thành",
+      "type": "ward",
+      "provinceCode": "74",
+      "legacyDistrictName": "TP. Thủ Dầu Một",
+      "aliases": [
+        "Hiệp Thành",
+        "Phường Hiệp Thành",
+        "Bình Dương",
+        "TP. Thủ Dầu Một"
+      ]
+    },
+    {
+      "code": "7404",
+      "name": "Chánh Nghĩa",
+      "fullName": "Phường Chánh Nghĩa",
+      "type": "ward",
+      "provinceCode": "74",
+      "legacyDistrictName": "TP. Thủ Dầu Một",
+      "aliases": [
+        "Chánh Nghĩa",
+        "Phường Chánh Nghĩa",
+        "Bình Dương",
+        "TP. Thủ Dầu Một"
+      ]
+    },
+    {
+      "code": "7405",
+      "name": "Lái Thiêu",
+      "fullName": "Phường Lái Thiêu",
+      "type": "ward",
+      "provinceCode": "74",
+      "legacyDistrictName": "TP. Thuận An",
+      "aliases": [
+        "Lái Thiêu",
+        "Phường Lái Thiêu",
+        "Bình Dương",
+        "TP. Thuận An"
+      ]
+    },
+    {
+      "code": "7406",
+      "name": "An Phú",
+      "fullName": "Phường An Phú",
+      "type": "ward",
+      "provinceCode": "74",
+      "legacyDistrictName": "TP. Thuận An",
+      "aliases": [
+        "An Phú",
+        "Phường An Phú",
+        "Bình Dương",
+        "TP. Thuận An"
+      ]
+    },
+    {
+      "code": "7407",
+      "name": "Dĩ An",
+      "fullName": "Phường Dĩ An",
+      "type": "ward",
+      "provinceCode": "74",
+      "legacyDistrictName": "TP. Dĩ An",
+      "aliases": [
+        "Dĩ An",
+        "Phường Dĩ An",
+        "Bình Dương",
+        "TP. Dĩ An"
+      ]
+    },
+    {
+      "code": "7408",
+      "name": "Đông Hòa",
+      "fullName": "Phường Đông Hòa",
+      "type": "ward",
+      "provinceCode": "74",
+      "legacyDistrictName": "TP. Dĩ An",
+      "aliases": [
+        "Đông Hòa",
+        "Phường Đông Hòa",
+        "Bình Dương",
+        "TP. Dĩ An"
+      ]
+    },
+    {
+      "code": "7409",
+      "name": "Uyên Hưng",
+      "fullName": "Phường Uyên Hưng",
+      "type": "ward",
+      "provinceCode": "74",
+      "legacyDistrictName": "TP. Tân Uyên",
+      "aliases": [
+        "Uyên Hưng",
+        "Phường Uyên Hưng",
+        "Bình Dương",
+        "TP. Tân Uyên"
+      ]
+    },
+    {
+      "code": "7410",
+      "name": "Mỹ Phước",
+      "fullName": "Phường Mỹ Phước",
+      "type": "ward",
+      "provinceCode": "74",
+      "legacyDistrictName": "TX. Bến Cát",
+      "aliases": [
+        "Mỹ Phước",
+        "Phường Mỹ Phước",
+        "Bình Dương",
+        "TX. Bến Cát"
+      ]
+    },
+    {
+      "code": "3601",
+      "name": "Vị Xuyên",
+      "fullName": "Phường Vị Xuyên",
+      "type": "ward",
+      "provinceCode": "36",
+      "legacyDistrictName": "TP. Nam Định",
+      "aliases": [
+        "Vị Xuyên",
+        "Phường Vị Xuyên",
+        "Nam Định",
+        "TP. Nam Định"
+      ]
+    },
+    {
+      "code": "3602",
+      "name": "Trần Hưng Đạo",
+      "fullName": "Phường Trần Hưng Đạo",
+      "type": "ward",
+      "provinceCode": "36",
+      "legacyDistrictName": "TP. Nam Định",
+      "aliases": [
+        "Trần Hưng Đạo",
+        "Phường Trần Hưng Đạo",
+        "Nam Định",
+        "TP. Nam Định"
+      ]
+    },
+    {
+      "code": "3603",
+      "name": "Năng Tĩnh",
+      "fullName": "Phường Năng Tĩnh",
+      "type": "ward",
+      "provinceCode": "36",
+      "legacyDistrictName": "TP. Nam Định",
+      "aliases": [
+        "Năng Tĩnh",
+        "Phường Năng Tĩnh",
+        "Nam Định",
+        "TP. Nam Định"
+      ]
+    },
+    {
+      "code": "3604",
+      "name": "Lộc Vượng",
+      "fullName": "Phường Lộc Vượng",
+      "type": "ward",
+      "provinceCode": "36",
+      "legacyDistrictName": "TP. Nam Định",
+      "aliases": [
+        "Lộc Vượng",
+        "Phường Lộc Vượng",
+        "Nam Định",
+        "TP. Nam Định"
+      ]
+    },
+    {
+      "code": "3605",
+      "name": "Cửa Bắc",
+      "fullName": "Phường Cửa Bắc",
+      "type": "ward",
+      "provinceCode": "36",
+      "legacyDistrictName": "TP. Nam Định",
+      "aliases": [
+        "Cửa Bắc",
+        "Phường Cửa Bắc",
+        "Nam Định",
+        "TP. Nam Định"
+      ]
+    },
+    {
+      "code": "3606",
+      "name": "Cửa Nam",
+      "fullName": "Phường Cửa Nam",
+      "type": "ward",
+      "provinceCode": "36",
+      "legacyDistrictName": "TP. Nam Định",
+      "aliases": [
+        "Cửa Nam",
+        "Phường Cửa Nam",
+        "Nam Định",
+        "TP. Nam Định"
+      ]
+    },
+    {
+      "code": "3607",
+      "name": "Lộc Hạ",
+      "fullName": "Phường Lộc Hạ",
+      "type": "ward",
+      "provinceCode": "36",
+      "legacyDistrictName": "TP. Nam Định",
+      "aliases": [
+        "Lộc Hạ",
+        "Phường Lộc Hạ",
+        "Nam Định",
+        "TP. Nam Định"
+      ]
+    },
+    {
+      "code": "3608",
+      "name": "Quất Lâm",
+      "fullName": "Thị trấn Quất Lâm",
+      "type": "commune",
+      "provinceCode": "36",
+      "legacyDistrictName": "Huyện Giao Thủy",
+      "aliases": [
+        "Quất Lâm",
+        "Thị trấn Quất Lâm",
+        "Nam Định",
+        "Huyện Giao Thủy"
+      ]
+    },
+    {
+      "code": "3609",
+      "name": "Thịnh Long",
+      "fullName": "Thị trấn Thịnh Long",
+      "type": "commune",
+      "provinceCode": "36",
+      "legacyDistrictName": "Huyện Hải Hậu",
+      "aliases": [
+        "Thịnh Long",
+        "Thị trấn Thịnh Long",
+        "Nam Định",
+        "Huyện Hải Hậu"
+      ]
+    },
+    {
+      "code": "3610",
+      "name": "Xuân Trường",
+      "fullName": "Thị trấn Xuân Trường",
+      "type": "commune",
+      "provinceCode": "36",
+      "legacyDistrictName": "Huyện Xuân Trường",
+      "aliases": [
+        "Xuân Trường",
+        "Thị trấn Xuân Trường",
+        "Nam Định",
+        "Huyện Xuân Trường"
+      ]
+    },
+    {
+      "code": "3501",
+      "name": "Lương Khánh Thiện",
+      "fullName": "Phường Lương Khánh Thiện",
+      "type": "ward",
+      "provinceCode": "35",
+      "legacyDistrictName": "TP. Phủ Lý",
+      "aliases": [
+        "Lương Khánh Thiện",
+        "Phường Lương Khánh Thiện",
+        "Hà Nam",
+        "TP. Phủ Lý"
+      ]
+    },
+    {
+      "code": "3502",
+      "name": "Minh Khai",
+      "fullName": "Phường Minh Khai",
+      "type": "ward",
+      "provinceCode": "35",
+      "legacyDistrictName": "TP. Phủ Lý",
+      "aliases": [
+        "Minh Khai",
+        "Phường Minh Khai",
+        "Hà Nam",
+        "TP. Phủ Lý"
+      ]
+    },
+    {
+      "code": "3503",
+      "name": "Hai Bà Trưng",
+      "fullName": "Phường Hai Bà Trưng",
+      "type": "ward",
+      "provinceCode": "35",
+      "legacyDistrictName": "TP. Phủ Lý",
+      "aliases": [
+        "Hai Bà Trưng",
+        "Phường Hai Bà Trưng",
+        "Hà Nam",
+        "TP. Phủ Lý"
+      ]
+    },
+    {
+      "code": "3504",
+      "name": "Hòa Mạc",
+      "fullName": "Phường Hòa Mạc",
+      "type": "ward",
+      "provinceCode": "35",
+      "legacyDistrictName": "TX. Duy Tiên",
+      "aliases": [
+        "Hòa Mạc",
+        "Phường Hòa Mạc",
+        "Hà Nam",
+        "TX. Duy Tiên"
+      ]
+    },
+    {
+      "code": "3505",
+      "name": "Đồng Văn",
+      "fullName": "Phường Đồng Văn",
+      "type": "ward",
+      "provinceCode": "35",
+      "legacyDistrictName": "TX. Duy Tiên",
+      "aliases": [
+        "Đồng Văn",
+        "Phường Đồng Văn",
+        "Hà Nam",
+        "TX. Duy Tiên"
+      ]
+    },
+    {
+      "code": "3001",
+      "name": "Trần Phú",
+      "fullName": "Phường Trần Phú",
+      "type": "ward",
+      "provinceCode": "30",
+      "legacyDistrictName": "TP. Hải Dương",
+      "aliases": [
+        "Trần Phú",
+        "Phường Trần Phú",
+        "Hải Dương",
+        "TP. Hải Dương"
+      ]
+    },
+    {
+      "code": "3002",
+      "name": "Lê Thanh Nghị",
+      "fullName": "Phường Lê Thanh Nghị",
+      "type": "ward",
+      "provinceCode": "30",
+      "legacyDistrictName": "TP. Hải Dương",
+      "aliases": [
+        "Lê Thanh Nghị",
+        "Phường Lê Thanh Nghị",
+        "Hải Dương",
+        "TP. Hải Dương"
+      ]
+    },
+    {
+      "code": "3003",
+      "name": "Nguyễn Trãi",
+      "fullName": "Phường Nguyễn Trãi",
+      "type": "ward",
+      "provinceCode": "30",
+      "legacyDistrictName": "TP. Hải Dương",
+      "aliases": [
+        "Nguyễn Trãi",
+        "Phường Nguyễn Trãi",
+        "Hải Dương",
+        "TP. Hải Dương"
+      ]
+    },
+    {
+      "code": "3004",
+      "name": "Sao Đỏ",
+      "fullName": "Phường Sao Đỏ",
+      "type": "ward",
+      "provinceCode": "30",
+      "legacyDistrictName": "TP. Chí Linh",
+      "aliases": [
+        "Sao Đỏ",
+        "Phường Sao Đỏ",
+        "Hải Dương",
+        "TP. Chí Linh"
+      ]
+    },
+    {
+      "code": "3005",
+      "name": "An Lưu",
+      "fullName": "Phường An Lưu",
+      "type": "ward",
+      "provinceCode": "30",
+      "legacyDistrictName": "TX. Kinh Môn",
+      "aliases": [
+        "An Lưu",
+        "Phường An Lưu",
+        "Hải Dương",
+        "TX. Kinh Môn"
+      ]
+    },
+    {
+      "code": "3401",
+      "name": "Bồ Xuyên",
+      "fullName": "Phường Bồ Xuyên",
+      "type": "ward",
+      "provinceCode": "34",
+      "legacyDistrictName": "TP. Thái Bình",
+      "aliases": [
+        "Bồ Xuyên",
+        "Phường Bồ Xuyên",
+        "Thái Bình",
+        "TP. Thái Bình"
+      ]
+    },
+    {
+      "code": "3402",
+      "name": "Đề Thám",
+      "fullName": "Phường Đề Thám",
+      "type": "ward",
+      "provinceCode": "34",
+      "legacyDistrictName": "TP. Thái Bình",
+      "aliases": [
+        "Đề Thám",
+        "Phường Đề Thám",
+        "Thái Bình",
+        "TP. Thái Bình"
+      ]
+    },
+    {
+      "code": "3403",
+      "name": "Lê Hồng Phong",
+      "fullName": "Phường Lê Hồng Phong",
+      "type": "ward",
+      "provinceCode": "34",
+      "legacyDistrictName": "TP. Thái Bình",
+      "aliases": [
+        "Lê Hồng Phong",
+        "Phường Lê Hồng Phong",
+        "Thái Bình",
+        "TP. Thái Bình"
+      ]
+    },
+    {
+      "code": "3404",
+      "name": "Diêm Điền",
+      "fullName": "Thị trấn Diêm Điền",
+      "type": "commune",
+      "provinceCode": "34",
+      "legacyDistrictName": "Huyện Thái Thụy",
+      "aliases": [
+        "Diêm Điền",
+        "Thị trấn Diêm Điền",
+        "Thái Bình",
+        "Huyện Thái Thụy"
+      ]
+    },
+    {
+      "code": "2401",
+      "name": "Hoàng Văn Thụ",
+      "fullName": "Phường Hoàng Văn Thụ",
+      "type": "ward",
+      "provinceCode": "24",
+      "legacyDistrictName": "TP. Bắc Giang",
+      "aliases": [
+        "Hoàng Văn Thụ",
+        "Phường Hoàng Văn Thụ",
+        "Bắc Giang",
+        "TP. Bắc Giang"
+      ]
+    },
+    {
+      "code": "2402",
+      "name": "Ngô Quyền",
+      "fullName": "Phường Ngô Quyền",
+      "type": "ward",
+      "provinceCode": "24",
+      "legacyDistrictName": "TP. Bắc Giang",
+      "aliases": [
+        "Ngô Quyền",
+        "Phường Ngô Quyền",
+        "Bắc Giang",
+        "TP. Bắc Giang"
+      ]
+    },
+    {
+      "code": "2403",
+      "name": "Bích Động",
+      "fullName": "Phường Bích Động",
+      "type": "ward",
+      "provinceCode": "24",
+      "legacyDistrictName": "TX. Việt Yên",
+      "aliases": [
+        "Bích Động",
+        "Phường Bích Động",
+        "Bắc Giang",
+        "TX. Việt Yên"
+      ]
+    },
+    {
+      "code": "2601",
+      "name": "Tích Sơn",
+      "fullName": "Phường Tích Sơn",
+      "type": "ward",
+      "provinceCode": "26",
+      "legacyDistrictName": "TP. Vĩnh Yên",
+      "aliases": [
+        "Tích Sơn",
+        "Phường Tích Sơn",
+        "Vĩnh Phúc",
+        "TP. Vĩnh Yên"
+      ]
+    },
+    {
+      "code": "2602",
+      "name": "Ngô Quyền",
+      "fullName": "Phường Ngô Quyền",
+      "type": "ward",
+      "provinceCode": "26",
+      "legacyDistrictName": "TP. Vĩnh Yên",
+      "aliases": [
+        "Ngô Quyền",
+        "Phường Ngô Quyền",
+        "Vĩnh Phúc",
+        "TP. Vĩnh Yên"
+      ]
+    },
+    {
+      "code": "2603",
+      "name": "Hùng Vương",
+      "fullName": "Phường Hùng Vương",
+      "type": "ward",
+      "provinceCode": "26",
+      "legacyDistrictName": "TP. Phúc Yên",
+      "aliases": [
+        "Hùng Vương",
+        "Phường Hùng Vương",
+        "Vĩnh Phúc",
+        "TP. Phúc Yên"
+      ]
+    },
+    {
+      "code": "2604",
+      "name": "Tam Đảo",
+      "fullName": "Thị trấn Tam Đảo",
+      "type": "commune",
+      "provinceCode": "26",
+      "legacyDistrictName": "Huyện Tam Đảo",
+      "aliases": [
+        "Tam Đảo",
+        "Thị trấn Tam Đảo",
+        "Vĩnh Phúc",
+        "Huyện Tam Đảo"
+      ]
+    },
+    {
+      "code": "1701",
+      "name": "Phương Lâm",
+      "fullName": "Phường Phương Lâm",
+      "type": "ward",
+      "provinceCode": "17",
+      "legacyDistrictName": "TP. Hòa Bình",
+      "aliases": [
+        "Phương Lâm",
+        "Phường Phương Lâm",
+        "Hòa Bình",
+        "TP. Hòa Bình"
+      ]
+    },
+    {
+      "code": "1702",
+      "name": "Tân Thịnh",
+      "fullName": "Phường Tân Thịnh",
+      "type": "ward",
+      "provinceCode": "17",
+      "legacyDistrictName": "TP. Hòa Bình",
+      "aliases": [
+        "Tân Thịnh",
+        "Phường Tân Thịnh",
+        "Hòa Bình",
+        "TP. Hòa Bình"
+      ]
+    },
+    {
+      "code": "1703",
+      "name": "Mai Châu",
+      "fullName": "Thị trấn Mai Châu",
+      "type": "commune",
+      "provinceCode": "17",
+      "legacyDistrictName": "Huyện Mai Châu",
+      "aliases": [
+        "Mai Châu",
+        "Thị trấn Mai Châu",
+        "Hòa Bình",
+        "Huyện Mai Châu"
+      ]
+    },
+    {
+      "code": "4401",
+      "name": "Đồng Mỹ",
+      "fullName": "Phường Đồng Mỹ",
+      "type": "ward",
+      "provinceCode": "44",
+      "legacyDistrictName": "TP. Đồng Hới",
+      "aliases": [
+        "Đồng Mỹ",
+        "Phường Đồng Mỹ",
+        "Quảng Bình",
+        "TP. Đồng Hới"
+      ]
+    },
+    {
+      "code": "4402",
+      "name": "Hải Đình",
+      "fullName": "Phường Hải Đình",
+      "type": "ward",
+      "provinceCode": "44",
+      "legacyDistrictName": "TP. Đồng Hới",
+      "aliases": [
+        "Hải Đình",
+        "Phường Hải Đình",
+        "Quảng Bình",
+        "TP. Đồng Hới"
+      ]
+    },
+    {
+      "code": "4403",
+      "name": "Phong Nha",
+      "fullName": "Thị trấn Phong Nha",
+      "type": "commune",
+      "provinceCode": "44",
+      "legacyDistrictName": "Huyện Bố Trạch",
+      "aliases": [
+        "Phong Nha",
+        "Thị trấn Phong Nha",
+        "Quảng Bình",
+        "Huyện Bố Trạch"
+      ]
+    },
+    {
+      "code": "4901",
+      "name": "Minh An",
+      "fullName": "Phường Minh An",
+      "type": "ward",
+      "provinceCode": "49",
+      "legacyDistrictName": "TP. Hội An",
+      "aliases": [
+        "Minh An",
+        "Phường Minh An",
+        "Quảng Nam",
+        "TP. Hội An"
+      ]
+    },
+    {
+      "code": "4902",
+      "name": "Cẩm Phô",
+      "fullName": "Phường Cẩm Phô",
+      "type": "ward",
+      "provinceCode": "49",
+      "legacyDistrictName": "TP. Hội An",
+      "aliases": [
+        "Cẩm Phô",
+        "Phường Cẩm Phô",
+        "Quảng Nam",
+        "TP. Hội An"
+      ]
+    },
+    {
+      "code": "4903",
+      "name": "An Mỹ",
+      "fullName": "Phường An Mỹ",
+      "type": "ward",
+      "provinceCode": "49",
+      "legacyDistrictName": "TP. Tam Kỳ",
+      "aliases": [
+        "An Mỹ",
+        "Phường An Mỹ",
+        "Quảng Nam",
+        "TP. Tam Kỳ"
+      ]
+    },
+    {
+      "code": "5201",
+      "name": "Lê Hồng Phong",
+      "fullName": "Phường Lê Hồng Phong",
+      "type": "ward",
+      "provinceCode": "52",
+      "legacyDistrictName": "TP. Quy Nhơn",
+      "aliases": [
+        "Lê Hồng Phong",
+        "Phường Lê Hồng Phong",
+        "Bình Định",
+        "TP. Quy Nhơn"
+      ]
+    },
+    {
+      "code": "5202",
+      "name": "Trần Phú",
+      "fullName": "Phường Trần Phú",
+      "type": "ward",
+      "provinceCode": "52",
+      "legacyDistrictName": "TP. Quy Nhơn",
+      "aliases": [
+        "Trần Phú",
+        "Phường Trần Phú",
+        "Bình Định",
+        "TP. Quy Nhơn"
+      ]
+    },
+    {
+      "code": "5203",
+      "name": "Đập Đá",
+      "fullName": "Phường Đập Đá",
+      "type": "ward",
+      "provinceCode": "52",
+      "legacyDistrictName": "TX. An Nhơn",
+      "aliases": [
+        "Đập Đá",
+        "Phường Đập Đá",
+        "Bình Định",
+        "TX. An Nhơn"
+      ]
+    },
+    {
+      "code": "5401",
+      "name": "Phường 1",
+      "fullName": "Phường 1",
+      "type": "ward",
+      "provinceCode": "54",
+      "legacyDistrictName": "TP. Tuy Hòa",
+      "aliases": [
+        "Phường 1",
+        "Phường 1",
+        "Phú Yên",
+        "TP. Tuy Hòa"
+      ]
+    },
+    {
+      "code": "5402",
+      "name": "Phường 5",
+      "fullName": "Phường 5",
+      "type": "ward",
+      "provinceCode": "54",
+      "legacyDistrictName": "TP. Tuy Hòa",
+      "aliases": [
+        "Phường 5",
+        "Phường 5",
+        "Phú Yên",
+        "TP. Tuy Hòa"
+      ]
+    },
+    {
+      "code": "5403",
+      "name": "Xuân Đài",
+      "fullName": "Phường Xuân Đài",
+      "type": "ward",
+      "provinceCode": "54",
+      "legacyDistrictName": "TX. Sông Cầu",
+      "aliases": [
+        "Xuân Đài",
+        "Phường Xuân Đài",
+        "Phú Yên",
+        "TX. Sông Cầu"
+      ]
+    },
+    {
+      "code": "5801",
+      "name": "Kinh Dinh",
+      "fullName": "Phường Kinh Dinh",
+      "type": "ward",
+      "provinceCode": "58",
+      "legacyDistrictName": "TP. Phan Rang - Tháp Chàm",
+      "aliases": [
+        "Kinh Dinh",
+        "Phường Kinh Dinh",
+        "Ninh Thuận",
+        "TP. Phan Rang - Tháp Chàm"
+      ]
+    },
+    {
+      "code": "5802",
+      "name": "Thanh Sơn",
+      "fullName": "Phường Thanh Sơn",
+      "type": "ward",
+      "provinceCode": "58",
+      "legacyDistrictName": "TP. Phan Rang - Tháp Chàm",
+      "aliases": [
+        "Thanh Sơn",
+        "Phường Thanh Sơn",
+        "Ninh Thuận",
+        "TP. Phan Rang - Tháp Chàm"
+      ]
+    },
+    {
+      "code": "6001",
+      "name": "Đức Nghĩa",
+      "fullName": "Phường Đức Nghĩa",
+      "type": "ward",
+      "provinceCode": "60",
+      "legacyDistrictName": "TP. Phan Thiết",
+      "aliases": [
+        "Đức Nghĩa",
+        "Phường Đức Nghĩa",
+        "Bình Thuận",
+        "TP. Phan Thiết"
+      ]
+    },
+    {
+      "code": "6002",
+      "name": "Mũi Né",
+      "fullName": "Phường Mũi Né",
+      "type": "ward",
+      "provinceCode": "60",
+      "legacyDistrictName": "TP. Phan Thiết",
+      "aliases": [
+        "Mũi Né",
+        "Phường Mũi Né",
+        "Bình Thuận",
+        "TP. Phan Thiết"
+      ]
+    },
+    {
+      "code": "6003",
+      "name": "Phước Hội",
+      "fullName": "Phường Phước Hội",
+      "type": "ward",
+      "provinceCode": "60",
+      "legacyDistrictName": "TX. La Gi",
+      "aliases": [
+        "Phước Hội",
+        "Phường Phước Hội",
+        "Bình Thuận",
+        "TX. La Gi"
+      ]
+    },
+    {
+      "code": "6201",
+      "name": "Quyết Thắng",
+      "fullName": "Phường Quyết Thắng",
+      "type": "ward",
+      "provinceCode": "62",
+      "legacyDistrictName": "TP. Kon Tum",
+      "aliases": [
+        "Quyết Thắng",
+        "Phường Quyết Thắng",
+        "Kon Tum",
+        "TP. Kon Tum"
+      ]
+    },
+    {
+      "code": "6202",
+      "name": "Măng Đen",
+      "fullName": "Thị trấn Măng Đen",
+      "type": "commune",
+      "provinceCode": "62",
+      "legacyDistrictName": "Huyện Kon Plông",
+      "aliases": [
+        "Măng Đen",
+        "Thị trấn Măng Đen",
+        "Kon Tum",
+        "Huyện Kon Plông"
+      ]
+    },
+    {
+      "code": "6701",
+      "name": "Nghĩa Đức",
+      "fullName": "Phường Nghĩa Đức",
+      "type": "ward",
+      "provinceCode": "67",
+      "legacyDistrictName": "TP. Gia Nghĩa",
+      "aliases": [
+        "Nghĩa Đức",
+        "Phường Nghĩa Đức",
+        "Đắk Nông",
+        "TP. Gia Nghĩa"
+      ]
+    },
+    {
+      "code": "6702",
+      "name": "Nghĩa Thành",
+      "fullName": "Phường Nghĩa Thành",
+      "type": "ward",
+      "provinceCode": "67",
+      "legacyDistrictName": "TP. Gia Nghĩa",
+      "aliases": [
+        "Nghĩa Thành",
+        "Phường Nghĩa Thành",
+        "Đắk Nông",
+        "TP. Gia Nghĩa"
+      ]
+    },
+    {
+      "code": "7001",
+      "name": "Tân Phú",
+      "fullName": "Phường Tân Phú",
+      "type": "ward",
+      "provinceCode": "70",
+      "legacyDistrictName": "TP. Đồng Xoài",
+      "aliases": [
+        "Tân Phú",
+        "Phường Tân Phú",
+        "Bình Phước",
+        "TP. Đồng Xoài"
+      ]
+    },
+    {
+      "code": "7002",
+      "name": "Hưng Long",
+      "fullName": "Phường Hưng Long",
+      "type": "ward",
+      "provinceCode": "70",
+      "legacyDistrictName": "TX. Chơn Thành",
+      "aliases": [
+        "Hưng Long",
+        "Phường Hưng Long",
+        "Bình Phước",
+        "TX. Chơn Thành"
+      ]
+    },
+    {
+      "code": "7701",
+      "name": "Phường 1",
+      "fullName": "Phường 1",
+      "type": "ward",
+      "provinceCode": "77",
+      "legacyDistrictName": "TP. Vũng Tàu",
+      "aliases": [
+        "Phường 1",
+        "Phường 1",
+        "Bà Rịa - Vũng Tàu",
+        "TP. Vũng Tàu"
+      ]
+    },
+    {
+      "code": "7702",
+      "name": "Thắng Tam",
+      "fullName": "Phường Thắng Tam",
+      "type": "ward",
+      "provinceCode": "77",
+      "legacyDistrictName": "TP. Vũng Tàu",
+      "aliases": [
+        "Thắng Tam",
+        "Phường Thắng Tam",
+        "Bà Rịa - Vũng Tàu",
+        "TP. Vũng Tàu"
+      ]
+    },
+    {
+      "code": "7703",
+      "name": "Phước Hưng",
+      "fullName": "Phường Phước Hưng",
+      "type": "ward",
+      "provinceCode": "77",
+      "legacyDistrictName": "TP. Bà Rịa",
+      "aliases": [
+        "Phước Hưng",
+        "Phường Phước Hưng",
+        "Bà Rịa - Vũng Tàu",
+        "TP. Bà Rịa"
+      ]
+    },
+    {
+      "code": "7704",
+      "name": "Phú Mỹ",
+      "fullName": "Phường Phú Mỹ",
+      "type": "ward",
+      "provinceCode": "77",
+      "legacyDistrictName": "TX. Phú Mỹ",
+      "aliases": [
+        "Phú Mỹ",
+        "Phường Phú Mỹ",
+        "Bà Rịa - Vũng Tàu",
+        "TX. Phú Mỹ"
+      ]
+    },
+    {
+      "code": "7705",
+      "name": "Côn Đảo",
+      "fullName": "Huyện Côn Đảo",
+      "type": "special_zone",
+      "provinceCode": "77",
+      "legacyDistrictName": "Huyện Côn Đảo",
+      "aliases": [
+        "Côn Đảo",
+        "Huyện Côn Đảo",
+        "Bà Rịa - Vũng Tàu",
+        "Huyện Côn Đảo"
+      ]
+    },
+    {
+      "code": "8001",
+      "name": "Phường 1",
+      "fullName": "Phường 1",
+      "type": "ward",
+      "provinceCode": "80",
+      "legacyDistrictName": "TP. Tân An",
+      "aliases": [
+        "Phường 1",
+        "Phường 1",
+        "Long An",
+        "TP. Tân An"
+      ]
+    },
+    {
+      "code": "8002",
+      "name": "Phường 2",
+      "fullName": "Phường 2",
+      "type": "ward",
+      "provinceCode": "80",
+      "legacyDistrictName": "TP. Tân An",
+      "aliases": [
+        "Phường 2",
+        "Phường 2",
+        "Long An",
+        "TP. Tân An"
+      ]
+    },
+    {
+      "code": "8003",
+      "name": "Bến Lức",
+      "fullName": "Thị trấn Bến Lức",
+      "type": "commune",
+      "provinceCode": "80",
+      "legacyDistrictName": "Huyện Bến Lức",
+      "aliases": [
+        "Bến Lức",
+        "Thị trấn Bến Lức",
+        "Long An",
+        "Huyện Bến Lức"
+      ]
+    },
+    {
+      "code": "8004",
+      "name": "Hậu Nghĩa",
+      "fullName": "Thị trấn Hậu Nghĩa",
+      "type": "commune",
+      "provinceCode": "80",
+      "legacyDistrictName": "Huyện Đức Hòa",
+      "aliases": [
+        "Hậu Nghĩa",
+        "Thị trấn Hậu Nghĩa",
+        "Long An",
+        "Huyện Đức Hòa"
+      ]
+    },
+    {
+      "code": "8201",
+      "name": "Phường 1",
+      "fullName": "Phường 1",
+      "type": "ward",
+      "provinceCode": "82",
+      "legacyDistrictName": "TP. Mỹ Tho",
+      "aliases": [
+        "Phường 1",
+        "Phường 1",
+        "Tiền Giang",
+        "TP. Mỹ Tho"
+      ]
+    },
+    {
+      "code": "8202",
+      "name": "Phường 4",
+      "fullName": "Phường 4",
+      "type": "ward",
+      "provinceCode": "82",
+      "legacyDistrictName": "TP. Mỹ Tho",
+      "aliases": [
+        "Phường 4",
+        "Phường 4",
+        "Tiền Giang",
+        "TP. Mỹ Tho"
+      ]
+    },
+    {
+      "code": "8203",
+      "name": "Phường 1",
+      "fullName": "Phường 1",
+      "type": "ward",
+      "provinceCode": "82",
+      "legacyDistrictName": "TX. Gò Công",
+      "aliases": [
+        "Phường 1",
+        "Phường 1",
+        "Tiền Giang",
+        "TX. Gò Công"
+      ]
+    },
+    {
+      "code": "8301",
+      "name": "An Hội",
+      "fullName": "Phường An Hội",
+      "type": "ward",
+      "provinceCode": "83",
+      "legacyDistrictName": "TP. Bến Tre",
+      "aliases": [
+        "An Hội",
+        "Phường An Hội",
+        "Bến Tre",
+        "TP. Bến Tre"
+      ]
+    },
+    {
+      "code": "8302",
+      "name": "Phường 6",
+      "fullName": "Phường 6",
+      "type": "ward",
+      "provinceCode": "83",
+      "legacyDistrictName": "TP. Bến Tre",
+      "aliases": [
+        "Phường 6",
+        "Phường 6",
+        "Bến Tre",
+        "TP. Bến Tre"
+      ]
+    },
+    {
+      "code": "8401",
+      "name": "Phường 1",
+      "fullName": "Phường 1",
+      "type": "ward",
+      "provinceCode": "84",
+      "legacyDistrictName": "TP. Trà Vinh",
+      "aliases": [
+        "Phường 1",
+        "Phường 1",
+        "Trà Vinh",
+        "TP. Trà Vinh"
+      ]
+    },
+    {
+      "code": "8402",
+      "name": "Phường 3",
+      "fullName": "Phường 3",
+      "type": "ward",
+      "provinceCode": "84",
+      "legacyDistrictName": "TP. Trà Vinh",
+      "aliases": [
+        "Phường 3",
+        "Phường 3",
+        "Trà Vinh",
+        "TP. Trà Vinh"
+      ]
+    },
+    {
+      "code": "9101",
+      "name": "Vĩnh Thanh",
+      "fullName": "Phường Vĩnh Thanh",
+      "type": "ward",
+      "provinceCode": "91",
+      "legacyDistrictName": "TP. Rạch Giá",
+      "aliases": [
+        "Vĩnh Thanh",
+        "Phường Vĩnh Thanh",
+        "Kiên Giang",
+        "TP. Rạch Giá"
+      ]
+    },
+    {
+      "code": "9102",
+      "name": "Vĩnh Lạc",
+      "fullName": "Phường Vĩnh Lạc",
+      "type": "ward",
+      "provinceCode": "91",
+      "legacyDistrictName": "TP. Rạch Giá",
+      "aliases": [
+        "Vĩnh Lạc",
+        "Phường Vĩnh Lạc",
+        "Kiên Giang",
+        "TP. Rạch Giá"
+      ]
+    },
+    {
+      "code": "9103",
+      "name": "Pháo Đài",
+      "fullName": "Phường Pháo Đài",
+      "type": "ward",
+      "provinceCode": "91",
+      "legacyDistrictName": "TP. Hà Tiên",
+      "aliases": [
+        "Pháo Đài",
+        "Phường Pháo Đài",
+        "Kiên Giang",
+        "TP. Hà Tiên"
+      ]
+    },
+    {
+      "code": "9104",
+      "name": "Dương Đông",
+      "fullName": "Phường Dương Đông",
+      "type": "special_zone",
+      "provinceCode": "91",
+      "legacyDistrictName": "TP. Phú Quốc",
+      "aliases": [
+        "Dương Đông",
+        "Phường Dương Đông",
+        "Kiên Giang",
+        "TP. Phú Quốc"
+      ]
+    },
+    {
+      "code": "9105",
+      "name": "An Thới",
+      "fullName": "Phường An Thới",
+      "type": "special_zone",
+      "provinceCode": "91",
+      "legacyDistrictName": "TP. Phú Quốc",
+      "aliases": [
+        "An Thới",
+        "Phường An Thới",
+        "Kiên Giang",
+        "TP. Phú Quốc"
+      ]
+    },
+    {
+      "code": "9301",
+      "name": "Phường 1",
+      "fullName": "Phường 1",
+      "type": "ward",
+      "provinceCode": "93",
+      "legacyDistrictName": "TP. Vị Thanh",
+      "aliases": [
+        "Phường 1",
+        "Phường 1",
+        "Hậu Giang",
+        "TP. Vị Thanh"
+      ]
+    },
+    {
+      "code": "9302",
+      "name": "Ngã Bảy",
+      "fullName": "Phường Ngã Bảy",
+      "type": "ward",
+      "provinceCode": "93",
+      "legacyDistrictName": "TP. Ngã Bảy",
+      "aliases": [
+        "Ngã Bảy",
+        "Phường Ngã Bảy",
+        "Hậu Giang",
+        "TP. Ngã Bảy"
+      ]
+    },
+    {
+      "code": "9401",
+      "name": "Phường 1",
+      "fullName": "Phường 1",
+      "type": "ward",
+      "provinceCode": "94",
+      "legacyDistrictName": "TP. Sóc Trăng",
+      "aliases": [
+        "Phường 1",
+        "Phường 1",
+        "Sóc Trăng",
+        "TP. Sóc Trăng"
+      ]
+    },
+    {
+      "code": "9402",
+      "name": "Phường 3",
+      "fullName": "Phường 3",
+      "type": "ward",
+      "provinceCode": "94",
+      "legacyDistrictName": "TP. Sóc Trăng",
+      "aliases": [
+        "Phường 3",
+        "Phường 3",
+        "Sóc Trăng",
+        "TP. Sóc Trăng"
+      ]
+    },
+    {
+      "code": "9501",
+      "name": "Phường 1",
+      "fullName": "Phường 1",
+      "type": "ward",
+      "provinceCode": "95",
+      "legacyDistrictName": "TP. Bạc Liêu",
+      "aliases": [
+        "Phường 1",
+        "Phường 1",
+        "Bạc Liêu",
+        "TP. Bạc Liêu"
+      ]
+    },
+    {
+      "code": "9502",
+      "name": "Phường 3",
+      "fullName": "Phường 3",
+      "type": "ward",
+      "provinceCode": "95",
+      "legacyDistrictName": "TP. Bạc Liêu",
+      "aliases": [
+        "Phường 3",
+        "Phường 3",
+        "Bạc Liêu",
+        "TP. Bạc Liêu"
+      ]
+    },
+    {
+      "code": "0201",
+      "name": "Trần Phú",
+      "fullName": "Phường Trần Phú",
+      "type": "ward",
+      "provinceCode": "02",
+      "legacyDistrictName": "TP. Hà Giang",
+      "aliases": [
+        "Trần Phú",
+        "Phường Trần Phú",
+        "Hà Giang",
+        "TP. Hà Giang"
+      ]
+    },
+    {
+      "code": "0202",
+      "name": "Đồng Văn",
+      "fullName": "Thị trấn Đồng Văn",
+      "type": "commune",
+      "provinceCode": "02",
+      "legacyDistrictName": "Huyện Đồng Văn",
+      "aliases": [
+        "Đồng Văn",
+        "Thị trấn Đồng Văn",
+        "Hà Giang",
+        "Huyện Đồng Văn"
+      ]
+    },
+    {
+      "code": "0601",
+      "name": "Đức Xuân",
+      "fullName": "Phường Đức Xuân",
+      "type": "ward",
+      "provinceCode": "06",
+      "legacyDistrictName": "TP. Bắc Kạn",
+      "aliases": [
+        "Đức Xuân",
+        "Phường Đức Xuân",
+        "Bắc Kạn",
+        "TP. Bắc Kạn"
+      ]
+    },
+    {
+      "code": "0602",
+      "name": "Ba Bể",
+      "fullName": "Xã Ba Bể",
+      "type": "commune",
+      "provinceCode": "06",
+      "legacyDistrictName": "Huyện Ba Bể",
+      "aliases": [
+        "Ba Bể",
+        "Xã Ba Bể",
+        "Bắc Kạn",
+        "Huyện Ba Bể"
+      ]
+    },
+    {
+      "code": "1501",
+      "name": "Đồng Tâm",
+      "fullName": "Phường Đồng Tâm",
+      "type": "ward",
+      "provinceCode": "15",
+      "legacyDistrictName": "TP. Yên Bái",
+      "aliases": [
+        "Đồng Tâm",
+        "Phường Đồng Tâm",
+        "Yên Bái",
+        "TP. Yên Bái"
+      ]
+    },
+    {
+      "code": "1502",
+      "name": "Mù Cang Chải",
+      "fullName": "Thị trấn Mù Cang Chải",
+      "type": "commune",
+      "provinceCode": "15",
+      "legacyDistrictName": "Huyện Mù Cang Chải",
+      "aliases": [
+        "Mù Cang Chải",
+        "Thị trấn Mù Cang Chải",
+        "Yên Bái",
+        "Huyện Mù Cang Chải"
       ]
     }
   ],

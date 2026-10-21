@@ -1176,6 +1176,13 @@ class WarehouseReturnService:
         effective_acc_num = stored_acc_num or beneficiary_account_number
         effective_acc_name = stored_acc_name or beneficiary_account_name or (ret_req.customer_name if ret_req else "Khách hàng")
 
+        if ret_req and not stored_acc_num and beneficiary_account_number:
+            ret_req.refund_bank_name = effective_bank
+            ret_req.refund_account_number = effective_acc_num
+            ret_req.refund_account_name = effective_acc_name
+            if not getattr(ret_req, "refund_beneficiary_submitted_at", None):
+                ret_req.refund_beneficiary_submitted_at = utcnow()
+
         if refund_method in [RefundMethod.BANK_TRANSFER.value, "BANK_TRANSFER"]:
             if not effective_acc_num or not effective_bank:
                 raise HTTPException(

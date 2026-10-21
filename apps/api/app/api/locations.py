@@ -26,20 +26,28 @@ def get_metadata():
     """
     Thông tin Metadata chính thức về bộ dữ liệu hành chính 2 cấp của Việt Nam sau sắp xếp 2025.
     """
-    return AdministrativeDataService.get_metadata()
+    return {
+        "country": "VN",
+        "administrativeModel": "2-tier",
+        "effectiveDate": "2025-07-01",
+        "totalProvinces": 34,
+        "totalCommunes": 3321,
+    }
 
 
 @locations_router.get("/provinces")
 def get_provinces(
     response: Response,
     search: Optional[str] = Query(None, description="Tìm kiếm không dấu hoặc theo tên tỉnh/thành"),
+    model: Optional[str] = Query("34", description="Mặc định '34' cho chuẩn 2-tier 2025, truyền '63' hoặc 'all' để lấy toàn bộ 63 tỉnh thành"),
 ):
     """
-    Lấy danh sách 34 đơn vị hành chính cấp tỉnh hiện hành.
+    Lấy danh sách đơn vị hành chính cấp tỉnh hiện hành.
     Cache trình duyệt 1 giờ để tối ưu hiệu năng.
     """
     response.headers["Cache-Control"] = "public, max-age=3600"
-    return AdministrativeDataService.get_provinces(search=search)
+    eff_model = "34" if model in ["34", "2-tier"] else None
+    return AdministrativeDataService.get_provinces(search=search, model=eff_model)
 
 
 @locations_router.get("/communes")

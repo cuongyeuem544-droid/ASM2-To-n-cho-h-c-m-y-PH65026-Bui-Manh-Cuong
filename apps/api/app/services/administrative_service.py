@@ -32,8 +32,11 @@ class AdministrativeDataService:
     @classmethod
     def initialize(cls, json_path: Optional[str] = None):
         if not json_path:
-            # Tìm đường dẫn tương đối từ gốc project
+            # Tìm đường dẫn tương đối từ vị trí file service hoặc gốc project
+            current_file_dir = Path(__file__).resolve().parent
             candidates = [
+                current_file_dir.parent.parent.parent / "data" / "vietnam-administrative-units.json",
+                current_file_dir.parent.parent.parent.parent / "data" / "vietnam-administrative-units.json",
                 Path("data/vietnam-administrative-units.json"),
                 Path("../data/vietnam-administrative-units.json"),
                 Path("../../data/vietnam-administrative-units.json"),
@@ -77,9 +80,16 @@ class AdministrativeDataService:
         })
 
     @classmethod
-    def get_provinces(cls, search: Optional[str] = None) -> list[dict[str, Any]]:
+    def get_provinces(cls, search: Optional[str] = None, model: Optional[str] = None) -> list[dict[str, Any]]:
         cls._ensure_loaded()
         provinces = list(cls._provinces_map.values())
+        if model == "34":
+            codes_34 = {
+                "01", "31", "46", "48", "79", "92", "04", "08", "10", "11", "12", "14", "19", "20",
+                "22", "25", "27", "33", "37", "38", "40", "42", "45", "51", "56", "64", "66", "68",
+                "72", "75", "86", "87", "89", "96"
+            }
+            provinces = [p for p in provinces if p["code"] in codes_34]
         if not search:
             return provinces
 

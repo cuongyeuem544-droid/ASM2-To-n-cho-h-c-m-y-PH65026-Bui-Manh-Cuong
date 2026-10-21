@@ -230,6 +230,9 @@ export function WarehouseReturnsPage() {
   const [managerPassword, setManagerPassword] = useState('')
   const [refundMethod, setRefundMethod] = useState('BANK_TRANSFER')
   const [manualRefNo, setManualRefNo] = useState('')
+  const [beneficiaryBank, setBeneficiaryBank] = useState('')
+  const [beneficiaryAccountNumber, setBeneficiaryAccountNumber] = useState('')
+  const [beneficiaryAccountName, setBeneficiaryAccountName] = useState('')
 
   // Stock Disposition Modal
   const [showDispositionModal, setShowDispositionModal] = useState(false)
@@ -560,6 +563,16 @@ export function WarehouseReturnsPage() {
   // 5. Hoàn tiền bảo mật (Mật khẩu Quản lý)
   const handleProcessRefund = async () => {
     if (!selectedCase || !managerPassword) return
+
+    const storedAcc = selectedCase.refund_info?.beneficiary_account_number
+    const finalAcc = (beneficiaryAccountNumber || (storedAcc && storedAcc !== '—' ? storedAcc : '')).trim()
+    const finalBank = (beneficiaryBank || (selectedCase.refund_info?.beneficiary_bank && selectedCase.refund_info?.beneficiary_bank !== 'Mặc định' ? selectedCase.refund_info.beneficiary_bank : '')).trim()
+
+    if (refundMethod === 'BANK_TRANSFER' && !finalAcc) {
+      setActionError('Vui lòng nhập số tài khoản ngân hàng của khách hàng để thực hiện chuyển khoản hoàn tiền.')
+      return
+    }
+
     setActionLoading(true)
     setActionError('')
     try {
@@ -568,12 +581,18 @@ export function WarehouseReturnsPage() {
         body: JSON.stringify({
           password: managerPassword,
           refund_method: refundMethod,
+          beneficiary_bank: finalBank || 'Mặc định',
+          beneficiary_account_number: finalAcc || undefined,
+          beneficiary_account_name: (beneficiaryAccountName || selectedCase.refund_info?.beneficiary_account_name || selectedCase.customer_name || '').trim() || undefined,
           manual_reference_number: manualRefNo.trim() || undefined,
         }),
       })
       setActionSuccess('Giao dịch hoàn tiền cho khách hàng đã được thực hiện thành công!')
       setShowRefundModal(false)
       setManagerPassword('')
+      setBeneficiaryBank('')
+      setBeneficiaryAccountNumber('')
+      setBeneficiaryAccountName('')
       await openCaseDetail(selectedCase.case_code)
       await fetchCases()
     } catch (err: any) {
@@ -1461,7 +1480,15 @@ export function WarehouseReturnsPage() {
                 {['APPROVED', 'REFUND_PENDING', 'REFUND_FAILED'].includes(selectedCase.status) && (
                   <button
                     type="button"
-                    onClick={() => setShowRefundModal(true)}
+                    onClick={() => {
+                      const rawBank = selectedCase?.refund_info?.beneficiary_bank
+                      const rawAcc = selectedCase?.refund_info?.beneficiary_account_number
+                      const rawName = selectedCase?.refund_info?.beneficiary_account_name || selectedCase?.customer_name
+                      setBeneficiaryBank(rawBank && rawBank !== 'Mặc định' && rawBank !== '—' ? rawBank : '')
+                      setBeneficiaryAccountNumber(rawAcc && rawAcc !== '—' ? rawAcc : '')
+                      setBeneficiaryAccountName(rawName && rawName !== '—' ? rawName : '')
+                      setShowRefundModal(true)
+                    }}
                     disabled={actionLoading}
                     style={{
                       padding: '8px 18px',
@@ -2142,17 +2169,75 @@ export function WarehouseReturnsPage() {
               </div>
             </div>
 
-            {/* THÔNG TIN TÀI KHOẢN THỤ HƯỞNG (CHỈ ĐỌC) */}
-            <div style={{ padding: 12, background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0', marginBottom: 16 }}>
-              <div style={{ fontSize: 12, color: '#334155', fontWeight: 700, marginBottom: 6 }}>
-                THÔNG TIN TÀI KHOẢN THỤ HƯỞNG (CHỈ ĐỌC):
+            {/* THÔNG TIN TÀI KHOẢN THỤ HƯỞNG */}
+            {refundMethod === 'BANK_TRANSFER' && (
+              <div style={{ padding: 12, background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0', marginBottom: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, color: '#334155', fontWeight: 700 }}>
+                    THÔNG TIN TÀI KHOẢN THỤ HƯỞNG:
+                  </div>
+                  {selectedCase?.refund_info?.beneficiary_account_number && selectedCase.refund_info.beneficiary_account_number !== '—' && (
+                    <span style={{ fontSize: 11, background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: 12, fontWeight: 600 }}>
+                      ✓ Đã có từ yêu cầu
+                    </span>
+                  )}
+                </div>
+
+                {selectedCase?.refund_info?.beneficiary_account_number && selectedCase.refund_info.beneficiary_account_number !== '—' && !beneficiaryAccountNumber ? (
+                  <div style={{ fontSize: 12, color: '#475569', display: 'grid', gridTemplateColumns: '1fr', gap: 4 }}>
+                    <div>Ngân hàng: <strong>{selectedCase.refund_info.beneficiary_bank || 'Mặc định'}</strong></div>
+                    <div>Chủ tài khoản: <strong>{selectedCase.refund_info.beneficiary_account_name || selectedCase.customer_name || '—'}</strong></div>
+                    <div>Số tài khoản: <strong style={{ color: '#047857', fontFamily: 'monospace' }}>{selectedCase.refund_info.beneficiary_account_number}</strong></div>
+                  </div>
+                ) : (
+                  <div>
+                    {(!selectedCase?.refund_info?.beneficiary_account_number || selectedCase.refund_info.beneficiary_account_number === '—') && (
+                      <div style={{ fontSize: 11, color: '#b45309', background: '#fef3c7', padding: '6px 10px', borderRadius: 6, marginBottom: 10 }}>
+                        ⚠️ Khách hàng chưa cung cấp số tài khoản khi tạo yêu cầu. Quản lý kho vui lòng liên hệ khách hàng để đối chiếu và nhập thông tin tài khoản thụ hưởng bên dưới:
+                      </div>
+                    )}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
+                          Ngân hàng <span style={{ color: '#dc2626' }}>*</span>:
+                        </label>
+                        <input
+                          type="text"
+                          value={beneficiaryBank}
+                          onChange={(e) => setBeneficiaryBank(e.target.value)}
+                          placeholder="VD: Vietcombank, MB, Techcombank..."
+                          style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12 }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
+                          Số tài khoản nhận tiền <span style={{ color: '#dc2626' }}>*</span>:
+                        </label>
+                        <input
+                          type="text"
+                          value={beneficiaryAccountNumber}
+                          onChange={(e) => setBeneficiaryAccountNumber(e.target.value.replace(/\D/g, ''))}
+                          placeholder="Nhập số tài khoản khách hàng..."
+                          style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12, fontFamily: 'monospace' }}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
+                        Tên chủ tài khoản:
+                      </label>
+                      <input
+                        type="text"
+                        value={beneficiaryAccountName}
+                        onChange={(e) => setBeneficiaryAccountName(e.target.value.toUpperCase())}
+                        placeholder={selectedCase?.customer_name || 'Họ và tên chủ tài khoản...'}
+                        style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12, fontWeight: 600 }}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
-              <div style={{ fontSize: 12, color: '#475569', display: 'grid', gridTemplateColumns: '1fr', gap: 4 }}>
-                <div>Ngân hàng: <strong>{selectedCase?.refund_info?.beneficiary_bank || '—'}</strong></div>
-                <div>Chủ tài khoản: <strong>{selectedCase?.refund_info?.beneficiary_account_name || selectedCase?.customer_name || '—'}</strong></div>
-                <div>Số tài khoản: <strong style={{ color: '#047857', fontFamily: 'monospace' }}>{selectedCase?.refund_info?.beneficiary_account_number || selectedCase?.refund_info?.beneficiary_account_number_masked || '—'}</strong></div>
-              </div>
-            </div>
+            )}
 
 
 

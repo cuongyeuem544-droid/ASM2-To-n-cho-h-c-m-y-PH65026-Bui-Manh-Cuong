@@ -178,7 +178,7 @@ export default function AddressEditorV2({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Filtered 34 Provinces
+  // Filtered 63 Provinces
   const filteredProvinces = useMemo(() => {
     return administrativeService.getProvinces(provinceSearch);
   }, [provinceSearch]);
@@ -292,13 +292,37 @@ export default function AddressEditorV2({
     try {
       const rev = await placesService.reverseGeocode(newLat, newLng);
       if (rev) {
+        let currentProv: ProvinceUnit | null = null;
         if (rev.province_code) {
           const p = administrativeService.getProvinceByCode(rev.province_code);
-          if (p) setSelectedProvince(p);
+          if (p) {
+            setSelectedProvince(p);
+            currentProv = p;
+          }
+        } else if (rev.province_name) {
+          const provs = administrativeService.getProvinces(rev.province_name);
+          if (provs.length > 0) {
+            setSelectedProvince(provs[0]);
+            currentProv = provs[0];
+          }
         }
+
         if (rev.commune_code) {
           const c = administrativeService.getCommuneByCode(rev.commune_code);
           if (c) setSelectedCommune(c);
+        } else if (currentProv) {
+          const candidateNames = [rev.commune_name, rev.district_name, rev.street_address].filter(Boolean);
+          let matched: CommuneUnit | null = null;
+          for (const name of candidateNames) {
+            const comms = administrativeService.getCommunes(currentProv.code, undefined, name as string);
+            if (comms.length > 0) {
+              matched = comms[0];
+              break;
+            }
+          }
+          if (matched) {
+            setSelectedCommune(matched);
+          }
         }
 
         if (rev.street_address) {
@@ -334,13 +358,37 @@ export default function AddressEditorV2({
 
       const rev = await placesService.reverseGeocode(loc.lat, loc.lng);
       if (rev) {
+        let currentProv: ProvinceUnit | null = null;
         if (rev.province_code) {
           const p = administrativeService.getProvinceByCode(rev.province_code);
-          if (p) setSelectedProvince(p);
+          if (p) {
+            setSelectedProvince(p);
+            currentProv = p;
+          }
+        } else if (rev.province_name) {
+          const provs = administrativeService.getProvinces(rev.province_name);
+          if (provs.length > 0) {
+            setSelectedProvince(provs[0]);
+            currentProv = provs[0];
+          }
         }
+
         if (rev.commune_code) {
           const c = administrativeService.getCommuneByCode(rev.commune_code);
           if (c) setSelectedCommune(c);
+        } else if (currentProv) {
+          const candidateNames = [rev.commune_name, rev.district_name, rev.street_address].filter(Boolean);
+          let matched: CommuneUnit | null = null;
+          for (const name of candidateNames) {
+            const comms = administrativeService.getCommunes(currentProv.code, undefined, name as string);
+            if (comms.length > 0) {
+              matched = comms[0];
+              break;
+            }
+          }
+          if (matched) {
+            setSelectedCommune(matched);
+          }
         }
         if (rev.street_address) {
           setStreetAddress(rev.street_address);
@@ -625,7 +673,7 @@ export default function AddressEditorV2({
         </div>
       </div>
 
-      {/* 3. ADMINISTRATIVE 2-TIER SELECTORS (34 Provinces + 3.321 Communes 2025) */}
+      {/* 3. ADMINISTRATIVE 2-TIER SELECTORS (63 Provinces & Cities 2026) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
         {/* CẤP 1: TỈNH / THÀNH PHỐ */}
         <div className="relative" ref={provinceRef}>
@@ -638,7 +686,7 @@ export default function AddressEditorV2({
             className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-left text-sm flex items-center justify-between hover:border-slate-300"
           >
             <span className={selectedProvince ? "text-slate-900 font-medium" : "text-slate-400"}>
-              {selectedProvince ? selectedProvince.fullName : "Chọn Tỉnh / Thành phố (34 đơn vị)"}
+              {selectedProvince ? selectedProvince.fullName : "Chọn Tỉnh / Thành phố (63 tỉnh thành)"}
             </span>
             <ChevronDown className="w-4 h-4 text-slate-400" />
           </button>
