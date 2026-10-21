@@ -25,7 +25,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth/auth-context";
-import { getAdminAuthQuery, redirectToAdminPortal } from "@/lib/auth/admin-redirect";
+import { getAdminAuthQuery, getAdminPortalBaseUrl, redirectToAdminPortal } from "@/lib/auth/admin-redirect";
 import { H4CareLogo } from "@/components/branding/H4CareLogo";
 import { FptPolyBadge } from "@/components/branding/FptPolyBadge";
 import { SpatialLoginBackground } from "@/components/auth/SpatialLoginBackground";
@@ -36,27 +36,9 @@ export default function AdminPortalPage() {
   const [viewMode, setViewMode] = useState<"launchpad" | "embedded">("launchpad");
   const [activeTab, setActiveTab] = useState("/imports");
   const [iframeKey, setIframeKey] = useState(0);
-  const [activePort, setActivePort] = useState<5173 | 8000>(5173);
 
   const authQuery = typeof window !== "undefined" ? getAdminAuthQuery() : "";
-
-  // Check which port is live (prefer 5173 for Vite dev server, fallback 8000)
-  useEffect(() => {
-    async function checkPort() {
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 400);
-        await fetch("http://localhost:5173/", { mode: "no-cors", signal: controller.signal });
-        clearTimeout(timeout);
-        setActivePort(5173);
-      } catch {
-        setActivePort(8000);
-      }
-    }
-    checkPort();
-  }, []);
-
-  const adminBaseUrl = `http://localhost:${activePort}`;
+  const adminBaseUrl = getAdminPortalBaseUrl();
 
   const adminModules = [
     {
@@ -223,16 +205,11 @@ export default function AdminPortalPage() {
                     </p>
                   </div>
 
-                  {/* Quick Demo Credentials Reminder */}
-                  <div className="p-3.5 bg-sky-50/70 rounded-2xl border border-sky-200/80 text-left text-xs space-y-1.5 backdrop-blur-xs">
-                    <div className="flex items-center justify-between text-slate-600 font-medium">
-                      <span>Tài khoản Admin:</span>
-                      <span className="font-mono text-sky-800 font-bold">admin@pharmatrust.vn</span>
-                    </div>
-                    <div className="flex items-center justify-between text-slate-600 font-medium">
-                      <span>Mật khẩu demo:</span>
-                      <span className="font-mono text-sky-800 font-bold">Admin@123456</span>
-                    </div>
+                  {/* Admin Portal Security Notice */}
+                  <div className="p-3.5 bg-slate-50/80 rounded-2xl border border-slate-200/80 text-left text-xs space-y-1.5 backdrop-blur-xs">
+                    <p className="text-slate-600 text-xs leading-relaxed">
+                      Cổng quản trị bảo mật dành riêng cho Quản trị viên và Nhân viên kho H4CARE. Vui lòng đăng nhập bằng tài khoản được cấp phép để tiếp tục.
+                    </p>
                   </div>
 
                   <div className="space-y-2 pt-2">
