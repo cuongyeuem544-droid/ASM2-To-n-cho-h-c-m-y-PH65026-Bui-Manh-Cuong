@@ -254,6 +254,14 @@ Chạy bộ test hiện tại để ghi nhận các test đang pass/fail trướ
 
 ---
 
+### 🔴 Lỗi 14: Nút trạng thái đơn Admin hiển thị sai điều kiện và thông báo bị che
+- **Triệu chứng**: Trong chi tiết đơn, bấm Xác nhận/Giao hàng/Hoàn thành/Hủy tưởng không có phản hồi hoặc thiếu quyền.
+- **Nguyên nhân đã xác minh trên code**: API đã yêu cầu ADMIN đúng; giao diện bật cả thao tác không hợp lệ theo trạng thái/kiện hàng. Thông báo nằm ngoài modal nên bị lớp phủ che. Không thể kết luận tài khoản triển khai thực tế bị HTTP 403 nếu chưa có response/log.
+- **Phòng ngừa**: Dùng chung policy backend cho validation và `status_actions` trong chi tiết đơn; hiển thị lý do khóa nút và kết quả ngay trong modal; sau thay đổi tải lại dữ liệu server. Không mở rộng role hoặc bỏ qua điều kiện xuất/giao hàng để chữa lỗi giao diện.
+- **Kiểm thử**: ADMIN thực hiện bốn thao tác hợp lệ, role khác bị 403, khách chưa đăng nhập bị 401, metadata cũ không vượt qua validation mới nhất.
+
+---
+
 ## 4. MA TRẬN ĐÁNH GIÁ ẢNH HƯỞNG & ĐỊNH NGHĨA HOÀN THÀNH
 
 ### 4.1. Ma trận 17 khu vực nghiệp vụ cần rà soát sau mỗi thay đổi

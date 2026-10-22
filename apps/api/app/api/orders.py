@@ -38,6 +38,7 @@ from app.services.administrative_service import AdministrativeDataService
 from app.services.alert_notifier import dispatch_alert
 from app.services.fulfillment_service import FulfillmentRoutingService
 from app.services.geo_service import GeoService
+from app.services.order_status_policy import get_order_status_actions, order_transition_error
 
 router = APIRouter(tags=["Đơn Hàng & Mua Sắm"])
 store_order_router = APIRouter(prefix="/store/orders", tags=["Storefront Khách Hàng - Đơn Hàng"])
@@ -1254,6 +1255,7 @@ def get_admin_order_detail(
     if not order:
         raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng.")
 
+    fulfillments = _serialize_fulfillments(db, order.id)
     return {
         "id": order.id,
         "order_code": order.order_code,
@@ -1294,7 +1296,8 @@ def get_admin_order_detail(
             }
             for it in order.items
         ],
-        "fulfillments": _serialize_fulfillments(db, order.id),
+        "fulfillments": fulfillments,
+        "status_actions": get_order_status_actions(order.order_status, fulfillments),
     }
 
 
@@ -1488,55 +1491,17 @@ def update_order_status(
             "payment_status": order.payment_status,
         }
 
-    # 1. Chặn chuyển đổi từ trạng thái kết thúc (Terminal states)
-    if current_status in ["COMPLETED", "CANCELLED"]:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Không thể thay đổi trạng thái của đơn hàng đã ở trạng thái kết thúc '{current_status}'.",
-        )
-
-    # 2. Quy tắc chuyển trạng thái hợp lệ (FSM Forward Transitions)
-    allowed_transitions = {
-        "PENDING": {"CONFIRMED", "PROCESSING", "CANCELLED"},
-        "CONFIRMED": {"PROCESSING", "SHIPPING", "CANCELLED"},
-        "PROCESSING": {"SHIPPING", "CANCELLED"},
-        "SHIPPING": {"COMPLETED", "CANCELLED"},
-    }
-    if target_status not in allowed_transitions.get(current_status, set()):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Không thể chuyển đổi trực tiếp trạng thái đơn hàng từ '{current_status}' sang '{target_status}'. Luồng xử lý đơn hàng không hợp lệ.",
-        )
-
-    # 3. Kiểm tra tính toàn vẹn của các kiện hàng (Fulfillments Guard)
+    # Use the same rules for UI availability and mutation; never trust client flags.
     fulfillments = db.scalars(select(OrderFulfillment).where(OrderFulfillment.order_id == order.id)).all()
+    error = order_transition_error(
+        current_status,
+        target_status,
+        [{"fulfillment_code": f.fulfillment_code, "status": f.status} for f in fulfillments],
+    )
+    if error:
+        raise HTTPException(status_code=400, detail=error)
 
-    if target_status == "COMPLETED":
-        if fulfillments:
-            non_delivered = [f for f in fulfillments if f.status != "DELIVERED"]
-            if non_delivered:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Không thể hoàn tất đơn hàng khi vẫn còn kiện hàng chưa giao thành công (DELIVERED). Trạng thái hiện tại: {[f'{f.fulfillment_code}: {f.status}' for f in non_delivered]}",
-                )
-
-    elif target_status == "SHIPPING":
-        if fulfillments:
-            has_shipped = any(f.status in ["SHIPPED", "DELIVERED"] for f in fulfillments)
-            if not has_shipped:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Không thể chuyển đơn sang SHIPPING khi chưa có kiện hàng nào được xuất kho (SHIPPED). Vui lòng cập nhật trạng thái kiện hàng trước.",
-                )
-
-    elif target_status == "CANCELLED":
-        if fulfillments:
-            already_shipped = [f for f in fulfillments if f.status in ["SHIPPED", "DELIVERED"]]
-            if already_shipped:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Không thể hủy đơn hàng đã xuất kho hoặc đã giao hàng ({len(already_shipped)} kiện). Vui lòng sử dụng quy trình Đổi / Trả hàng.",
-                )
+    if target_status == "CANCELLED":
         # Tự động giải phóng tồn kho thuốc đã giữ chỗ (FEFO) và hủy các kiện pending
         FulfillmentRoutingService.release_order_reservations(
             db=db,

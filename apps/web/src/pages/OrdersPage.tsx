@@ -25,13 +25,14 @@ import {
   X,
   XCircle,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { AdminPageHeader } from '../components/AdminPageHeader'
 import { FilterBar } from '../components/FilterBar'
 import { PaginationBar } from '../components/PaginationBar'
 import { StatusBadge } from '../components/StatusBadge'
-import { api } from '../services/api'
+import { OrderStatusActions, type OrderStatusAction } from '../components/OrderStatusActions'
+import { api, ApiError } from '../services/api'
 import { formatDateTimeVN } from '../utils/dateUtils'
 
 // --- Interfaces for Orders List ---
@@ -105,6 +106,7 @@ interface OrderDetailData {
   created_at: string | null
   items: OrderDetailItem[]
   fulfillments?: OrderFulfillmentInfo[]
+  status_actions?: OrderStatusAction[]
 }
 
 // --- Interfaces for Warehouse Overview & Detail ---
@@ -252,6 +254,7 @@ export function OrdersPage() {
   const [updatingId, setUpdatingId] = useState<number | null>(null)
   const [updatingFulfillmentId, setUpdatingFulfillmentId] = useState<number | null>(null)
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const actionInFlight = useRef(false)
 
   // Orders Pagination
   const [currentPage, setCurrentPage] = useState<number>(1)
@@ -331,6 +334,7 @@ export function OrdersPage() {
   }, [orders, currentPage, pageSize])
 
   async function openOrderDetail(orderId: number) {
+    setNotification(null)
     setLoadingOrderDetail(true)
     try {
       const res = await api<OrderDetailData>(`/admin/orders/${orderId}`)
@@ -343,29 +347,39 @@ export function OrdersPage() {
   }
 
   async function handleUpdateStatus(orderId: number, newStatus: string) {
+    if (actionInFlight.current) return
+    actionInFlight.current = true
     setUpdatingId(orderId)
     setNotification(null)
     try {
-      await api(`/admin/orders/${orderId}/status`, {
+      const result = await api<{ order_status: string; payment_status: string; message: string }>(`/admin/orders/${orderId}/status`, {
         method: 'PATCH',
         body: JSON.stringify({ order_status: newStatus }),
       })
-      setNotification({
-        type: 'success',
-        message: `Đã cập nhật trạng thái đơn sang "${STATUS_LABELS[newStatus]?.label || newStatus}"!`,
-      })
-      await loadOrders()
-      if (selectedOrder && selectedOrder.id === orderId) {
-        setSelectedOrder({ ...selectedOrder, order_status: newStatus })
+      setSelectedOrder(current => current?.id === orderId
+        ? { ...current, order_status: result.order_status, payment_status: result.payment_status, status_actions: undefined }
+        : current)
+      try {
+        const detail = await api<OrderDetailData>(`/admin/orders/${orderId}`)
+        setSelectedOrder(current => current?.id === orderId ? detail : current)
+        setNotification({ type: 'success', message: result.message })
+      } catch {
+        setNotification({ type: 'error', message: 'Đã lưu trạng thái đơn, nhưng chưa tải lại được chi tiết. Bấm “Làm mới trạng thái” để kiểm tra; không cần gửi lại thao tác.' })
       }
+      await loadOrders()
     } catch (err: any) {
-      setNotification({ type: 'error', message: err?.message || 'Không thể cập nhật trạng thái đơn hàng.' })
+      const prefix = err instanceof ApiError && [401, 403].includes(err.status)
+        ? `Lỗi xác thực/quyền truy cập (${err.status}): ` : ''
+      setNotification({ type: 'error', message: prefix + (err?.message || 'Không thể cập nhật trạng thái đơn hàng.') })
     } finally {
+      actionInFlight.current = false
       setUpdatingId(null)
     }
   }
 
   async function handleUpdateFulfillmentStatus(fulfillmentId: number, newStatus: string) {
+    if (actionInFlight.current) return
+    actionInFlight.current = true
     setUpdatingFulfillmentId(fulfillmentId)
     setNotification(null)
     try {
@@ -373,13 +387,20 @@ export function OrdersPage() {
         method: 'PATCH',
         body: JSON.stringify({ status: newStatus }),
       })
+      if (selectedOrder) {
+        try {
+          const detail = await api<OrderDetailData>(`/admin/orders/${selectedOrder.id}`)
+          setSelectedOrder(current => current?.id === selectedOrder.id ? detail : current)
+        } catch {
+          setSelectedOrder(current => current?.id === selectedOrder.id ? { ...current, status_actions: undefined } : current)
+          setNotification({ type: 'error', message: 'Đã lưu trạng thái kiện hàng, nhưng chưa tải lại được chi tiết. Bấm “Làm mới trạng thái” để kiểm tra; không cần gửi lại thao tác.' })
+          return
+        }
+      }
       setNotification({
         type: 'success',
         message: `Đã chuyển trạng thái kiện hàng sang "${FULFILLMENT_STATUS_LABELS[newStatus]?.label || newStatus}"!`,
       })
-      if (selectedOrder) {
-        await openOrderDetail(selectedOrder.id)
-      }
       await loadOrders()
     } catch (err: any) {
       setNotification({
@@ -387,7 +408,24 @@ export function OrdersPage() {
         message: err?.message || 'Không thể cập nhật trạng thái kiện hàng.',
       })
     } finally {
+      actionInFlight.current = false
       setUpdatingFulfillmentId(null)
+    }
+  }
+
+  async function refreshOrderActions(orderId: number) {
+    if (actionInFlight.current) return
+    actionInFlight.current = true
+    setUpdatingId(orderId)
+    setNotification(null)
+    try {
+      const detail = await api<OrderDetailData>(`/admin/orders/${orderId}`)
+      setSelectedOrder(current => current?.id === orderId ? detail : current)
+    } catch (err: any) {
+      setNotification({ type: 'error', message: err?.message || 'Không tải được trạng thái mới nhất. Vui lòng thử lại.' })
+    } finally {
+      actionInFlight.current = false
+      setUpdatingId(null)
     }
   }
 
@@ -457,7 +495,7 @@ export function OrdersPage() {
         </button>
       </div>
 
-      {notification && (
+      {notification && !selectedOrder && (
         <div
           className={`alert ${notification.type === 'success' ? 'alert-success' : 'alert-error'}`}
           style={{ marginBottom: 20 }}
@@ -1191,6 +1229,9 @@ export function OrdersPage() {
       {/* ======================================================== */}
       {selectedOrder && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Chi tiết đơn hàng ${selectedOrder.order_code}`}
           style={{
             position: 'fixed',
             inset: 0,
@@ -1239,6 +1280,8 @@ export function OrdersPage() {
                 type="button"
                 onClick={() => setSelectedOrder(null)}
                 style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
+                disabled={updatingId !== null || updatingFulfillmentId !== null}
+                aria-label="Đóng chi tiết đơn hàng"
               >
                 <X size={20} />
               </button>
@@ -1361,7 +1404,7 @@ export function OrdersPage() {
                             <button
                               type="button"
                               onClick={() => handleUpdateFulfillmentStatus(ff.id, 'PACKED')}
-                              disabled={updatingFulfillmentId === ff.id}
+                              disabled={updatingFulfillmentId !== null || updatingId !== null}
                               style={{ padding: '4px 10px', fontSize: 11, background: '#4338ca', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}
                             >
                               Đã đóng gói (PACKED)
@@ -1371,7 +1414,7 @@ export function OrdersPage() {
                             <button
                               type="button"
                               onClick={() => handleUpdateFulfillmentStatus(ff.id, 'SHIPPED')}
-                              disabled={updatingFulfillmentId === ff.id}
+                              disabled={updatingFulfillmentId !== null || updatingId !== null}
                               style={{ padding: '4px 10px', fontSize: 11, background: '#0284c7', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}
                             >
                               Xuất kho giao (SHIPPED)
@@ -1381,7 +1424,7 @@ export function OrdersPage() {
                             <button
                               type="button"
                               onClick={() => handleUpdateFulfillmentStatus(ff.id, 'DELIVERED')}
-                              disabled={updatingFulfillmentId === ff.id}
+                              disabled={updatingFulfillmentId !== null || updatingId !== null}
                               style={{ padding: '4px 10px', fontSize: 11, background: '#16a34a', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}
                             >
                               Giao thành công (DELIVERED)
@@ -1421,54 +1464,32 @@ export function OrdersPage() {
                 background: '#f8fafc',
                 borderTop: '1px solid #e2e8f0',
                 display: 'flex',
+                flexDirection: 'column',
+                gap: 12,
+                flexShrink: 0,
+                maxHeight: '40vh',
+                overflowY: 'auto',
                 justifyContent: 'space-between',
-                alignItems: 'center',
+                alignItems: 'stretch',
               }}
             >
               <button
                 type="button"
                 onClick={() => setSelectedOrder(null)}
                 className="admin-button button-secondary"
+                style={{ alignSelf: 'flex-start' }}
+                disabled={updatingId !== null || updatingFulfillmentId !== null}
               >
                 Đóng
               </button>
 
-              {selectedOrder.order_status !== 'COMPLETED' && selectedOrder.order_status !== 'CANCELLED' && (
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button
-                    type="button"
-                    onClick={() => handleUpdateStatus(selectedOrder.id, 'CONFIRMED')}
-                    disabled={updatingId === selectedOrder.id}
-                    style={{ padding: '8px 14px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
-                  >
-                    Xác nhận đơn
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleUpdateStatus(selectedOrder.id, 'SHIPPING')}
-                    disabled={updatingId === selectedOrder.id}
-                    style={{ padding: '8px 14px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
-                  >
-                    Đang giao hàng
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleUpdateStatus(selectedOrder.id, 'COMPLETED')}
-                    disabled={updatingId === selectedOrder.id}
-                    style={{ padding: '8px 14px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
-                  >
-                    Hoàn thành
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleUpdateStatus(selectedOrder.id, 'CANCELLED')}
-                    disabled={updatingId === selectedOrder.id}
-                    style={{ padding: '8px 14px', background: '#fee2e2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
-                  >
-                    Hủy đơn
-                  </button>
-                </div>
-              )}
+              <OrderStatusActions
+                actions={selectedOrder.status_actions}
+                busy={updatingId !== null || updatingFulfillmentId !== null}
+                notification={notification}
+                onUpdate={status => handleUpdateStatus(selectedOrder.id, status)}
+                onRefresh={() => refreshOrderActions(selectedOrder.id)}
+              />
             </div>
           </div>
         </div>
