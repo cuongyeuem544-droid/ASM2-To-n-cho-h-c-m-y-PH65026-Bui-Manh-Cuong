@@ -29,6 +29,7 @@ from app.api import (
     live_chat,
     warehouse_orders_returns,
     warehouse_portal,
+    revenue_analytics,
 )
 
 
@@ -73,5 +74,6 @@ api_router.include_router(warehouse_portal.router)
 api_router.include_router(warehouse_orders_returns.manager_router)
 api_router.include_router(warehouse_orders_returns.staff_router)
 api_router.include_router(warehouse_orders_returns.compat_portal_router)
+api_router.include_router(revenue_analytics.router)
 
 

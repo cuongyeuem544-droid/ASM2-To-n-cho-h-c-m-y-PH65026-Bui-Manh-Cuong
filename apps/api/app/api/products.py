@@ -260,6 +260,85 @@ def list_products(
     }
 
 
+@router.get("/products/images/review-queue")
+@router.get("/admin/products/images/review-queue")
+def get_product_images_review_queue(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    status: str = Query(default="ALL", description="ALL, HAS_LOCAL, HAS_REMOTE, NEEDS_IMAGE"),
+    search: str | None = Query(default=None),
+    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.WAREHOUSE_MANAGER)),
+    db: Session = Depends(get_db),
+):
+    query = select(CanonicalProduct)
+    if search and search.strip():
+        kw = f"%{search.strip()}%"
+        query = query.where(
+            or_(
+                CanonicalProduct.canonical_name.ilike(kw),
+                CanonicalProduct.registration_number.ilike(kw),
+                CanonicalProduct.manufacturer.ilike(kw),
+            )
+        )
+
+    if status == "HAS_LOCAL":
+        query = query.where(CanonicalProduct.local_image_url.is_not(None))
+    elif status == "HAS_REMOTE":
+        query = query.where(CanonicalProduct.image_url.is_not(None), CanonicalProduct.local_image_url.is_(None))
+    elif status == "NEEDS_IMAGE":
+        query = query.where(CanonicalProduct.local_image_url.is_(None), CanonicalProduct.image_url.is_(None))
+
+    total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
+
+    # Aggregate statistics
+    total_all = db.scalar(select(func.count(CanonicalProduct.id))) or 0
+    total_local = db.scalar(select(func.count(CanonicalProduct.id)).where(CanonicalProduct.local_image_url.is_not(None))) or 0
+    total_remote = db.scalar(select(func.count(CanonicalProduct.id)).where(CanonicalProduct.image_url.is_not(None), CanonicalProduct.local_image_url.is_(None))) or 0
+    total_needs = db.scalar(select(func.count(CanonicalProduct.id)).where(CanonicalProduct.local_image_url.is_(None), CanonicalProduct.image_url.is_(None))) or 0
+
+    offset = (page - 1) * page_size
+    products = db.scalars(query.order_by(CanonicalProduct.id.asc()).offset(offset).limit(page_size)).all()
+
+    items = []
+    for p in products:
+        eff_img = p.local_image_url or p.image_url or "/images/placeholder-medicine.svg"
+        if p.local_image_url:
+            img_status = "LOCAL_VERIFIED"
+        elif p.image_url:
+            img_status = "REMOTE_CDN"
+        else:
+            img_status = "PLACEHOLDER"
+
+        items.append({
+            "id": p.id,
+            "canonical_name": p.canonical_name,
+            "dosage_form": p.dosage_form or "—",
+            "package_description": p.package_description or "—",
+            "manufacturer": p.manufacturer or "—",
+            "manufacturing_country": p.manufacturing_country or "—",
+            "image_url": p.image_url,
+            "local_image_url": p.local_image_url,
+            "effective_image_url": eff_img,
+            "image_status": img_status,
+            "publish_mode": p.publish_mode or "REFERENCE_ONLY",
+            "publish_status": p.publish_status.value if hasattr(p.publish_status, "value") else str(p.publish_status),
+        })
+
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": math.ceil(total / page_size) if total else 0,
+        "stats": {
+            "total": total_all,
+            "has_local": total_local,
+            "has_remote": total_remote,
+            "needs_image": total_needs,
+        },
+    }
+
+
 @router.get("/products/{product_id}", response_model=ProductDetail)
 def get_product(product_id: int, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     product = db.scalar(_product_query().where(CanonicalProduct.id == product_id))

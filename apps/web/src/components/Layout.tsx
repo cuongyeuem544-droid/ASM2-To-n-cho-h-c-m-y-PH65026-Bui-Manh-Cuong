@@ -20,6 +20,7 @@ import {
   ShieldCheck,
   ShoppingBag,
   ThermometerSnowflake,
+  TrendingUp,
   Users,
   X,
   Banknote,
@@ -77,6 +78,7 @@ const navGroups: NavGroup[] = [
     items: [
       { to: '/returns', label: 'Quản lý Đổi/Trả hàng', icon: RotateCcw },
       { to: '/refunds', label: 'Hoàn tiền & Đối soát', icon: Banknote },
+      { to: '/revenue', label: 'Doanh thu & Dòng tiền', icon: TrendingUp, adminOnly: true },
     ],
   },
   {

@@ -312,6 +312,209 @@ def get_category_products(
     )
 
 
+@router.get("/home/curated")
+def get_curated_home_data(db: Session = Depends(get_db)):
+    """Curated homepage sections with real database products, verified packshots,
+    and verified pharmaceutical data. No 300-item client-side loading."""
+    from app.models.inventory import BatchStatus, InventoryBatch, ProductSku, WarehouseBatchStock, ProductReview
+
+    products = db.scalars(
+        select(CanonicalProduct)
+        .options(
+            selectinload(CanonicalProduct.ingredients).selectinload(ProductIngredient.ingredient),
+        )
+        .where(
+            CanonicalProduct.publish_status == PublishStatus.PUBLISHED,
+            ~CanonicalProduct.canonical_name.like("Hồ sơ%"),
+        )
+        .order_by(CanonicalProduct.id.asc())
+    ).all()
+
+    if not products:
+        return {
+            "bestsellers": [],
+            "otc_medicines": [],
+            "supplements": [],
+            "medical_devices": [],
+            "campaigns": [],
+            "verified_brands": [],
+            "health_articles": [],
+            "total_active_products": 0,
+        }
+
+    prod_ids = [p.id for p in products]
+
+    # Batch prices from ProductSku then PriceObservation
+    sku_prices = db.query(
+        ProductSku.canonical_product_id,
+        ProductSku.base_price,
+        ProductSku.is_default,
+    ).filter(
+        ProductSku.canonical_product_id.in_(prod_ids),
+        ProductSku.is_active == True,
+        ProductSku.base_price.isnot(None),
+        ProductSku.base_price > 0,
+    ).order_by(ProductSku.is_default.desc(), ProductSku.id.asc()).all()
+    prices_map = {}
+    for pid, b_price, _ in sku_prices:
+        if pid not in prices_map and b_price:
+            prices_map[pid] = int(b_price)
+
+    obs_prices = db.query(
+        PriceObservation.product_id,
+        PriceObservation.observed_price,
+    ).filter(
+        PriceObservation.product_id.in_(prod_ids),
+        PriceObservation.observed_price.isnot(None),
+        PriceObservation.observed_price > 0,
+    ).order_by(PriceObservation.observed_at.desc()).all()
+    for pid, obs_p in obs_prices:
+        if pid not in prices_map and obs_p:
+            prices_map[pid] = int(obs_p)
+
+    # Batch reviews
+    rev_rows = db.query(
+        ProductReview.canonical_product_id,
+        func.avg(ProductReview.rating),
+        func.count(ProductReview.id),
+    ).filter(
+        ProductReview.canonical_product_id.in_(prod_ids),
+        ProductReview.is_approved == True,
+    ).group_by(ProductReview.canonical_product_id).all()
+    reviews_map = {pid: (round(float(avg_r), 1) if avg_r else 0.0, int(cnt) if cnt else 0) for pid, avg_r, cnt in rev_rows}
+
+    # Batch stock
+    stock_rows = db.query(
+        ProductSku.canonical_product_id,
+        func.coalesce(func.sum(WarehouseBatchStock.quantity_available), 0),
+    ).select_from(ProductSku).join(
+        InventoryBatch, InventoryBatch.sku_id == ProductSku.id
+    ).join(
+        WarehouseBatchStock, WarehouseBatchStock.batch_id == InventoryBatch.id
+    ).filter(
+        ProductSku.canonical_product_id.in_(prod_ids),
+        InventoryBatch.status == BatchStatus.ACTIVE,
+        InventoryBatch.expiry_date > date.today(),
+        WarehouseBatchStock.quantity_available > 0,
+    ).group_by(ProductSku.canonical_product_id).all()
+    stocks_map = {pid: int(s_qty) for pid, s_qty in stock_rows}
+
+    all_serialized = [
+        serialize_product(
+            p,
+            price=prices_map.get(p.id),
+            rating=reviews_map.get(p.id, (0.0, 0))[0],
+            review_count=reviews_map.get(p.id, (0.0, 0))[1],
+            stock=stocks_map.get(p.id, 0),
+        )
+        for p in products
+    ]
+
+    # Bestsellers: products with verified local images or top active medicines
+    bestseller_ids = {279185, 279284, 120085, 279255, 279189, 279336, 279338, 279341}
+    bestsellers = [item for item in all_serialized if item["dbId"] in bestseller_ids or item.get("isBestseller")]
+    if len(bestsellers) < 6:
+        extras = [item for item in all_serialized if item["isSaleEligible"] and item not in bestsellers]
+        bestsellers.extend(extras[: 8 - len(bestsellers)])
+
+    # OTC Medicines
+    otc_medicines = [
+        item for item in all_serialized
+        if item.get("category") == "thuoc-khong-ke-don" and not item.get("isPrescription")
+    ][:8]
+
+    # Supplements
+    supplements = [
+        item for item in all_serialized
+        if item.get("category") == "thuc-pham-chuc-nang"
+    ][:8]
+
+    # Medical Devices
+    medical_devices = [
+        item for item in all_serialized
+        if item.get("category") == "thiet-bi-y-te"
+    ][:6]
+
+    # Curated verified brands
+    verified_brands = [
+        {"name": "DHG Pharma", "country": "Việt Nam", "badge": "Dược Hậu Giang - Chuẩn GMP-WHO", "logoText": "DHG"},
+        {"name": "Sanofi", "country": "Pháp", "badge": "Tập đoàn Dược phẩm Quốc tế", "logoText": "SANOFI"},
+        {"name": "GSK", "country": "Anh Quốc", "badge": "GlaxoSmithKline Toàn cầu", "logoText": "GSK"},
+        {"name": "Reckitt Benckiser", "country": "Anh Quốc", "badge": "Chăm sóc sức khỏe & Giảm đau", "logoText": "RECKITT"},
+        {"name": "Traphaco", "country": "Việt Nam", "badge": "Đông dược & Tân dược Việt Nam", "logoText": "TRAPHACO"},
+        {"name": "Rohto Mentholatum", "country": "Nhật Bản", "badge": "Chăm sóc mắt & Da liễu", "logoText": "ROHTO"},
+        {"name": "Omron Healthcare", "country": "Nhật Bản", "badge": "Thiết bị y tế gia đình hàng đầu", "logoText": "OMRON"},
+        {"name": "Ipsen", "country": "Pháp", "badge": "Dược phẩm tiêu hóa chuyên sâu", "logoText": "IPSEN"},
+    ]
+
+    # Curated Active Campaigns
+    active_campaigns = [
+        {
+            "id": "camp-flu-season",
+            "title": "Chiến Dịch Phòng Ngừa Cảm Cúm & Viêm Họng Mùa Mưa",
+            "tag": "Chiến dịch y tế",
+            "description": "Bảo vệ hệ hô hấp cho cả gia đình. Hỗ trợ tư vấn dược sĩ 24/7 và kiểm tra tương tác thuốc miễn phí.",
+            "gradient": "from-blue-600 to-indigo-700",
+            "cta": "Xem gói thuốc cảm cúm",
+            "link": "/category/thuoc-khong-ke-don?subCategory=tri-ho-cam-cum",
+        },
+        {
+            "id": "camp-gut-health",
+            "title": "Bảo Vệ Hệ Tiêu Hóa & Men Vi Sinh Chuẩn Y Khoa",
+            "tag": "Sức khỏe tiêu hóa",
+            "description": "Men vi sinh dạng ống uống Enterogermina và gói Smecta chính hãng bảo quản điều kiện chuẩn GSP.",
+            "gradient": "from-teal-600 to-emerald-700",
+            "cta": "Khám phá danh mục tiêu hóa",
+            "link": "/category/thuoc-khong-ke-don?subCategory=da-day-tieu-hoa",
+        },
+    ]
+
+    # Curated Health Articles
+    health_articles = [
+        {
+            "id": "art-paracetamol-safety",
+            "title": "Sử dụng Paracetamol an toàn: Cảnh báo quá liều và cách tính liều chuẩn theo cân nặng",
+            "category": "Dược lâm sàng",
+            "readTime": "4 phút đọc",
+            "author": "Dược sĩ CKI H4CARE",
+            "date": "22/10/2026",
+            "summary": "Paracetamol là thuốc giảm đau hạ sốt phổ biến nhất nhưng tiềm ẩn nguy cơ tổn thương gan cấp tính nếu dùng vượt quá 4g/ngày ở người lớn hoặc tính sai liều theo kg ở trẻ em.",
+            "link": "/category/thuoc-khong-ke-don?subCategory=giam-dau-ha-sot",
+        },
+        {
+            "id": "art-probiotics-vs-enzymes",
+            "title": "Phân biệt Men vi sinh (Probiotics) và Men tiêu hóa (Enzymes): Tránh lạm dụng ở trẻ nhỏ",
+            "category": "Tiêu hóa & Nhi khoa",
+            "readTime": "5 phút đọc",
+            "author": "Hội đồng Dược sĩ H4CARE",
+            "date": "20/10/2026",
+            "summary": "Nhiều phụ huynh nhầm lẫn giữa vi khuẩn có lợi đường ruột và enzym tiêu hóa thức ăn, dẫn đến việc dùng men tiêu hóa kéo dài làm teo tuyến tiết tự nhiên của cơ thể bé.",
+            "link": "/category/thuoc-khong-ke-don?subCategory=da-day-tieu-hoa",
+        },
+        {
+            "id": "art-rx-dispensing-standard",
+            "title": "Quy trình tư vấn và cung ứng thuốc kê đơn (Rx) an toàn theo quy chuẩn Bộ Y Tế tại H4CARE",
+            "category": "Quy chế & An toàn",
+            "readTime": "3 phút đọc",
+            "author": "Ban Giám sát Chất lượng GPP",
+            "date": "18/10/2026",
+            "summary": "H4CARE tuân thủ nghiêm ngặt Luật Dược 2016: Không bán thuốc kê đơn trực tuyến tùy tiện, mọi đơn thuốc phải được dược sĩ đại học xác thực trước khi điều phối từ kho chi nhánh.",
+            "link": "/category/thuoc-ke-don",
+        },
+    ]
+
+    return {
+        "bestsellers": bestsellers[:8],
+        "otc_medicines": otc_medicines,
+        "supplements": supplements,
+        "medical_devices": medical_devices,
+        "campaigns": active_campaigns,
+        "verified_brands": verified_brands,
+        "health_articles": health_articles,
+        "total_active_products": len(all_serialized),
+    }
+
+
 @router.get("/products")
 def get_store_products(
     category: str | None = None,

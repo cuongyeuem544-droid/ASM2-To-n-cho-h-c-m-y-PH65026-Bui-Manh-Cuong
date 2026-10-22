@@ -27,6 +27,7 @@ const ReturnsPage = lazy(() => import('./pages/ReturnsPage').then(module => ({ d
 const RefundsPage = lazy(() => import('./pages/RefundsPage').then(module => ({ default: module.RefundsPage })))
 const LiveChatPage = lazy(() => import('./pages/LiveChatPage').then(module => ({ default: module.LiveChatPage })))
 const ChatbotAdminPage = lazy(() => import('./pages/admin/ChatbotAdminPage').then(module => ({ default: module.ChatbotAdminPage })))
+const RevenuePage = lazy(() => import('./pages/RevenuePage').then(module => ({ default: module.RevenuePage })))
 
 // Warehouse Manager Pages & Layout
 const WarehouseManagerLayout = lazy(() =>
@@ -151,6 +152,7 @@ export default function App() {
             <Route path="orders" element={<OrdersPage />} />
             <Route path="returns" element={<ReturnsPage />} />
             <Route path="refunds" element={<RefundsPage />} />
+            <Route path="revenue" element={<AdminOnly><RevenuePage /></AdminOnly>} />
             <Route path="reviews" element={<ReviewsPage />} />
             <Route path="campaigns" element={<CampaignsPage />} />
             <Route path="warehouses" element={<WarehousesPage />} />
