@@ -1,5 +1,4 @@
 import { Product, Category } from "@/types";
-import { PRODUCTS_DATA } from "@/data/products";
 import { CATEGORIES_DATA } from "@/data/mockData";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
@@ -21,7 +20,18 @@ export async function getStoreCategoriesTree(): Promise<Category[]> {
   return CATEGORIES_DATA;
 }
 
-export async function getStoreProducts(params?: {
+export interface StoreProductsResponse {
+  items: Product[];
+  total: number;
+  page?: number;
+  pageSize?: number;
+  totalPages?: number;
+  availableBrands?: string[];
+  availableOrigins?: string[];
+  availableDosageForms?: string[];
+}
+
+export interface GetStoreProductsParams {
   category?: string;
   subCategory?: string;
   productType?: string;
@@ -31,7 +41,17 @@ export async function getStoreProducts(params?: {
   sort?: string;
   limit?: number;
   offset?: number;
-}): Promise<{ items: Product[]; total: number }> {
+  page?: number;
+  pageSize?: number;
+  brand?: string | string[];
+  origin?: string | string[];
+  dosageForm?: string | string[];
+  priceRange?: string;
+  minPrice?: number;
+  maxPrice?: number;
+}
+
+export async function getStoreProducts(params?: GetStoreProductsParams): Promise<StoreProductsResponse> {
   try {
     const query = new URLSearchParams();
     if (params?.category) query.set("category", params.category);
@@ -43,6 +63,24 @@ export async function getStoreProducts(params?: {
     if (params?.sort) query.set("sort", params.sort);
     if (params?.limit) query.set("limit", String(params.limit));
     if (params?.offset) query.set("offset", String(params.offset));
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.pageSize) query.set("pageSize", String(params.pageSize));
+    if (params?.priceRange) query.set("priceRange", params.priceRange);
+    if (params?.minPrice !== undefined) query.set("minPrice", String(params.minPrice));
+    if (params?.maxPrice !== undefined) query.set("maxPrice", String(params.maxPrice));
+
+    if (params?.brand) {
+      const brands = Array.isArray(params.brand) ? params.brand.join(",") : params.brand;
+      if (brands) query.set("brand", brands);
+    }
+    if (params?.origin) {
+      const origins = Array.isArray(params.origin) ? params.origin.join(",") : params.origin;
+      if (origins) query.set("origin", origins);
+    }
+    if (params?.dosageForm) {
+      const dosageForms = Array.isArray(params.dosageForm) ? params.dosageForm.join(",") : params.dosageForm;
+      if (dosageForms) query.set("dosageForm", dosageForms);
+    }
 
     const res = await fetch(`${API_BASE}/api/v1/store/products?${query.toString()}`, {
       next: { revalidate: 60 },
@@ -50,35 +88,30 @@ export async function getStoreProducts(params?: {
 
     if (res.ok) {
       const data = await res.json();
-      if (Array.isArray(data.items) && data.items.length > 0) {
-        return data;
+      if (data && Array.isArray(data.items)) {
+        return {
+          items: data.items,
+          total: typeof data.total === "number" ? data.total : data.items.length,
+          page: data.page,
+          pageSize: data.pageSize,
+          totalPages: data.totalPages,
+          availableBrands: data.availableBrands || [],
+          availableOrigins: data.availableOrigins || [],
+          availableDosageForms: data.availableDosageForms || [],
+        };
       }
     }
   } catch (err) {
-    console.warn("Backend API unavailable, using local product catalog:", err);
+    console.warn("Backend API unavailable for getStoreProducts:", err);
   }
 
-  // Graceful fallback to static products
-  let filtered = [...PRODUCTS_DATA];
-  if (params?.category) {
-    filtered = filtered.filter((p) => p.category === params.category);
-  }
-  if (params?.prescriptionType === "rx") {
-    filtered = filtered.filter((p) => p.isPrescription);
-  } else if (params?.prescriptionType === "otc") {
-    filtered = filtered.filter((p) => !p.isPrescription);
-  }
-  if (params?.search) {
-    const q = params.search.toLowerCase();
-    filtered = filtered.filter(
-      (p) =>
-        p.name.toLowerCase().includes(q) ||
-        p.brand.toLowerCase().includes(q) ||
-        p.activeIngredient.toLowerCase().includes(q)
-    );
-  }
-
-  return { items: filtered, total: filtered.length };
+  return {
+    items: [],
+    total: 0,
+    availableBrands: [],
+    availableOrigins: [],
+    availableDosageForms: [],
+  };
 }
 
 export async function getStoreProductBySlug(slug: string): Promise<Product | null> {
@@ -90,10 +123,7 @@ export async function getStoreProductBySlug(slug: string): Promise<Product | nul
       return await res.json();
     }
   } catch (err) {
-    console.warn("Backend API unavailable for product detail, using local product catalog:", err);
+    console.warn("Backend API unavailable for product detail:", err);
   }
-
-  // Fallback to local catalog
-  const found = PRODUCTS_DATA.find((p) => p.slug === slug || p.id === slug);
-  return found || null;
+  return null;
 }

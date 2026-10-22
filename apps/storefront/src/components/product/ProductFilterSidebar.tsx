@@ -17,6 +17,9 @@ interface ProductFilterSidebarProps {
   onFilterChange: (newFilters: ProductFilterState) => void;
   onResetFilters: () => void;
   totalProducts: number;
+  availableBrands?: string[];
+  availableOrigins?: string[];
+  availableDosageForms?: string[];
 }
 
 const BRANDS_LIST = [
@@ -67,7 +70,13 @@ export const ProductFilterSidebar: React.FC<ProductFilterSidebarProps> = ({
   onFilterChange,
   onResetFilters,
   totalProducts,
+  availableBrands,
+  availableOrigins,
+  availableDosageForms,
 }) => {
+  const displayBrands = availableBrands && availableBrands.length > 0 ? availableBrands : BRANDS_LIST;
+  const displayOrigins = availableOrigins && availableOrigins.length > 0 ? availableOrigins : ORIGINS_LIST;
+  const displayDosageForms = availableDosageForms && availableDosageForms.length > 0 ? availableDosageForms : DOSAGE_FORMS;
   const [openSections, setOpenSections] = useState({
     category: true,
     prescription: true,
@@ -305,7 +314,7 @@ export const ProductFilterSidebar: React.FC<ProductFilterSidebarProps> = ({
 
         {openSections.brand && (
           <div className="max-h-48 overflow-y-auto space-y-1.5 pt-1 pr-1 custom-scrollbar">
-            {BRANDS_LIST.map((brand) => {
+            {displayBrands.map((brand) => {
               const isChecked = filters.brand.includes(brand);
               return (
                 <label
@@ -343,7 +352,7 @@ export const ProductFilterSidebar: React.FC<ProductFilterSidebarProps> = ({
 
         {openSections.dosageForm && (
           <div className="max-h-40 overflow-y-auto space-y-1.5 pt-1 pr-1 custom-scrollbar">
-            {DOSAGE_FORMS.map((form) => {
+            {displayDosageForms.map((form) => {
               const isChecked = filters.dosageForm.includes(form);
               return (
                 <label
@@ -381,7 +390,7 @@ export const ProductFilterSidebar: React.FC<ProductFilterSidebarProps> = ({
 
         {openSections.origin && (
           <div className="max-h-40 overflow-y-auto space-y-1.5 pt-1 pr-1 custom-scrollbar">
-            {ORIGINS_LIST.map((origin) => {
+            {displayOrigins.map((origin) => {
               const isChecked = filters.origin.includes(origin);
               return (
                 <label

@@ -3,13 +3,62 @@ import re
 from typing import List, Optional, Tuple
 
 from sqlalchemy import or_, select, text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
-from app.models import CanonicalProduct, ProductIngredient
+from app.models import CanonicalProduct, Ingredient, ProductIngredient
 from app.models.enums import PublishStatus
 from app.services.normalization import normalize_for_match, strip_accents
 
 logger = logging.getLogger("pharmatrust.search")
+
+# Từ điển đồng nghĩa dược phẩm chuẩn hóa (Active ingredients <-> Common brand names)
+# TUYỆT ĐỐI KHÔNG SUY DIỄN BỆNH LÝ NGUY HIỂM SANG THUỐC KÊ ĐƠN (Rx)
+CURATED_PHARMACY_SYNONYMS: dict[str, list[str]] = {
+    "paracetamol": ["hapacol", "efferalgan", "panadol", "acetaminophen"],
+    "acetaminophen": ["paracetamol", "hapacol", "efferalgan", "panadol"],
+    "hapacol": ["paracetamol"],
+    "efferalgan": ["paracetamol"],
+    "panadol": ["paracetamol"],
+    "ibuprofen": ["gofen", "advil"],
+    "cetirizine": ["zyrtec"],
+    "loratadine": ["clarityne", "loratadin"],
+    "fexofenadine": ["telfast"],
+    "telfast": ["fexofenadine"],
+    "diosmectite": ["smecta"],
+    "smecta": ["diosmectite"],
+    "berberin": ["berberine"],
+    "berberine": ["berberin"],
+    "prospan": ["cao la thuong xuan", "siro ho"],
+    "gaviscon": ["antacid", "da day"],
+    "vitamin c": ["acid ascorbic", "ceelin"],
+    "oresol": ["o resol", "hydrite", "bu nuoc"],
+}
+
+# Từ điển sửa lỗi chính tả thường gặp khi tìm kiếm thuốc tại Việt Nam
+COMMON_MISSPELLINGS: dict[str, str] = {
+    "paracetamon": "paracetamol",
+    "paracetamoll": "paracetamol",
+    "parasitamol": "paracetamol",
+    "paracelamol": "paracetamol",
+    "panadoll": "panadol",
+    "panadon": "panadol",
+    "efferalgane": "efferalgan",
+    "eferalgan": "efferalgan",
+    "efferalgang": "efferalgan",
+    "hapacool": "hapacol",
+    "berberine": "berberin",
+    "beberin": "berberin",
+    "smacta": "smecta",
+    "smeta": "smecta",
+    "prospam": "prospan",
+    "prospant": "prospan",
+    "gavisconne": "gaviscon",
+    "loratadin": "loratadine",
+    "cetirizin": "cetirizine",
+    "fexofenadin": "fexofenadine",
+    "vitaminc": "vitamin c",
+    "omega3": "omega 3",
+}
 
 
 def _is_sqlite(db: Session) -> bool:
@@ -124,14 +173,21 @@ def search_product_ids_fts(
 ) -> List[int]:
     """
     Tìm kiếm danh sách ID sản phẩm theo thứ tự độ liên quan.
-    Hỗ trợ tiếng Việt có dấu, không dấu, tìm theo hoạt chất, bệnh lý/triệu chứng.
-    Tự động tương thích cả SQLite FTS5 lẫn Neon PostgreSQL.
+    Hỗ trợ tiếng Việt có dấu, không dấu, tìm theo tên thương mại, hoạt chất, số ĐK, NSX.
+    Tự động áp dụng từ điển đồng nghĩa & sửa lỗi chính tả thường gặp.
+    Tương thích cả SQLite FTS5 lẫn Neon PostgreSQL.
     """
     clean_q = query.strip()[:100]
     if not clean_q or len(clean_q) < 2:
         return []
 
-    unaccent_q = strip_accents(clean_q).lower()
+    # Sửa lỗi chính tả thường gặp
+    lower_q = clean_q.lower()
+    corrected_q = COMMON_MISSPELLINGS.get(lower_q, lower_q)
+    unaccent_q = strip_accents(corrected_q).lower()
+
+    # Mở rộng từ đồng nghĩa dược khoa hợp lệ
+    synonyms = CURATED_PHARMACY_SYNONYMS.get(unaccent_q, [])
 
     if _is_sqlite(db):
         words = [re.sub(r"[^\w\d]", "", w) for w in unaccent_q.split() if len(w) > 1]
@@ -161,37 +217,64 @@ def search_product_ids_fts(
             except Exception as e:
                 logger.debug(f"FTS5 query không thành công, chuyển sang fallback ranking: {e}")
 
-    # Fallback chuẩn hóa an toàn trên PostgreSQL (Neon) và SQLite
-    return _fallback_weighted_search(db, clean_q, unaccent_q, limit, offset)
+    # Fallback chuẩn hóa an toàn trên PostgreSQL (Neon) và SQLite với từ đồng nghĩa & đa trường
+    return _fallback_weighted_search(db, corrected_q, unaccent_q, synonyms=synonyms, limit=limit, offset=offset)
 
 
 def _fallback_weighted_search(
     db: Session,
     query: str,
     unaccent_q: str,
-    limit: int,
-    offset: int,
+    synonyms: list[str] | None = None,
+    limit: int = 50,
+    offset: int = 0,
 ) -> List[int]:
     """
     Tìm kiếm dự phòng dựa trên SQL LIKE kết hợp tính điểm liên quan đa trường.
+    Bao gồm tên thuốc, hoạt chất (ProductIngredient), số đăng ký, chỉ định, nhà sản xuất.
     """
+    if synonyms is None:
+        synonyms = []
+
     pattern_orig = f"%{query}%"
     pattern_unaccent = f"%{unaccent_q}%"
 
-    products = db.scalars(
-        select(CanonicalProduct).where(
-            or_(
-                CanonicalProduct.canonical_name.ilike(pattern_orig),
-                CanonicalProduct.registration_number.ilike(pattern_orig),
-                CanonicalProduct.indications.ilike(pattern_orig),
-                CanonicalProduct.description.ilike(pattern_orig),
-                CanonicalProduct.manufacturer.ilike(pattern_orig),
-            )
+    search_conditions = [
+        CanonicalProduct.canonical_name.ilike(pattern_orig),
+        CanonicalProduct.canonical_name.ilike(pattern_unaccent),
+        CanonicalProduct.registration_number.ilike(pattern_orig),
+        CanonicalProduct.indications.ilike(pattern_orig),
+        CanonicalProduct.indications.ilike(pattern_unaccent),
+        CanonicalProduct.description.ilike(pattern_orig),
+        CanonicalProduct.manufacturer.ilike(pattern_orig),
+        Ingredient.normalized_name.ilike(pattern_orig),
+        Ingredient.normalized_name.ilike(pattern_unaccent),
+    ]
+
+    for syn in synonyms[:4]:
+        search_conditions.append(CanonicalProduct.canonical_name.ilike(f"%{syn}%"))
+        search_conditions.append(Ingredient.normalized_name.ilike(f"%{syn}%"))
+
+    products_query = (
+        select(CanonicalProduct)
+        .options(
+            selectinload(CanonicalProduct.ingredients).selectinload(ProductIngredient.ingredient)
         )
-    ).all()
+        .join(ProductIngredient, ProductIngredient.product_id == CanonicalProduct.id, isouter=True)
+        .join(Ingredient, Ingredient.id == ProductIngredient.ingredient_id, isouter=True)
+        .where(
+            CanonicalProduct.publish_status == PublishStatus.PUBLISHED,
+            or_(*search_conditions),
+        )
+        .distinct()
+    )
+
+    products = db.scalars(products_query).all()
 
     # Tính điểm liên quan cho từng sản phẩm
     scored_products: List[Tuple[int, int]] = []
+    query_tokens = [w for w in unaccent_q.split() if len(w) > 1]
+
     for p in products:
         score = 0
         name = (p.canonical_name or "").lower()
@@ -199,19 +282,52 @@ def _fallback_weighted_search(
         reg = (p.registration_number or "").lower()
         ind = strip_accents(p.indications or "").lower()
         desc = strip_accents(p.description or "").lower()
+        mfg = strip_accents(p.manufacturer or "").lower()
 
         # 1. Khớp chính xác tên thuốc
-        if unaccent_q in uname:
+        if unaccent_q == uname:
+            score += 200
+        elif uname.startswith(unaccent_q):
+            score += 150
+        elif unaccent_q in uname:
             score += 100
-            if uname.startswith(unaccent_q):
-                score += 50
+
+        # Khớp từng từ đơn lẻ trong tên thuốc
+        for token in query_tokens:
+            if token in uname:
+                score += 30
+
         # 2. Khớp số đăng ký
         if unaccent_q in reg:
-            score += 80
-        # 3. Khớp chỉ định / công dụng y khoa
+            score += 120
+
+        # 3. Khớp hoạt chất (Active Ingredients)
+        if p.ingredients:
+            for pi in p.ingredients:
+                if pi.ingredient and pi.ingredient.normalized_name:
+                    ing_name = strip_accents(pi.ingredient.normalized_name.lower())
+                    if unaccent_q in ing_name:
+                        score += 110
+                    for token in query_tokens:
+                        if token in ing_name:
+                            score += 25
+                    if pi.original_strength_text and any(tok in pi.original_strength_text.lower() for tok in query_tokens):
+                        score += 40
+
+        # 4. Khớp từ đồng nghĩa
+        for syn in synonyms:
+            if syn in uname:
+                score += 70
+
+        # 5. Khớp nhà sản xuất
+        if unaccent_q in mfg:
+            score += 50
+
+        # 6. Khớp chỉ định / công dụng y khoa
         if unaccent_q in ind:
             score += 40
-        # 4. Khớp mô tả
+
+        # 7. Khớp mô tả
         if unaccent_q in desc:
             score += 20
 

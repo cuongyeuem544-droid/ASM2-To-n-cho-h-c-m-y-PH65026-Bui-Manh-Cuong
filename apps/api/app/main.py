@@ -21,6 +21,19 @@ async def lifespan(_: FastAPI):
     # Khởi động Scheduler cào tự động 24/7
     if settings.auto_crawl_enabled:
         scheduler.start()
+
+    # Tự động nạp danh mục tiêu chuẩn nếu bảng danh mục còn trống
+    try:
+        from app.db.session import SessionLocal
+        from app.models.classification import Category
+        from app.services.category_service import seed_standard_categories
+        with SessionLocal() as db:
+            if db.query(Category).count() == 0:
+                seed_standard_categories(db)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("Category auto-seed during startup skipped: %s", exc)
+
     yield
     scheduler.stop()
 

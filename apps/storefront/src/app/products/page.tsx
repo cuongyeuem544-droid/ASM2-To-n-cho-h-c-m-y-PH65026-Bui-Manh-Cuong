@@ -25,6 +25,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { getStoreProducts } from "@/lib/api/products";
 
 const INITIAL_FILTERS: ProductFilterState = {
   category: "",
@@ -36,7 +37,7 @@ const INITIAL_FILTERS: ProductFilterState = {
   prescriptionType: "all",
 };
 
-const ITEMS_PER_PAGE = 8;
+const ITEMS_PER_PAGE = 12;
 
 function ProductsContent() {
   const router = useRouter();
@@ -45,6 +46,12 @@ function ProductsContent() {
   const categoryParam = searchParams.get("category") || "";
 
   const [products, setProducts] = useState<Product[]>([]);
+  const [totalProducts, setTotalProducts] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [availableBrands, setAvailableBrands] = useState<string[]>([]);
+  const [availableOrigins, setAvailableOrigins] = useState<string[]>([]);
+  const [availableDosageForms, setAvailableDosageForms] = useState<string[]>([]);
+
   const [filters, setFilters] = useState<ProductFilterState>(() => ({
     ...INITIAL_FILTERS,
     category: categoryParam,
@@ -63,41 +70,42 @@ function ProductsContent() {
   useEffect(() => {
     if (categoryParam) {
       setFilters((prev) => ({ ...prev, category: categoryParam }));
+      setCurrentPage(1);
     }
   }, [categoryParam]);
 
-  // Dynamically sync products from FastAPI backend based on searchParamQuery and prescriptionType
+  // Dynamically sync products from FastAPI backend based on filters, pagination, sort, search
   useEffect(() => {
     let isMounted = true;
     setIsLoading(true);
 
-    const queryParts = ["limit=300"];
-    if (searchParamQuery.trim()) {
-      queryParts.push(`search=${encodeURIComponent(searchParamQuery.trim())}`);
-    }
-    if (filters.prescriptionType && filters.prescriptionType !== "all") {
-      queryParts.push(`prescriptionType=${filters.prescriptionType}`);
-    } else {
-      queryParts.push("prescriptionType=all");
-    }
-
-    const url = `/api/v1/store/products?${queryParts.join("&")}`;
-
-    fetch(url)
+    getStoreProducts({
+      page: currentPage,
+      pageSize: ITEMS_PER_PAGE,
+      search: searchParamQuery.trim() || undefined,
+      category: filters.category || undefined,
+      prescriptionType: filters.prescriptionType,
+      brand: filters.brand.length > 0 ? filters.brand : undefined,
+      origin: filters.origin.length > 0 ? filters.origin : undefined,
+      dosageForm: filters.dosageForm.length > 0 ? filters.dosageForm : undefined,
+      priceRange: filters.priceRange || undefined,
+      sort: sortOption,
+    })
       .then((res) => {
-        if (!res.ok) throw new Error("API error");
-        return res.json();
-      })
-      .then((data) => {
         if (!isMounted) return;
-        if (data?.items && Array.isArray(data.items)) {
-          setProducts(data.items);
-        }
+        setProducts(res.items || []);
+        setTotalProducts(res.total || 0);
+        setTotalPages(res.totalPages || 1);
+        if (res.availableBrands?.length) setAvailableBrands(res.availableBrands);
+        if (res.availableOrigins?.length) setAvailableOrigins(res.availableOrigins);
+        if (res.availableDosageForms?.length) setAvailableDosageForms(res.availableDosageForms);
       })
       .catch((err) => {
         if (!isMounted) return;
         console.warn("FastAPI Storefront error fetching products:", err);
         setProducts([]);
+        setTotalProducts(0);
+        setTotalPages(1);
       })
       .finally(() => {
         if (isMounted) setIsLoading(false);
@@ -106,93 +114,17 @@ function ProductsContent() {
     return () => {
       isMounted = false;
     };
-  }, [searchParamQuery, filters.prescriptionType]);
-
-  // Filter products locally (brand, origin, priceRange, dosageForm, category)
-  const filteredProducts = useMemo(() => {
-    return products.filter((product) => {
-      // Category filter
-      if (filters.category && product.category !== filters.category) {
-        return false;
-      }
-      // Prescription type filter
-      if (filters.prescriptionType === "rx" && !product.isPrescription) {
-        return false;
-      }
-      if (filters.prescriptionType === "otc" && product.isPrescription) {
-        return false;
-      }
-      // Brand filter
-      if (filters.brand.length > 0 && !filters.brand.includes(product.brand)) {
-        return false;
-      }
-      // Origin filter
-      if (filters.origin.length > 0 && !filters.origin.includes(product.origin)) {
-        return false;
-      }
-      // Dosage form filter
-      if (
-        filters.dosageForm.length > 0 &&
-        !filters.dosageForm.includes(product.dosageForm)
-      ) {
-        return false;
-      }
-      // Price range filter
-      const effectivePrice = product.salePrice || product.price;
-      if (filters.priceRange === "under-100" && effectivePrice >= 100000) {
-        return false;
-      }
-      if (
-        filters.priceRange === "100-300" &&
-        (effectivePrice < 100000 || effectivePrice > 300000)
-      ) {
-        return false;
-      }
-      if (
-        filters.priceRange === "300-500" &&
-        (effectivePrice < 300000 || effectivePrice > 500000)
-      ) {
-        return false;
-      }
-      if (filters.priceRange === "above-500" && effectivePrice <= 500000) {
-        return false;
-      }
-
-      return true;
-    });
-  }, [products, filters]);
-
-  // Sort products
-  const sortedProducts = useMemo(() => {
-    const list = [...filteredProducts];
-    switch (sortOption) {
-      case "newest":
-        return list.sort(
-          (a, b) =>
-            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        );
-      case "price-asc":
-        return list.sort(
-          (a, b) => (a.salePrice || a.price) - (b.salePrice || b.price)
-        );
-      case "price-desc":
-        return list.sort(
-          (a, b) => (b.salePrice || b.price) - (a.salePrice || a.price)
-        );
-      case "rating":
-        return list.sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
-      case "popular":
-      default:
-        return list.sort((a, b) => (b.reviewCount ?? 0) - (a.reviewCount ?? 0));
-    }
-  }, [filteredProducts, sortOption]);
-
-  // Pagination logic
-  const totalPages = Math.ceil(sortedProducts.length / ITEMS_PER_PAGE) || 1;
-  const paginatedProducts = useMemo(() => {
-    const start = (currentPage - 1) * ITEMS_PER_PAGE;
-    return sortedProducts.slice(start, start + ITEMS_PER_PAGE);
-  }, [sortedProducts, currentPage]);
+  }, [
+    searchParamQuery,
+    filters.category,
+    filters.prescriptionType,
+    filters.brand,
+    filters.origin,
+    filters.dosageForm,
+    filters.priceRange,
+    sortOption,
+    currentPage,
+  ]);
 
   const handleFilterChange = (newFilters: ProductFilterState) => {
     setFilters(newFilters);
@@ -253,7 +185,7 @@ function ProductsContent() {
                     </h1>
                   </div>
                   <p className="text-xs text-slate-500">
-                    Tìm thấy <span className="font-bold text-slate-800">{filteredProducts.length}</span> sản phẩm phù hợp trong hệ thống nhà thuốc H4CARE.
+                    Tìm thấy <span className="font-bold text-slate-800">{totalProducts}</span> sản phẩm phù hợp trong hệ thống nhà thuốc H4CARE.
                   </p>
                   <div className="mt-2 flex items-start gap-1.5 p-2 rounded-lg bg-amber-50/80 border border-amber-200/60 text-[11px] text-amber-900 max-w-2xl">
                     <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
@@ -298,7 +230,10 @@ function ProductsContent() {
               filters={filters}
               onFilterChange={handleFilterChange}
               onResetFilters={handleResetFilters}
-              totalProducts={filteredProducts.length}
+              totalProducts={totalProducts}
+              availableBrands={availableBrands}
+              availableOrigins={availableOrigins}
+              availableDosageForms={availableDosageForms}
             />
           </aside>
 
@@ -306,7 +241,7 @@ function ProductsContent() {
           <main className="col-span-12 lg:col-span-9 space-y-6">
             {/* Sort and View Options Bar */}
             <ProductSortBar
-              total={filteredProducts.length}
+              total={totalProducts}
               currentSort={sortOption}
               onSortChange={setSortOption}
               gridCols={gridCols}
@@ -382,16 +317,8 @@ function ProductsContent() {
               </div>
             )}
 
-            {/* Loading state indicator */}
-            {isLoading && (
-              <div className="py-12 flex flex-col items-center justify-center gap-3 text-slate-500 bg-white rounded-2xl border border-slate-200/80 p-8 shadow-xs">
-                <Loader2 className="w-8 h-8 animate-spin text-brand-blue-600" />
-                <p className="text-sm font-semibold text-slate-700">Đang tra cứu cơ sở dữ liệu thuốc H4CARE...</p>
-              </div>
-            )}
-
-            {/* Product Cards Grid */}
-            {!isLoading && paginatedProducts.length > 0 ? (
+            {/* Product Cards Grid with Skeleton Loading */}
+            {isLoading ? (
               <div
                 className={`grid grid-cols-2 sm:grid-cols-2 ${
                   gridCols === 4
@@ -399,7 +326,27 @@ function ProductsContent() {
                     : "lg:grid-cols-3 gap-3 sm:gap-5"
                 } items-stretch`}
               >
-                {paginatedProducts.map((product) => (
+                {[...Array(6)].map((_, i) => (
+                  <div
+                    key={i}
+                    className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 animate-pulse space-y-3 shadow-xs"
+                  >
+                    <div className="w-full aspect-square bg-slate-100 rounded-xl" />
+                    <div className="h-4 bg-slate-100 rounded w-3/4" />
+                    <div className="h-3 bg-slate-100 rounded w-1/2" />
+                    <div className="h-6 bg-slate-100 rounded w-1/3 pt-2" />
+                  </div>
+                ))}
+              </div>
+            ) : products.length > 0 ? (
+              <div
+                className={`grid grid-cols-2 sm:grid-cols-2 ${
+                  gridCols === 4
+                    ? "lg:grid-cols-4 gap-3 sm:gap-4"
+                    : "lg:grid-cols-3 gap-3 sm:gap-5"
+                } items-stretch`}
+              >
+                {products.map((product) => (
                   <ProductCard
                     key={product.id}
                     product={product}
@@ -408,7 +355,7 @@ function ProductsContent() {
                   />
                 ))}
               </div>
-            ) : !isLoading && (
+            ) : (
               <div className="bg-white rounded-2xl border border-slate-200 p-8 sm:p-12 text-center space-y-4 shadow-xs">
                 <div className="w-16 h-16 rounded-2xl bg-brand-blue-50 text-brand-blue-600 flex items-center justify-center mx-auto border border-brand-blue-100 shadow-xs">
                   {searchParamQuery ? (
@@ -523,7 +470,10 @@ function ProductsContent() {
                   filters={filters}
                   onFilterChange={handleFilterChange}
                   onResetFilters={handleResetFilters}
-                  totalProducts={filteredProducts.length}
+                  totalProducts={totalProducts}
+                  availableBrands={availableBrands}
+                  availableOrigins={availableOrigins}
+                  availableDosageForms={availableDosageForms}
                 />
               </div>
             </div>
@@ -535,7 +485,7 @@ function ProductsContent() {
                 className="w-full"
                 onClick={() => setMobileFilterOpen(false)}
               >
-                Áp dụng bộ lọc ({filteredProducts.length})
+                Áp dụng bộ lọc ({totalProducts})
               </Button>
             </div>
           </div>

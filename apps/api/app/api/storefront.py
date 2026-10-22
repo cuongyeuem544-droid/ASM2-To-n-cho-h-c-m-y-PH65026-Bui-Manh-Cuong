@@ -1,4 +1,5 @@
 from datetime import date
+import math
 import re
 import unicodedata
 from typing import Any
@@ -277,6 +278,14 @@ def get_category_products(
     slug: str,
     prescriptionType: str = Query("all", pattern="^(all|otc|rx)$"),
     sort: str = "popular",
+    brand: str | None = None,
+    origin: str | None = None,
+    dosageForm: str | None = None,
+    priceRange: str | None = None,
+    minPrice: int | None = None,
+    maxPrice: int | None = None,
+    page: int = Query(1, ge=1),
+    pageSize: int | None = Query(None, ge=1, le=100),
     limit: int = Query(24, ge=1, le=100),
     offset: int = Query(0, ge=0),
     search: str | None = Query(None, max_length=100),
@@ -287,7 +296,15 @@ def get_category_products(
         category=slug,
         prescriptionType=prescriptionType,
         search=search,
+        brand=brand,
+        origin=origin,
+        dosageForm=dosageForm,
+        priceRange=priceRange,
+        minPrice=minPrice,
+        maxPrice=maxPrice,
         sort=sort,
+        page=page,
+        pageSize=pageSize,
         limit=limit,
         offset=offset,
         db=db,
@@ -303,7 +320,15 @@ def get_store_products(
     tag: str | None = None,
     prescriptionType: str = Query("all", pattern="^(all|otc|rx)$"),
     search: str | None = Query(None, max_length=100),
+    brand: str | None = None,
+    origin: str | None = None,
+    dosageForm: str | None = None,
+    priceRange: str | None = None,
+    minPrice: int | None = None,
+    maxPrice: int | None = None,
     sort: str = "popular",
+    page: int = Query(1, ge=1),
+    pageSize: int | None = Query(None, ge=1, le=100),
     limit: int = Query(150, ge=1, le=300),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -444,29 +469,106 @@ def get_store_products(
 
         serialized.append(item)
 
+    # Collect available facets from the category/search matching products
+    available_brands = set()
+    available_origins = set()
+    available_dosage_forms = set()
+    for item in serialized:
+        if item.get("brand"):
+            available_brands.add(item["brand"])
+        if item.get("origin"):
+            available_origins.add(item["origin"])
+        if item.get("dosageForm"):
+            available_dosage_forms.add(item["dosageForm"])
+
+    # Parse and apply facet filters (brand, origin, dosageForm, price)
+    brand_tokens = [b.strip().lower() for b in str(_unwrap_param(brand, "")).split(",") if b.strip()]
+    origin_tokens = [o.strip().lower() for o in str(_unwrap_param(origin, "")).split(",") if o.strip()]
+    dosage_tokens = [d.strip().lower() for d in str(_unwrap_param(dosageForm, "")).split(",") if d.strip()]
+    price_range_str = str(_unwrap_param(priceRange, "")).strip()
+    min_p = _unwrap_param(minPrice, None)
+    max_p = _unwrap_param(maxPrice, None)
+
+    filtered_items = []
+    for item in serialized:
+        if brand_tokens:
+            b_val = (item.get("brand") or "").lower()
+            if not any(bt in b_val for bt in brand_tokens):
+                continue
+        if origin_tokens:
+            o_val = (item.get("origin") or "").lower()
+            if not any(ot in o_val for ot in origin_tokens):
+                continue
+        if dosage_tokens:
+            d_val = (item.get("dosageForm") or "").lower()
+            if not any(dt in d_val for dt in dosage_tokens):
+                continue
+        cur_p = item.get("price") or 0
+        if min_p is not None and cur_p < min_p:
+            continue
+        if max_p is not None and cur_p > max_p:
+            continue
+        if price_range_str:
+            if price_range_str == "under-100" and cur_p >= 100000:
+                continue
+            elif price_range_str == "100-300" and (cur_p < 100000 or cur_p > 300000):
+                continue
+            elif price_range_str == "300-500" and (cur_p < 300000 or cur_p > 500000):
+                continue
+            elif price_range_str == "above-500" and cur_p <= 500000:
+                continue
+
+        filtered_items.append(item)
+
     # Sort
     if search_term and fts_ids and sort_mode == "popular":
         rank_dict = {pid: idx for idx, pid in enumerate(fts_ids)}
-        serialized.sort(key=lambda x: rank_dict.get(x["dbId"], 9999))
+        filtered_items.sort(key=lambda x: rank_dict.get(x["dbId"], 9999))
     elif sort_mode == "newest":
-        serialized.sort(key=lambda x: x["dbId"], reverse=True)
+        filtered_items.sort(key=lambda x: x["dbId"], reverse=True)
     elif sort_mode == "price-asc":
-        serialized.sort(key=lambda x: x["price"])
+        filtered_items.sort(key=lambda x: x["price"])
     elif sort_mode == "price-desc":
-        serialized.sort(key=lambda x: x["price"], reverse=True)
+        filtered_items.sort(key=lambda x: x["price"], reverse=True)
     elif sort_mode == "rating":
-        serialized.sort(key=lambda x: x["rating"], reverse=True)
+        filtered_items.sort(key=lambda x: x["rating"], reverse=True)
     else:  # popular / default
-        serialized.sort(key=lambda x: (not x["isBestSeller"], not x["isFeatured"], x["dbId"]))
+        filtered_items.sort(key=lambda x: (not x["isBestSeller"], not x["isFeatured"], x["dbId"]))
 
-    total = len(serialized)
-    paged_items = serialized[offset_num : offset_num + limit_num]
+    total = len(filtered_items)
+
+    # Calculate pagination params (page & pageSize take precedence over offset & limit)
+    raw_page_size = _unwrap_param(pageSize, None)
+    raw_page = _unwrap_param(page, 1)
+    if raw_page_size is not None:
+        try:
+            page_size_num = max(1, min(100, int(raw_page_size)))
+        except (TypeError, ValueError):
+            page_size_num = 12
+        try:
+            page_num = max(1, int(raw_page))
+        except (TypeError, ValueError):
+            page_num = 1
+        limit_num = page_size_num
+        offset_num = (page_num - 1) * page_size_num
+        current_page = page_num
+    else:
+        current_page = (offset_num // limit_num) + 1 if limit_num else 1
+
+    total_pages = math.ceil(total / limit_num) if limit_num else 1
+    paged_items = filtered_items[offset_num : offset_num + limit_num]
 
     return {
         "items": paged_items,
         "total": total,
+        "page": current_page,
+        "pageSize": limit_num,
+        "totalPages": total_pages,
         "limit": limit_num,
         "offset": offset_num,
+        "availableBrands": sorted(list(available_brands)),
+        "availableOrigins": sorted(list(available_origins)),
+        "availableDosageForms": sorted(list(available_dosage_forms)),
     }
 
 
