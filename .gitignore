@@ -8,13 +8,22 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+# Prescription and health document storage (Strict privacy - NEVER COMMIT)
+apps/storefront/storage/
+apps/api/storage/
+storage/
+!storage/**/.gitkeep
 test_storage/
-.coverage
-htmlcov/
+
+# Database files and backups
 *.db
-*.db-shm
-*.db-wal
+*.db*
+*.bak
+*.bak*
+*.backup*
 *.sqlite3
+pharmatrust.db*
+
 node_modules/
 dist/
 .vite/

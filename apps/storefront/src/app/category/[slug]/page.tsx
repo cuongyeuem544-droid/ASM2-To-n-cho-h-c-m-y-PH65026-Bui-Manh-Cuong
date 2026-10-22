@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { useParams, notFound } from "next/navigation";
+import { useParams } from "next/navigation";
 import { Header } from "@/components/layout/Header";
 import { CATEGORIES_DATA } from "@/data/mockData";
 import { getStoreCategoriesTree, getStoreProducts } from "@/lib/api/products";
@@ -15,49 +15,31 @@ import { RxConsultModal } from "@/components/product/RxConsultModal";
 import { FptPolyBadge } from "@/components/branding/FptPolyBadge";
 import {
   ChevronRight,
+  ChevronLeft,
   Home,
   PackageOpen,
   RotateCcw,
   ShieldCheck,
-  CheckCircle2,
   Sparkles,
-  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+
+const ITEMS_PER_PAGE = 12;
 
 export default function CategoryPage() {
   const params = useParams();
   const slug = params?.slug as string;
 
   const [categories, setCategories] = useState<Category[]>(CATEGORIES_DATA);
-  const [apiProducts, setApiProducts] = useState<Product[]>([]);
-  const [isLoadingProducts, setIsLoadingProducts] = useState(false);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [totalProducts, setTotalProducts] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [isLoadingProducts, setIsLoadingProducts] = useState(true);
 
-  useEffect(() => {
-    let mounted = true;
-    getStoreCategoriesTree().then((cats) => {
-      if (mounted && cats?.length) setCategories(cats);
-    });
-    return () => { mounted = false; };
-  }, []);
-
-  useEffect(() => {
-    let mounted = true;
-    setIsLoadingProducts(true);
-    getStoreProducts({ category: slug, limit: 120 })
-      .then((res) => {
-        if (mounted && res?.items) {
-          setApiProducts(res.items);
-        }
-      })
-      .finally(() => {
-        if (mounted) setIsLoadingProducts(false);
-      });
-    return () => { mounted = false; };
-  }, [slug]);
-
-  // Find corresponding category from dynamic tree or mockData
-  const currentCategory = categories.find((c) => c.slug === slug) || CATEGORIES_DATA.find((c) => c.slug === slug);
+  // Facet data from backend
+  const [availableBrands, setAvailableBrands] = useState<string[]>([]);
+  const [availableOrigins, setAvailableOrigins] = useState<string[]>([]);
+  const [availableDosageForms, setAvailableDosageForms] = useState<string[]>([]);
 
   const [activeSubCategory, setActiveSubCategory] = useState<string>("");
   const [sortOption, setSortOption] = useState<ProductSortOption>("popular");
@@ -80,82 +62,74 @@ export default function CategoryPage() {
     prescriptionType: "all",
   });
 
-  const sourceProducts = apiProducts;
-
-  // Filter products by category and active filters
-  const categoryProducts = useMemo(() => {
-    return sourceProducts.filter((p) => {
-      // Must match current category
-      if (p.category !== slug && p.subCategory !== slug) return false;
-
-      // Subcategory filter if selected
-      if (activeSubCategory && p.subCategory !== activeSubCategory) {
-        return false;
-      }
-
-      // Prescription type filter
-      if (filters.prescriptionType === "rx" && !p.isPrescription) return false;
-      if (filters.prescriptionType === "otc" && p.isPrescription) return false;
-
-      // Brand filter
-      if (filters.brand.length > 0 && !filters.brand.includes(p.brand)) {
-        return false;
-      }
-
-      // Origin filter
-      if (filters.origin.length > 0 && !filters.origin.includes(p.origin)) {
-        return false;
-      }
-
-      // Price range filter
-      const effectivePrice = p.salePrice || p.price;
-      if (filters.priceRange === "under-100" && effectivePrice >= 100000) return false;
-      if (
-        filters.priceRange === "100-300" &&
-        (effectivePrice < 100000 || effectivePrice > 300000)
-      )
-        return false;
-      if (
-        filters.priceRange === "300-500" &&
-        (effectivePrice < 300000 || effectivePrice > 500000)
-      )
-        return false;
-      if (filters.priceRange === "above-500" && effectivePrice <= 500000) return false;
-
-      return true;
+  // Load category tree once
+  useEffect(() => {
+    let mounted = true;
+    getStoreCategoriesTree().then((cats) => {
+      if (mounted && cats?.length) setCategories(cats);
     });
-  }, [slug, activeSubCategory, filters]);
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
-  // Sort products
-  const sortedProducts = useMemo(() => {
-    const list = [...categoryProducts];
-    switch (sortOption) {
-      case "newest":
-        return list.sort(
-          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        );
-      case "price-asc":
-        return list.sort(
-          (a, b) => (a.salePrice || a.price) - (b.salePrice || b.price)
-        );
-      case "price-desc":
-        return list.sort(
-          (a, b) => (b.salePrice || b.price) - (a.salePrice || a.price)
-        );
-      case "rating":
-        return list.sort((a, b) => b.rating - a.rating);
-      case "popular":
-      default:
-        return list.sort((a, b) => b.reviewCount - a.reviewCount);
-    }
-  }, [categoryProducts, sortOption]);
+  // Sync category changes
+  useEffect(() => {
+    setFilters((prev) => ({
+      ...prev,
+      category: slug,
+      subCategory: "",
+    }));
+    setActiveSubCategory("");
+    setCurrentPage(1);
+  }, [slug]);
 
-  const ITEMS_PER_PAGE = 8;
-  const totalPages = Math.ceil(sortedProducts.length / ITEMS_PER_PAGE) || 1;
-  const paginatedProducts = useMemo(() => {
-    const start = (currentPage - 1) * ITEMS_PER_PAGE;
-    return sortedProducts.slice(start, start + ITEMS_PER_PAGE);
-  }, [sortedProducts, currentPage]);
+  // Server-side fetching: pagination, sort, facet filtering
+  useEffect(() => {
+    let mounted = true;
+    setIsLoadingProducts(true);
+
+    getStoreProducts({
+      page: currentPage,
+      pageSize: ITEMS_PER_PAGE,
+      category: slug,
+      subCategory: activeSubCategory || undefined,
+      prescriptionType: filters.prescriptionType,
+      brand: filters.brand.length > 0 ? filters.brand : undefined,
+      origin: filters.origin.length > 0 ? filters.origin : undefined,
+      dosageForm: filters.dosageForm.length > 0 ? filters.dosageForm : undefined,
+      priceRange: filters.priceRange || undefined,
+      sort: sortOption,
+    })
+      .then((res) => {
+        if (!mounted) return;
+        setProducts(res?.items || []);
+        setTotalProducts(res?.total || 0);
+        setTotalPages(res?.totalPages || 1);
+        if (res?.availableBrands?.length) setAvailableBrands(res.availableBrands);
+        if (res?.availableOrigins?.length) setAvailableOrigins(res.availableOrigins);
+        if (res?.availableDosageForms?.length) setAvailableDosageForms(res.availableDosageForms);
+      })
+      .catch((err) => {
+        console.warn("Error fetching category products:", err);
+        if (mounted) {
+          setProducts([]);
+          setTotalProducts(0);
+          setTotalPages(1);
+        }
+      })
+      .finally(() => {
+        if (mounted) setIsLoadingProducts(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [slug, activeSubCategory, filters, sortOption, currentPage]);
+
+  const currentCategory =
+    categories.find((c) => c.slug === slug) ||
+    CATEGORIES_DATA.find((c) => c.slug === slug);
 
   const handleSubCategorySelect = (subSlug: string) => {
     setActiveSubCategory(activeSubCategory === subSlug ? "" : subSlug);
@@ -242,7 +216,7 @@ export default function CategoryPage() {
               </div>
               <div>
                 <p className="font-bold text-white">Tư Vấn Đúng Bệnh, Đúng Thuốc</p>
-                <p className="text-[11px] text-cyan-300">Dược sĩ Đại học phản hồi trong 5 phút</p>
+                <p className="text-[11px] text-cyan-300">Dược sĩ chuyên môn tận tâm tư vấn (8h00 - 21h30)</p>
               </div>
             </div>
           </div>
@@ -293,16 +267,22 @@ export default function CategoryPage() {
                 setCurrentPage(1);
               }}
               onResetFilters={handleResetFilters}
-              totalProducts={categoryProducts.length}
+              totalProducts={totalProducts}
+              availableBrands={availableBrands}
+              availableOrigins={availableOrigins}
+              availableDosageForms={availableDosageForms}
             />
           </aside>
 
           {/* Main Cards List */}
           <main className="col-span-12 lg:col-span-9 space-y-6">
             <ProductSortBar
-              total={categoryProducts.length}
+              total={totalProducts}
               currentSort={sortOption}
-              onSortChange={setSortOption}
+              onSortChange={(s) => {
+                setSortOption(s);
+                setCurrentPage(1);
+              }}
               gridCols={gridCols}
               onGridColsChange={setGridCols}
               onOpenMobileFilter={() => setMobileFilterOpen(true)}
@@ -326,13 +306,13 @@ export default function CategoryPage() {
                   </div>
                 ))}
               </div>
-            ) : paginatedProducts.length > 0 ? (
+            ) : products.length > 0 ? (
               <div
                 className={`grid grid-cols-1 sm:grid-cols-2 ${
                   gridCols === 4 ? "lg:grid-cols-4 gap-4" : "lg:grid-cols-3 gap-5"
                 }`}
               >
-                {paginatedProducts.map((product) => (
+                {products.map((product) => (
                   <ProductCard
                     key={product.id}
                     product={product}
@@ -362,6 +342,39 @@ export default function CategoryPage() {
                 >
                   Xóa bộ lọc
                 </Button>
+              </div>
+            )}
+
+            {/* Pagination Controls */}
+            {!isLoadingProducts && totalPages > 1 && (
+              <div className="flex items-center justify-center gap-2 pt-6">
+                <button
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="p-2 rounded-xl border border-slate-200 bg-white text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 transition-colors shadow-xs"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                  <button
+                    key={page}
+                    onClick={() => setCurrentPage(page)}
+                    className={`w-9 h-9 rounded-xl text-xs font-bold transition-all shadow-xs ${
+                      currentPage === page
+                        ? "bg-brand-blue-600 text-white shadow-brand-blue-500/20 shadow-md"
+                        : "bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    {page}
+                  </button>
+                ))}
+                <button
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  className="p-2 rounded-xl border border-slate-200 bg-white text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 transition-colors shadow-xs"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
               </div>
             )}
           </main>

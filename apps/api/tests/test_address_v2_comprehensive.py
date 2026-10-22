@@ -73,11 +73,16 @@ class TestAddressV2Comprehensive(unittest.TestCase):
                 manufacturing_country="Việt Nam",
                 package_description="Lọ 100 viên",
                 publish_status=PublishStatus.PUBLISHED,
+                publish_mode="SALE_ELIGIBLE",
                 rx_otc_status=RxOtcStatus.OTC,
             )
             cls.db.add(prod)
             cls.db.commit()
             cls.db.refresh(prod)
+        else:
+            prod.publish_mode = "SALE_ELIGIBLE"
+            prod.publish_status = PublishStatus.PUBLISHED
+            cls.db.commit()
         cls.test_prod_id = prod.id
 
         price_obs = cls.db.query(PriceObservation).filter_by(product_id=prod.id).first()

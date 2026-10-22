@@ -1,3 +1,4 @@
+from pydantic import BaseModel
 from datetime import date
 import math
 import re
@@ -184,12 +185,12 @@ def serialize_product(
                 eligibility_tier = "OUT_OF_STOCK"
                 primary_reason = "Tạm hết hàng hoặc các lô thuốc đã hết hạn sử dụng."
             elif is_rx:
-                cta_type = "RESERVE_RX"
-                cta_label = "Đặt Giữ Chỗ / Tư Vấn Toa"
-                eligibility_tier = "PRESCRIPTION_RESERVATION"
-                is_sale_eligible = True
+                cta_type = "RX_PRESCRIPTION"
+                cta_label = "Gửi Đơn Thuốc Để Dược Sĩ Tư Vấn"
+                eligibility_tier = "PRESCRIPTION_RESTRICTED"
+                is_sale_eligible = False
                 can_add_to_cart = False
-                primary_reason = "Thuốc kê đơn: Cần có đơn thuốc bác sĩ để Dược sĩ tư vấn cấp phát."
+                primary_reason = "Thuốc kê đơn (Rx) không được phép bán trực tuyến theo quy định của Bộ Y Tế. Cần có đơn thuốc để Dược sĩ kiểm tra và tư vấn."
             elif product.publish_mode == "REFERENCE_ONLY":
                 cta_type = "CONSULT_PHARMACIST"
                 cta_label = "Tra Cứu Y Tế"
@@ -217,7 +218,7 @@ def serialize_product(
         "name": product.canonical_name,
         "slug": slug,
         "sku": product.registration_number or f"PT-MED-{product.id:04d}",
-        "brand": product.manufacturer or "PharmaTrust",
+        "brand": product.manufacturer or "Đang cập nhật",
         "productType": getattr(product, "product_type", "MEDICINE") or "MEDICINE",
         "prescriptionStatus": getattr(product, "prescription_status", "RX" if is_rx else "OTC") or ("RX" if is_rx else "OTC"),
         "category": cat_slug,
@@ -230,10 +231,10 @@ def serialize_product(
         "shortDescription": (product.description[:180] + "...") if product.description and len(product.description) > 180 else (product.indications or product.canonical_name),
         "description": product.description or product.indications or product.canonical_name,
         "activeIngredient": ingredients_str,
-        "dosageForm": product.dosage_form or "Viên nén",
-        "packaging": product.package_description or "Hộp tiêu chuẩn",
-        "origin": product.manufacturing_country or "Việt Nam",
-        "manufacturer": product.manufacturer or "PharmaTrust Hợp Tác",
+        "dosageForm": product.dosage_form or "Đang cập nhật theo hồ sơ đăng ký",
+        "packaging": product.package_description or "Đang cập nhật theo hồ sơ đăng ký",
+        "origin": product.manufacturing_country or "Chưa có thông tin xuất xứ",
+        "manufacturer": product.manufacturer or "Đang cập nhật theo hồ sơ đăng ký",
         "usage": product.usage_instructions or "Dùng theo chỉ định của bác sĩ/dược sĩ hoặc đọc kỹ hướng dẫn sử dụng trong hộp thuốc.",
         "indications": product.indications or "Chỉ định điều trị theo công bố của nhà sản xuất và Cục Quản lý Dược.",
         "contraindications": product.contraindications or "Mẫn cảm với bất kỳ thành phần nào của thuốc. Phụ nữ có thai và cho con bú cần hỏi ý kiến bác sĩ.",
@@ -388,12 +389,20 @@ def get_store_products(
     reviews_map: dict[int, tuple[float, int]] = {}
     stocks_map: dict[int, int] = {}
     if prod_ids:
-        price_rows = db.query(PriceObservation.product_id, PriceObservation.observed_price).filter(
-            PriceObservation.product_id.in_(prod_ids)
-        ).all()
-        for pid, pval in price_rows:
-            if pid not in prices_map and pval is not None:
-                prices_map[pid] = int(pval)
+        from app.models.inventory import ProductSku
+        sku_prices = db.query(
+            ProductSku.canonical_product_id,
+            ProductSku.base_price,
+            ProductSku.is_default,
+        ).filter(
+            ProductSku.canonical_product_id.in_(prod_ids),
+            ProductSku.is_active == True,
+            ProductSku.base_price.isnot(None),
+            ProductSku.base_price > 0,
+        ).order_by(ProductSku.is_default.desc(), ProductSku.id.asc()).all()
+        for pid, b_price, _ in sku_prices:
+            if pid not in prices_map and b_price:
+                prices_map[pid] = int(b_price)
 
         from app.models.inventory import BatchStatus, InventoryBatch, ProductReview, ProductSku, WarehouseBatchStock
         rev_rows = db.query(
@@ -634,11 +643,10 @@ def get_store_product_detail(
     from app.services.product_eligibility_service import ProductEligibilityService
     eligibility_res = ProductEligibilityService.evaluate_product_eligibility(product, db, sku_id=skuId)
 
-    # Fetch price fallback if not from SKU
-    price_row = db.query(PriceObservation.observed_price).filter(
-        PriceObservation.product_id == product.id
-    ).first()
-    price_val = int(price_row[0]) if (price_row and price_row[0] is not None) else None
+    # Extract official retail price strictly from active SKU
+    price_val = None
+    if eligibility_res.selected_sku and eligibility_res.selected_sku.get("base_price", 0) > 0:
+        price_val = int(eligibility_res.selected_sku["base_price"])
 
     # Fetch real review stats
     from app.models.inventory import ProductReview
@@ -732,3 +740,60 @@ def get_store_categories(db: Session = Depends(get_db)):
             ],
         },
     ]
+
+
+class PrescriptionConsultPayload(BaseModel):
+    product_id: int
+    patient_name: str
+    phone_number: str
+    prescription_file_name: str | None = None
+    storage_key: str | None = None
+    notes: str | None = None
+
+
+@router.post("/prescriptions/consult")
+def submit_prescription_consultation(
+    payload: PrescriptionConsultPayload,
+    db: Session = Depends(get_db),
+):
+    product = db.get(CanonicalProduct, payload.product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Sản phẩm yêu cầu tư vấn không tồn tại")
+
+    # Validate Vietnamese phone number format
+    phone = payload.phone_number.strip().replace(" ", "")
+    if not re.match(r"^(0|\+84)(3|5|7|8|9)[0-9]{8}$", phone):
+        raise HTTPException(status_code=400, detail="Số điện thoại không đúng định dạng Việt Nam")
+
+    patient_name = payload.patient_name.strip()
+    if len(patient_name) < 2:
+        raise HTTPException(status_code=400, detail="Vui lòng nhập họ và tên người bệnh hợp lệ")
+
+    # Save real consult alert for pharmacists
+    from app.models.entities import AdminAlert
+    alert_message = (
+        f"Yêu cầu tư vấn thuốc kê đơn: '{product.canonical_name}' (ID: {product.id}). "
+        f"Bệnh nhân: {patient_name}, SĐT: {phone}. "
+        f"Tệp đơn thuốc: {payload.prescription_file_name or payload.storage_key or 'Không đính kèm'}. "
+        f"Ghi chú: {payload.notes or 'Không có ghi chú thêm.'}"
+    )
+    alert = AdminAlert(
+        source_code="RX_CONSULTATION",
+        alert_type="PRESCRIPTION_CONSULT_REQUEST",
+        severity="INFO",
+        message=alert_message,
+        is_read=False,
+    )
+    db.add(alert)
+    db.commit()
+    db.refresh(alert)
+
+    return {
+        "success": True,
+        "message": "Yêu cầu tư vấn đơn thuốc đã được tiếp nhận thành công",
+        "requestId": alert.id,
+        "productName": product.canonical_name,
+        "patientName": patient_name,
+        "phoneNumber": phone,
+        "consultSla": "Dược sĩ chuyên môn H4CARE sẽ liên hệ tư vấn trong giờ làm việc (8h00 - 21h30 hàng ngày)",
+    }

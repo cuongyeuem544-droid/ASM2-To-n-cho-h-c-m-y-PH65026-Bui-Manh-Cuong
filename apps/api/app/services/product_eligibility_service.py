@@ -58,18 +58,19 @@ class ProductEligibilityResult:
 
 
 class ProductEligibilityService:
-    # Chuẩn số đăng ký lưu hành Cục Quản lý Dược (Bộ Y Tế)
+    # Chuẩn số đăng ký lưu hành chính thức Cục Quản lý Dược (Bộ Y Tế)
+    # Loại bỏ hoàn toàn regex bắt tự do; chỉ chấp nhận các đầu mã lưu hành pháp lý chuẩn
     DAV_REG_REGEX = re.compile(
         r"^(VD|VD3|VN|VN2|VN3|QLĐB|GC)-\d+-\d{2}$"
         r"|^V\d{2,4}-[A-Z]\d{2}-\d{2}$"
         r"|^\d+/\d{4}/(ĐKSP|ATTP-XNCB|ATTP-TNCB)$"
-        r"|^\d{2,5}/(BYT-TB-CT|ĐKLT-BYT)$"
-        r"|^[A-Z0-9\-\.\/]{6,30}$",
+        r"|^\d{2,5}/(BYT-TB-CT|ĐKLT-BYT)$",
         re.IGNORECASE,
     )
 
     @classmethod
-    def is_verified_registration(cls, reg_num: str | None) -> bool:
+    def is_valid_registration_format(cls, reg_num: str | None) -> bool:
+        """Kiểm tra định dạng cấu trúc cú pháp của Số Đăng Ký (FORMAT_VALID)."""
         if not reg_num or not isinstance(reg_num, str):
             return False
         clean = reg_num.strip().upper()
@@ -80,6 +81,50 @@ class ProductEligibilityService:
         return bool(cls.DAV_REG_REGEX.match(clean))
 
     @classmethod
+    def is_verified_registration(cls, reg_num: str | None) -> bool:
+        """Alias tương thích ngược kiểm tra cú pháp SĐK hợp lệ."""
+        return cls.is_valid_registration_format(reg_num)
+
+    @classmethod
+    def verify_official_registration(
+        cls, product: CanonicalProduct, db: Session
+    ) -> tuple[bool, str, list[str]]:
+        """
+        Kiểm tra bằng chứng đối chiếu thực tế với hồ sơ quản lý dược (OFFICIALLY_VERIFIED).
+        Tuyệt đối không dùng độ dài hoặc regex để chứng minh tính pháp lý nếu thiếu chứng cứ.
+        """
+        if not product.registration_number or not isinstance(product.registration_number, str):
+            return False, "MISSING_REGISTRATION", []
+
+        if not cls.is_valid_registration_format(product.registration_number):
+            return False, "INVALID_FORMAT", []
+
+        clean_reg = product.registration_number.strip().upper()
+
+        from app.models.entities import RegulatoryRecord
+        records = db.query(RegulatoryRecord).filter(
+            func.upper(RegulatoryRecord.registration_number) == clean_reg
+        ).all()
+
+        if not records:
+            return False, "FORMAT_VALID_UNVERIFIED_EVIDENCE", []
+
+        sources = []
+        has_verified_record = False
+        for rec in records:
+            if rec.source_url:
+                sources.append(rec.source_url)
+                has_verified_record = True
+            elif rec.official_name:
+                sources.append("Cơ sở dữ liệu Dược thư Cục Quản lý Dược")
+                has_verified_record = True
+
+        if has_verified_record:
+            return True, "OFFICIALLY_VERIFIED", sources
+
+        return False, "FORMAT_VALID_UNVERIFIED_EVIDENCE", []
+
+    @classmethod
     def calculate_transparency_score(cls, product: CanonicalProduct) -> tuple[int, list[str]]:
         """
         Tính điểm mức độ minh bạch và đầy đủ của hồ sơ dược khoa.
@@ -87,7 +132,7 @@ class ProductEligibilityService:
         """
         checklist = [
             ("canonical_name", bool(product.canonical_name), 10),
-            ("registration_number", cls.is_verified_registration(product.registration_number), 20),
+            ("registration_number", cls.is_valid_registration_format(product.registration_number), 20),
             ("manufacturer", bool(product.manufacturer), 10),
             ("dosage_form", bool(product.dosage_form), 10),
             ("indications", bool(product.indications), 10),
@@ -153,13 +198,22 @@ class ProductEligibilityService:
 
         # 2. Tính toán điểm minh bạch dữ liệu H4CARE
         comp_score, missing_fields = cls.calculate_transparency_score(product)
-        is_verified_reg = cls.is_verified_registration(product.registration_number)
-        source_name = (
-            "Dữ liệu Cục Quản lý Dược (Bộ Y Tế) & Hồ sơ nhà sản xuất"
-            if is_verified_reg
-            else "Dữ liệu tra cứu danh mục dược lý tham khảo"
-        )
+        is_format_valid = cls.is_valid_registration_format(product.registration_number)
+        is_officially_verified, reg_status_code, reg_sources = cls.verify_official_registration(product, db)
+
+        if is_officially_verified:
+            source_name = "Dữ liệu Cục Quản lý Dược (Bộ Y Tế) & Hồ sơ pháp lý đã đối chiếu"
+            reg_status_label = "ĐÃ ĐỐI CHIẾU SỐ ĐĂNG KÝ VỚI CƠ QUAN QUẢN LÝ"
+        elif is_format_valid:
+            source_name = "Cấu trúc định dạng SĐK hợp lệ - Đang chờ đối chiếu hồ sơ gốc"
+            reg_status_label = "ĐÚNG ĐỊNH DẠNG SĐK - CHƯA ĐỐI CHIẾU CHỨNG TỪ GỐC"
+        else:
+            source_name = "Dữ liệu tra cứu danh mục dược lý tham khảo"
+            reg_status_label = "SỐ ĐĂNG KÝ CHƯA ĐẠT CHUẨN ĐỊNH DẠNG"
+
         pending_verifications: list[str] = []
+        if not is_officially_verified:
+            pending_verifications.append("Đối chiếu số đăng ký với hồ sơ cấp phép lưu hành của Cục Quản lý Dược")
         if product.publish_mode != "SALE_ELIGIBLE":
             pending_verifications.append("Biên bản kiểm nghiệm chất lượng xuất xưởng (COA) của lô hàng vật lý")
             pending_verifications.append("Phiếu kiểm nhập kho GSP và hóa đơn GTGT của nhà phân phối hợp pháp")
@@ -169,7 +223,11 @@ class ProductEligibilityService:
         transparency_info = {
             "source_name": source_name,
             "registration_number": product.registration_number or "Đang cập nhật",
-            "registration_status": "ĐÃ ĐỐI CHIẾU SỐ ĐĂNG KÝ LƯU HÀNH" if is_verified_reg else "CHƯA ĐỐI CHIẾU CHỨNG TỪ GỐC",
+            "registration_status": reg_status_label,
+            "registration_status_code": reg_status_code,
+            "verified_sources": reg_sources,
+            "is_officially_verified": is_officially_verified,
+            "is_format_valid": is_format_valid,
             "completeness_score": comp_score,
             "pending_verifications": pending_verifications,
             "last_audited_at": (product.updated_at or product.created_at or now).strftime("%Y-%m-%d"),
@@ -266,15 +324,7 @@ class ProductEligibilityService:
             )
 
         if selected_sku_dict.get("base_price", 0) <= 0:
-            from app.models import PriceObservation
-            price_row = db.query(PriceObservation.observed_price).filter(
-                PriceObservation.product_id == product.id
-            ).first()
-            if price_row and price_row[0] and price_row[0] > 0:
-                selected_sku_dict["base_price"] = int(price_row[0])
-
-        if selected_sku_dict.get("base_price", 0) <= 0:
-            reasons.append("Sản phẩm chưa có giá bán thương mại niêm yết hợp lệ.")
+            reasons.append("Sản phẩm chưa có giá bán thương mại niêm yết hợp lệ từ SKU chính thức.")
             return ProductEligibilityResult(
                 is_eligible_for_sale=False,
                 eligibility_tier="UNVERIFIED_DATA",
@@ -282,7 +332,7 @@ class ProductEligibilityService:
                 cta_type="LOCKED",
                 cta_label="Chưa Có Giá Niêm Yết",
                 available_stock=0,
-                primary_reason="Chưa có thông tin giá bán thương mại được phê duyệt.",
+                primary_reason="Chưa có thông tin giá bán thương mại được phê duyệt từ quy cách đóng gói chính thức (không sử dụng giá tham khảo thị trường).",
                 reasons=reasons,
                 transparency_info=transparency_info,
                 skus=sku_list,
@@ -308,7 +358,8 @@ class ProductEligibilityService:
             )
 
         # Pillar 7: Đủ điều kiện bán hàng thương mại (SALE_ELIGIBLE)
-        if product.publish_mode in ["SALE_ELIGIBLE", "MANUAL_REVIEW", "VERIFIED_PRODUCT_DATA", "AUTO_PUBLISH_VALID"] or (product.publish_status == PublishStatus.PUBLISHED and product.publish_mode != "REFERENCE_ONLY"):
+        # Chỉ có publish_mode == 'SALE_ELIGIBLE' và publish_status == PUBLISHED mới được mở bán trực tuyến
+        if product.publish_mode == "SALE_ELIGIBLE" and product.publish_status == PublishStatus.PUBLISHED:
             return ProductEligibilityResult(
                 is_eligible_for_sale=True,
                 eligibility_tier="SALE_ELIGIBLE",
@@ -317,7 +368,11 @@ class ProductEligibilityService:
                 cta_label="Chọn Mua Ngay",
                 available_stock=cur_stock,
                 primary_reason="Sản phẩm đạt toàn bộ tiêu chuẩn thương mại, có tồn kho xác minh và đủ điều kiện bán trực tuyến.",
-                reasons=["Đã xác thực số đăng ký lưu hành.", "Lô hàng hợp lệ, chưa hết hạn dùng.", "Đủ điều kiện kinh doanh thuốc OTC trực tuyến."],
+                reasons=[
+                    "Đã xác thực định dạng số đăng ký lưu hành.",
+                    "Lô hàng hợp lệ, còn hạn dùng theo chuẩn FEFO.",
+                    "Đủ điều kiện kinh doanh sản phẩm OTC trực tuyến.",
+                ],
                 transparency_info=transparency_info,
                 skus=sku_list,
                 selected_sku=selected_sku_dict,
