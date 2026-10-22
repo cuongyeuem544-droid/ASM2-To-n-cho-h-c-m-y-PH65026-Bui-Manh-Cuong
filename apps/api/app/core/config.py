@@ -133,6 +133,8 @@ class Settings(BaseSettings):
     sepay_account_number: str = ""
     sepay_account_holder: str = ""
     sepay_webhook_secret: str = ""
+    sepay_api_token: str = ""
+    sepay_api_key: str = ""
 
     # Cấu hình Dịch vụ Bản đồ Google Maps Platform (Places Autocomplete, Geocoding, Routes)
     google_maps_api_key: str = ""
@@ -253,6 +255,10 @@ class Settings(BaseSettings):
             and self.payos_checksum_key
             and self.payos_checksum_key.strip()
         )
+
+    @property
+    def effective_sepay_api_token(self) -> str:
+        return (self.sepay_api_token or self.sepay_api_key or "").strip()
 
     @property
     def is_sepay_configured(self) -> bool:

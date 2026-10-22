@@ -28,6 +28,8 @@ class ProductSummary(ORMModel):
     registration_number: str | None
     manufacturer: str | None
     image_url: str | None = None
+    local_image_url: str | None = None
+    local_thumbnail_url: str | None = None
     description: str | None = None
     usage_instructions: str | None = None
     indications: str | None = None

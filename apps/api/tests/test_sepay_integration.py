@@ -210,7 +210,7 @@ class TestSepayIntegration:
             db_order = db.scalar(select(Order).where(Order.order_code == order.order_code))
             assert db_order.payment_status == "PAID"
             assert db_order.order_status == "CONFIRMED"
-            assert db_order.fulfillment_status == "UNFULFILLED"
+            assert db_order.fulfillment_status == "ALLOCATED"
 
             tx = db.scalar(select(PaymentTransaction).where(PaymentTransaction.order_id == db_order.id, PaymentTransaction.provider == "SEPAY"))
             assert tx is not None
@@ -452,3 +452,101 @@ class TestSepayIntegration:
         )
         assert resp_retry2.status_code == 200
         assert resp_retry2.json()["provider"] == "SEPAY"
+
+    def test_11_active_reconciliation_via_get_status_reconciles_unmatched_db_inbound(self, setup_sepay_data):
+        """
+        Khách chuyển tiền thành công, tiền đã vào tài khoản và ghi nhận trong inbound DB,
+        nhưng vì webhook đến muộn hoặc chưa gán:
+        Khi gọi GET /api/v1/payments/orders/{order_code}/status,
+        hệ thống tự động kích hoạt Active Reconciliation, khớp lệnh và chuyển trạng thái đơn thành PAID.
+        """
+        client = TestClient(app)
+        with SessionLocal() as db:
+            order = _create_test_order(db, setup_sepay_data["user"], 320000)
+            code_obj = SepayService.generate_payment_code(db, order)
+            payment_code = code_obj.payment_code
+
+            # Giả lập giao dịch SePay đã vào tài khoản MBBank nhưng chưa được gắn PROCESSED
+            sepay_id = int(time.time() * 1000) % 100000000 + 100
+            inbound = SepayInboundTransaction(
+                sepay_id=sepay_id,
+                gateway="MBBank",
+                account_number=TEST_ACCOUNT_NUMBER,
+                transfer_type="in",
+                transfer_amount=320000,
+                accumulated=50000000,
+                code=payment_code,
+                content=f"NAPAS MBVCB.{payment_code}.THANHTOAN",
+                description=f"Chuyen tien {payment_code}",
+                status="FLAGGED_NO_CODE",
+                order_id=None,
+                error_message="Chờ đối soát",
+                raw_payload="{}",
+            )
+            db.add(inbound)
+            db.commit()
+
+        # Gọi API tra cứu trạng thái đơn hàng (như Frontend polling thực hiện mỗi 3s)
+        headers = {
+            "Authorization": setup_sepay_data["auth_headers"]["Authorization"],
+            "X-Order-Token": f"token-{order.order_code}",
+        }
+        res = client.get(f"/api/v1/payments/orders/{order.order_code}/status", headers=headers)
+        assert res.status_code == 200
+        summary = res.json()
+        assert summary["payment_status"] == "PAID"
+        assert summary["order_status"] == "CONFIRMED"
+
+        # Kiểm tra database state
+        with SessionLocal() as db:
+            db_order = db.scalar(select(Order).where(Order.order_code == order.order_code))
+            assert db_order.payment_status == "PAID"
+            assert db_order.fulfillment_status == "ALLOCATED"
+            reconciled_inbound = db.scalar(select(SepayInboundTransaction).where(SepayInboundTransaction.sepay_id == sepay_id))
+            assert reconciled_inbound.status == "PROCESSED"
+            assert reconciled_inbound.order_id == db_order.id
+
+    def test_12_webhook_matches_by_order_code_when_customer_writes_order_code_in_memo(self, setup_sepay_data):
+        """
+        Khách chuyển khoản nhưng gõ mã đơn hàng (ví dụ PT-SEP-...) thay vì mã HC,
+        Webhook vẫn trích xuất được mã đơn hàng và khớp lệnh thành công 100%.
+        """
+        client = TestClient(app)
+        with SessionLocal() as db:
+            order = _create_test_order(db, setup_sepay_data["user"], 180000)
+
+        sepay_id = int(time.time() * 1000) % 100000000 + 200
+        payload = {
+            "id": sepay_id,
+            "gateway": "MBBank",
+            "transactionDate": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "accountNumber": TEST_ACCOUNT_NUMBER,
+            "code": "",
+            "content": f"Chuyen tien mua thuoc don {order.order_code}",
+            "transferType": "in",
+            "description": f"Chuyen tien {order.order_code}",
+            "transferAmount": 180000,
+            "referenceCode": f"FT{sepay_id}",
+        }
+
+        raw_body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        current_ts = int(time.time())
+        signature = _generate_sepay_signature(raw_body, current_ts, TEST_SECRET)
+
+        headers = {
+            "Content-Type": "application/json",
+            "X-SePay-Signature": signature,
+            "X-SePay-Timestamp": str(current_ts),
+        }
+
+        response = client.post("/api/v1/payments/sepay/webhook", content=raw_body, headers=headers)
+        assert response.status_code == 200
+        res_data = response.json()
+        assert res_data["success"] is True
+        assert res_data["order_code"] == order.order_code
+
+        with SessionLocal() as db:
+            db_order = db.scalar(select(Order).where(Order.order_code == order.order_code))
+            assert db_order.payment_status == "PAID"
+            assert db_order.fulfillment_status == "ALLOCATED"
+

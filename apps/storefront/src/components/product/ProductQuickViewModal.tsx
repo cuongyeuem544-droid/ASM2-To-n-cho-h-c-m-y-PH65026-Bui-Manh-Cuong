@@ -78,8 +78,11 @@ export const ProductQuickViewModal: React.FC<ProductQuickViewModalProps> = ({
               <div className="md:col-span-5 flex flex-col items-center">
                 <div className="relative w-full aspect-square rounded-xl bg-slate-50 border border-slate-200 overflow-hidden flex items-center justify-center p-4 group">
                   <img
-                    src={product.images[selectedImageIdx] || product.images[0]}
+                    src={product.images[selectedImageIdx] || product.images[0] || "/images/placeholder-medicine.svg"}
                     alt={product.name}
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = "/images/placeholder-medicine.svg";
+                    }}
                     className="w-full h-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-300"
                   />
                   {discountPercent > 0 && (
@@ -107,7 +110,14 @@ export const ProductQuickViewModal: React.FC<ProductQuickViewModalProps> = ({
                             : "border-slate-200 opacity-70 hover:opacity-100"
                         }`}
                       >
-                        <img src={img} alt="" className="w-full h-full object-contain" />
+                        <img
+                          src={img || "/images/placeholder-medicine.svg"}
+                          alt=""
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = "/images/placeholder-medicine.svg";
+                          }}
+                          className="w-full h-full object-contain"
+                        />
                       </button>
                     ))}
                   </div>

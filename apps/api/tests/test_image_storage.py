@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from app.db.base import Base
 from app.models.entities import CanonicalProduct
 from app.models.enums import PublishStatus, RegulatoryStatus, RxOtcStatus
-from app.services.image_storage import download_and_optimize_image, backfill_product_images, get_product_storage_dir
+from app.services.image_storage import download_and_optimize_image, backfill_product_images, get_product_storage_dir, validate_image_magic_bytes, save_and_optimize_uploaded_image
 
 
 class TestImageStorageAndOptimization(unittest.TestCase):
@@ -129,6 +129,52 @@ class TestImageStorageAndOptimization(unittest.TestCase):
         self.db.refresh(prod1)
         self.assertEqual(prod1.local_image_url, "/storage/products/prod_1_abc.webp")
         self.assertEqual(prod1.local_thumbnail_url, "/storage/products/prod_1_abc_thumb.webp")
+
+    def test_05_validate_image_magic_bytes(self):
+        """Kiểm tra xác thực định dạng nhị phân (magic bytes) chính xác."""
+        jpeg_bytes = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01"
+        png_bytes = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+        webp_bytes = b"RIFF\x20\x00\x00\x00WEBPVP8 "
+        bad_script = b"<?php echo 'malicious'; ?>"
+
+        self.assertEqual(validate_image_magic_bytes(jpeg_bytes), "JPEG")
+        self.assertEqual(validate_image_magic_bytes(png_bytes), "PNG")
+        self.assertEqual(validate_image_magic_bytes(webp_bytes), "WEBP")
+
+        with self.assertRaises(ValueError):
+            validate_image_magic_bytes(bad_script)
+
+        with self.assertRaises(ValueError):
+            validate_image_magic_bytes(b"short")
+
+    def test_06_save_and_optimize_uploaded_image(self):
+        """Kiểm tra lưu và nén ảnh tải lên trực tiếp từ admin."""
+        raw_bytes = self._create_dummy_image_bytes(width=1000, height=750, color="green")
+        main_url, thumb_url = save_and_optimize_uploaded_image(
+            content=raw_bytes,
+            product_id=888,
+            original_filename="packaging_photo.jpg",
+        )
+
+        self.assertIsNotNone(main_url)
+        self.assertIsNotNone(thumb_url)
+        self.assertTrue(main_url.startswith("/storage/products/prod_888_"))
+        self.assertTrue(main_url.endswith(".webp"))
+        self.assertTrue(thumb_url.endswith("_thumb.webp"))
+
+        # Kiểm tra file đã ghi lên đĩa
+        storage_dir = get_product_storage_dir()
+        main_path = storage_dir / main_url.split("/")[-1]
+        thumb_path = storage_dir / thumb_url.split("/")[-1]
+
+        self.assertTrue(main_path.exists())
+        self.assertTrue(thumb_path.exists())
+
+        with Image.open(main_path) as img:
+            self.assertEqual(img.format, "WEBP")
+            self.assertLessEqual(img.width, 800)
+            self.assertLessEqual(img.height, 800)
+
 
 
 if __name__ == "__main__":

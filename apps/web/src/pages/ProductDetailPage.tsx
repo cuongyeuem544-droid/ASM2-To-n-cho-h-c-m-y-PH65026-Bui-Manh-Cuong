@@ -1,4 +1,4 @@
-import { ArrowLeft, Beaker, CheckCircle2, FileSearch, RefreshCw, ShieldAlert } from 'lucide-react'
+import { ArrowLeft, Beaker, CheckCircle2, FileSearch, RefreshCw, ShieldAlert, Upload, Image as ImageIcon, Loader2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ScoreRing } from '../components/ScoreRing'
@@ -34,6 +34,33 @@ export function ProductDetailPage() {
   const [product, setProduct] = useState<ProductDetail | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [uploadingImage, setUploadingImage] = useState(false)
+  const [imageMsg, setImageMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+
+  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file || !product) return
+    setUploadingImage(true)
+    setImageMsg(null)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const token = localStorage.getItem('pharmatrust_access_token') || localStorage.getItem('access_token')
+      const res = await fetch(`/api/v1/admin/products/${product.id}/image`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Không thể tải ảnh lên.')
+      setImageMsg({ type: 'success', text: 'Tải lên và tối ưu WebP thành công!' })
+      setProduct({ ...product, image_url: data.local_image_url || data.image_url })
+    } catch (err) {
+      setImageMsg({ type: 'error', text: err instanceof Error ? err.message : 'Lỗi khi tải ảnh' })
+    } finally {
+      setUploadingImage(false)
+    }
+  }
   const load = () => api<ProductDetail>(`/products/${id}`).then(setProduct).catch(err => setError(err.message))
   useEffect(() => { void load() }, [id])
 
@@ -172,25 +199,65 @@ export function ProductDetailPage() {
         </section>
       </div>
 
-      {(product.usage_instructions || product.indications || product.contraindications || product.side_effects || product.image_url) && (
-        <section className="panel leaflet-section">
+      <section className="panel leaflet-section">
           <div className="panel-heading">
             <div>
-              <h2>Tờ Hướng Dẫn Sử Dụng & Thông Tin Lâm Sàng</h2>
-              <p>Trích xuất trực tiếp từ hồ sơ đăng ký thuốc hoặc nhà thuốc đối chiếu</p>
+              <h2>Ảnh Bao Bì & Tờ Hướng Dẫn Sử Dụng Lâm Sàng</h2>
+              <p>Trích xuất trực tiếp từ hồ sơ đăng ký thuốc Cục QLD hoặc cập nhật bao bì thực tế</p>
             </div>
           </div>
-          <div className="leaflet-grid" style={{ display: 'grid', gridTemplateColumns: product.image_url ? '260px 1fr' : '1fr', gap: '20px' }}>
-            {product.image_url && (
-              <div className="product-photo-box" style={{ background: '#f8fafc', borderRadius: '12px', padding: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <div className="leaflet-grid" style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: '20px' }}>
+            <div className="product-photo-box" style={{ background: '#f8fafc', borderRadius: '12px', padding: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', border: '1px solid #e2e8f0' }}>
+              {product.image_url ? (
                 <img
                   src={product.image_url}
                   alt={product.canonical_name}
-                  style={{ maxWidth: '100%', maxHeight: '240px', objectFit: 'contain', borderRadius: '8px' }}
+                  style={{ maxWidth: '100%', maxHeight: '200px', objectFit: 'contain', borderRadius: '8px' }}
                   onError={(e) => { (e.target as HTMLElement).style.display = 'none' }}
                 />
-              </div>
-            )}
+              ) : (
+                <div style={{ width: '100%', height: '140px', background: '#f1f5f9', borderRadius: '8px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: '12px', gap: '6px' }}>
+                  <ImageIcon size={32} />
+                  <span>Chưa có ảnh bao bì</span>
+                </div>
+              )}
+
+              <label style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '7px 14px',
+                borderRadius: '8px',
+                background: '#0284c7',
+                color: '#ffffff',
+                fontSize: '12px',
+                fontWeight: 600,
+                cursor: uploadingImage ? 'not-allowed' : 'pointer',
+                opacity: uploadingImage ? 0.7 : 1,
+                boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+              }}>
+                {uploadingImage ? <Loader2 size={13} className="spinner" /> : <Upload size={13} />}
+                <span>{uploadingImage ? 'Đang nén WebP...' : (product.image_url ? 'Thay đổi ảnh bao bì' : 'Tải lên ảnh bao bì')}</span>
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/avif"
+                  onChange={handleImageUpload}
+                  disabled={uploadingImage}
+                  style={{ display: 'none' }}
+                />
+              </label>
+
+              {imageMsg && (
+                <div style={{
+                  fontSize: '11px',
+                  color: imageMsg.type === 'success' ? '#16a34a' : '#ef4444',
+                  textAlign: 'center',
+                  fontWeight: 500,
+                }}>
+                  {imageMsg.text}
+                </div>
+              )}
+            </div>
             <div className="leaflet-details-box" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               {product.description && (
                 <div style={{ background: '#f1f5f9', padding: '12px 16px', borderRadius: '8px' }}>
@@ -230,7 +297,6 @@ export function ProductDetailPage() {
             </div>
           </div>
         </section>
-      )}
 
       <section className="panel">
         <div className="panel-heading"><div><h2>Bằng chứng và nguồn dữ liệu</h2><p>Mỗi thông tin thuốc đều gắn liền với nguồn gốc và thời điểm đối soát</p></div><FileSearch size={20} /></div>

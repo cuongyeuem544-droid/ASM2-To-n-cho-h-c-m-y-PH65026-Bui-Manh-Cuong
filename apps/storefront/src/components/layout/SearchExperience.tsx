@@ -322,8 +322,11 @@ export const SearchExperience: React.FC<SearchExperienceProps> = ({
                           >
                             <div className="w-12 h-12 rounded-lg bg-slate-50 border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center p-1">
                               <img
-                                src={prod.images?.[0] || prod.thumbnail || "/images/medicines/panadol.jpg"}
+                                src={prod.images?.[0] || prod.thumbnail || "/images/placeholder-medicine.svg"}
                                 alt={prod.name}
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).src = "/images/placeholder-medicine.svg";
+                                }}
                                 className="w-full h-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-200"
                               />
                             </div>
@@ -470,8 +473,11 @@ export const SearchExperience: React.FC<SearchExperienceProps> = ({
                         >
                           <div className="w-10 h-10 rounded-lg bg-slate-50 border border-slate-200/70 overflow-hidden shrink-0 flex items-center justify-center p-0.5">
                             <img
-                              src={prod.images?.[0] || "/images/medicines/panadol.jpg"}
+                              src={prod.images?.[0] || prod.thumbnail || "/images/placeholder-medicine.svg"}
                               alt={prod.name}
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).src = "/images/placeholder-medicine.svg";
+                              }}
                               className="w-full h-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform"
                             />
                           </div>

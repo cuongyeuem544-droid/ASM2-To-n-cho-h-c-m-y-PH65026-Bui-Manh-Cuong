@@ -96,6 +96,9 @@ export default function DedicatedPaymentPage() {
   const [orderData, setOrderData] = useState<OrderPaymentSummary | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [qrImgError, setQrImgError] = useState(false);
+  const [qrReloadKey, setQrReloadKey] = useState(0);
+  const isPollingBusyRef = React.useRef(false);
 
   // Modals & Action loading
   const [showChangeMethodModal, setShowChangeMethodModal] = useState(false);
@@ -150,7 +153,12 @@ export default function DedicatedPaymentPage() {
       }
 
       const data: OrderPaymentSummary = await res.json();
-      setOrderData(data);
+      setOrderData((prev) => {
+        if (prev?.sepay_details?.qr_code_url && data.sepay_details && !data.sepay_details.qr_code_url) {
+          data.sepay_details.qr_code_url = prev.sepay_details.qr_code_url;
+        }
+        return data;
+      });
       setErrorMessage(null);
 
       // Compute initial remaining seconds from server expires_at
@@ -189,23 +197,45 @@ export default function DedicatedPaymentPage() {
     return () => clearInterval(timer);
   }, [orderData]);
 
-  // 3. Live Polling (Every 3 seconds while PENDING)
+  // 3. Robust Live Polling (Every 3s while PENDING & NOT EXPIRED, decoupled from 1s tick)
   useEffect(() => {
-    if (
-      !orderData ||
-      orderData.payment_status === "PAID" ||
-      orderData.order_status === "CANCELLED" ||
-      timeLeft <= 0
-    ) {
+    const isOrderPaid = orderData?.payment_status === "PAID";
+    const isOrderCancelled = orderData?.order_status === "CANCELLED";
+    const isOrderExpired = orderData?.payment_method !== "COD" && timeLeft <= 0;
+
+    if (!orderCode || isOrderPaid || isOrderCancelled || isOrderExpired) {
       return;
     }
 
-    const poller = setInterval(() => {
-      fetchOrderStatus(true);
-    }, 3000);
+    const safeFetch = async () => {
+      if (isPollingBusyRef.current) return;
+      isPollingBusyRef.current = true;
+      try {
+        await fetchOrderStatus(true);
+      } finally {
+        isPollingBusyRef.current = false;
+      }
+    };
 
-    return () => clearInterval(poller);
-  }, [orderData, timeLeft]);
+    const poller = setInterval(safeFetch, 3000);
+
+    // Bắt sự kiện khi khách hàng hoàn tất chuyển khoản trong App ngân hàng rồi quay lại trình duyệt
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        safeFetch();
+      }
+    };
+    const handleFocus = () => safeFetch();
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleFocus);
+
+    return () => {
+      clearInterval(poller);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [orderCode, orderData?.payment_status, orderData?.order_status, orderData?.payment_method !== "COD" && timeLeft <= 0]);
 
   // Helper formatting
   const formatCountdown = (seconds: number) => {
@@ -583,10 +613,31 @@ export default function DedicatedPaymentPage() {
                         {/* QR Code Container */}
                         <div className="text-center p-4 bg-slate-50 rounded-2xl border border-slate-200/80 relative">
                           <div className="relative inline-block bg-white p-3 rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                            {sepayInfo?.qr_code_url ? (
+                            {qrImgError ? (
+                              <div className="w-52 h-52 sm:w-60 sm:h-60 flex flex-col items-center justify-center p-4 text-center bg-slate-100 rounded-xl text-slate-700">
+                                <AlertTriangle className="w-8 h-8 text-amber-500 mb-2" />
+                                <span className="text-xs font-bold text-slate-800">Không tải được ảnh mã QR</span>
+                                <span className="text-[10px] text-slate-500 mt-1 max-w-[180px] leading-relaxed">
+                                  Bạn có thể chuyển khoản bằng thông tin số tài khoản bên dưới
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setQrImgError(false);
+                                    setQrReloadKey((k) => k + 1);
+                                  }}
+                                  className="mt-3 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                                >
+                                  <RefreshCw className="w-3.5 h-3.5" />
+                                  <span>Tải lại ảnh QR</span>
+                                </button>
+                              </div>
+                            ) : sepayInfo?.qr_code_url ? (
                               <img
+                                key={qrReloadKey}
                                 src={sepayInfo.qr_code_url}
                                 alt="VietQR MBBank SePay"
+                                onError={() => setQrImgError(true)}
                                 className={`w-52 h-52 sm:w-60 sm:h-60 object-contain mx-auto rounded-xl transition-all ${
                                   isExpired ? "opacity-20 blur-xs grayscale" : ""
                                 }`}
@@ -634,6 +685,26 @@ export default function DedicatedPaymentPage() {
                           <p className="text-[11px] text-slate-500 mt-1">
                             Sử dụng ứng dụng bất kỳ (MBBank, Vietcombank, Techcombank, BIDV, VPBank,...) để quét mã Napas 247
                           </p>
+
+                          {/* Instant Check Button */}
+                          <div className="mt-4 pt-3 border-t border-slate-200/70 flex flex-col items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => fetchOrderStatus(false)}
+                              disabled={isLoading}
+                              className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm active:scale-98 transition-all cursor-pointer"
+                            >
+                              {isLoading ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-200" />
+                              )}
+                              <span>Tôi đã chuyển khoản — Kiểm tra ngay</span>
+                            </button>
+                            <span className="text-[10px] text-slate-400">
+                              Hệ thống tự động kiểm tra mỗi 3 giây hoặc khi bạn chuyển lại tab này
+                            </span>
+                          </div>
                         </div>
 
                         {/* Bank Details Table */}

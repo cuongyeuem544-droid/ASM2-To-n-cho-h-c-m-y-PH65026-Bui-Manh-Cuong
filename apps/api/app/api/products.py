@@ -2,7 +2,7 @@ from datetime import date, timedelta
 import math
 from pydantic import BaseModel
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -49,6 +49,7 @@ from app.schemas.products import (
 )
 from app.services.audit import write_audit
 from app.services.scoring import calculate_product_score
+from app.services.image_storage import save_and_optimize_uploaded_image, download_and_optimize_image, backfill_product_images
 
 
 router = APIRouter(tags=["Sản phẩm và kiểm chứng"])
@@ -85,7 +86,9 @@ def _detail(product: CanonicalProduct, db: Session | None = None) -> ProductDeta
         canonical_name=product.canonical_name,
         registration_number=product.registration_number,
         manufacturer=product.manufacturer,
-        image_url=product.image_url,
+        image_url=product.local_image_url or product.image_url,
+        local_image_url=product.local_image_url,
+        local_thumbnail_url=product.local_thumbnail_url,
         description=product.description,
         usage_instructions=product.usage_instructions,
         indications=product.indications,
@@ -237,6 +240,9 @@ def list_products(
     items = []
     for p in products:
         item_dict = ProductSummary.model_validate(p).model_dump()
+        item_dict["image_url"] = p.local_image_url or p.image_url
+        item_dict["local_image_url"] = p.local_image_url
+        item_dict["local_thumbnail_url"] = p.local_thumbnail_url
         item_dict["dosage_form"] = p.dosage_form or "Viên nén"
         item_dict["package_description"] = p.package_description or "Hộp tiêu chuẩn"
         item_dict["price"] = prices_map.get(p.id)
@@ -838,3 +844,138 @@ def public_product(product_id: int, db: Session = Depends(get_db)):
     if not product:
         raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm đủ điều kiện công bố")
     return _detail(product, db=db)
+
+class UpdateProductImageUrlRequest(BaseModel):
+    image_url: str
+
+
+@router.post("/products/{product_id}/image")
+@router.post("/admin/products/{product_id}/image")
+async def upload_product_image(
+    product_id: int,
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.WAREHOUSE_MANAGER)),
+    db: Session = Depends(get_db),
+):
+    """
+    Tải lên và đồng bộ ảnh thuốc chính thức:
+    1. Kiểm tra quyền Admin/Warehouse Manager.
+    2. Xác thực kích thước (max 10MB) và magic bytes nhị phân.
+    3. Tối ưu ảnh chính thành WebP 800x800 và thumbnail WebP 250x250.
+    4. Cập nhật CanonicalProduct.local_image_url, local_thumbnail_url và image_url.
+    5. Ghi nhật ký WarehouseAuditLog bảo đảm truy vết.
+    """
+    product = db.get(CanonicalProduct, product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm.")
+
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Kích thước tệp vượt quá 10MB.")
+
+    try:
+        main_url, thumb_url = save_and_optimize_uploaded_image(
+            content=content,
+            product_id=product.id,
+            original_filename=file.filename or "",
+        )
+    except ValueError as val_err:
+        raise HTTPException(status_code=400, detail=str(val_err))
+    except Exception as exc:
+        logger.error(f"Lỗi khi xử lý ảnh tải lên cho thuốc {product_id}: {exc}")
+        raise HTTPException(status_code=500, detail="Lỗi xử lý ảnh nén WebP trên máy chủ.")
+
+    product.local_image_url = main_url
+    product.local_thumbnail_url = thumb_url
+    product.image_url = main_url
+    product.updated_at = utcnow()
+
+    write_audit(
+        db=db,
+        action="UPLOAD_PRODUCT_IMAGE",
+        entity_type="CanonicalProduct",
+        entity_id=product.id,
+        user=current_user,
+        after={
+            "filename": file.filename,
+            "local_image_url": main_url,
+            "local_thumbnail_url": thumb_url,
+        },
+    )
+    db.commit()
+    db.refresh(product)
+
+    return {
+        "success": True,
+        "message": f"Tải lên và tối ưu ảnh WebP cho thuốc '{product.canonical_name}' thành công.",
+        "product_id": product.id,
+        "local_image_url": main_url,
+        "local_thumbnail_url": thumb_url,
+        "image_url": main_url,
+    }
+
+
+@router.post("/products/{product_id}/image-url")
+@router.post("/admin/products/{product_id}/image-url")
+def update_product_image_url(
+    product_id: int,
+    payload: UpdateProductImageUrlRequest,
+    current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.WAREHOUSE_MANAGER)),
+    db: Session = Depends(get_db),
+):
+    """
+    Cập nhật URL ảnh thuốc từ bên ngoài và tự động tải về tối ưu WebP nội bộ.
+    """
+    product = db.get(CanonicalProduct, product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm.")
+
+    clean_url = payload.image_url.strip()
+    if not clean_url:
+        raise HTTPException(status_code=400, detail="URL ảnh không được để trống.")
+
+    main_url, thumb_url = download_and_optimize_image(clean_url, product.id)
+    product.image_url = clean_url
+    if main_url:
+        product.local_image_url = main_url
+        product.local_thumbnail_url = thumb_url
+    product.updated_at = utcnow()
+
+    write_audit(
+        db=db,
+        action="UPDATE_PRODUCT_IMAGE_URL",
+        entity_type="CanonicalProduct",
+        entity_id=product.id,
+        user=current_user,
+        after={"image_url": clean_url, "local_image_url": main_url},
+    )
+    db.commit()
+    db.refresh(product)
+
+    return {
+        "success": True,
+        "message": "Cập nhật URL ảnh và đồng bộ tối ưu hóa WebP thành công.",
+        "product_id": product.id,
+        "image_url": product.image_url,
+        "local_image_url": product.local_image_url,
+        "local_thumbnail_url": product.local_thumbnail_url,
+    }
+
+
+@router.post("/products/images/backfill")
+@router.post("/admin/products/images/backfill")
+def trigger_backfill_product_images(
+    limit: int = Query(default=50, ge=1, le=200),
+    current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.WAREHOUSE_MANAGER)),
+    db: Session = Depends(get_db),
+):
+    """
+    Kích hoạt tiến trình quét và tối ưu hàng loạt ảnh thuốc sang WebP cục bộ.
+    """
+    stats = backfill_product_images(db=db, max_items=limit)
+    return {
+        "success": True,
+        "message": f"Hoàn tất quét {stats['total_scanned']} ảnh: {stats['succeeded']} thành công, {stats['failed']} thất bại.",
+        "stats": stats,
+    }
+

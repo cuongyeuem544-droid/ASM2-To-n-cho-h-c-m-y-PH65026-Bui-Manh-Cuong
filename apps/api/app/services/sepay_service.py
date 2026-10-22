@@ -74,7 +74,8 @@ class SepayService:
             and getattr(existing, "status", "ACTIVE") == "ACTIVE"
             and (not getattr(existing, "expires_at", None) or existing.expires_at.replace(tzinfo=existing.expires_at.tzinfo or UTC) > utcnow())
         )
-        if existing and not force_new and is_still_valid:
+        # Giữ nguyên mã nếu vẫn còn hiệu lực (không overwrite làm sai lệch mã QR người dùng đang quét)
+        if existing and is_still_valid:
             return existing
 
         # Thử sinh mã từ order.id (nếu khả dụng)
@@ -497,16 +498,21 @@ class SepayService:
                     "sepay_id": sepay_id,
                 }
 
-        # 7. Trích xuất mã thanh toán HC + 8 số
+        # 7. Trích xuất mã thanh toán HC + 8 số hoặc mã đơn hàng
         matched_code: str | None = None
         if code and re.match(r"^HC\d{8}$", code):
             matched_code = code
         else:
-            # Tìm trong nội dung chuyển khoản hoặc description
+            # Tìm trong nội dung chuyển khoản hoặc description (hỗ trợ cả dấu chấm, gạch chéo UNC)
             search_text = f"{content} {description}".upper()
-            found = re.findall(r"\b(HC\d{8})\b", search_text)
+            found = re.findall(r"(HC\d{8})", search_text)
             if found:
                 matched_code = found[0]
+            else:
+                # Tìm mã đơn hàng (ORD-... hoặc PT-...) nếu khách ghi mã đơn thay vì mã HC
+                ord_found = re.findall(r"(ORD-[A-Z0-9-]+|PT-[A-Z0-9-]+|PT\d+)", search_text)
+                if ord_found:
+                    matched_code = ord_found[0]
 
         if not matched_code:
             err_msg = f"Không tìm thấy mã thanh toán hợp lệ (HC + 8 chữ số) trong nội dung: '{content}'"
@@ -549,14 +555,33 @@ class SepayService:
                 "sepay_id": sepay_id,
             }
 
-        # 8. Tra cứu mã thanh toán trong bảng sepay_payment_codes
+        # 8. Tra cứu mã thanh toán trong bảng sepay_payment_codes hoặc đối soát đa chiều
         code_entry = db.scalar(
             select(SepayPaymentCode).where(
                 SepayPaymentCode.payment_code == matched_code
             )
         )
-        if not code_entry:
-            err_msg = f"Mã thanh toán '{matched_code}' không tồn tại trong hệ thống H4CARE."
+        order = None
+        if code_entry:
+            order = db.get(Order, code_entry.order_id)
+
+        # Fallback 8.1: Nếu không thấy trong sepay_payment_codes, tra cứu theo order_code
+        if not order and matched_code:
+            order = db.scalar(select(Order).where(Order.order_code == matched_code))
+
+        # Fallback 8.2: Tra cứu trong PaymentTransaction (xem mã này có từng được gán cho đơn nào không)
+        if not order and matched_code:
+            prev_txn = db.scalar(
+                select(PaymentTransaction).where(
+                    PaymentTransaction.provider == "SEPAY",
+                    PaymentTransaction.provider_response_raw.contains(matched_code),
+                )
+            )
+            if prev_txn and prev_txn.order_id:
+                order = db.get(Order, prev_txn.order_id)
+
+        if not order:
+            err_msg = f"Mã thanh toán hoặc đơn hàng '{matched_code}' không tồn tại trong hệ thống H4CARE."
             logger.warning(f"[SEPAY WEBHOOK] {err_msg}")
             inbound_rec = SepayInboundTransaction(
                 sepay_id=sepay_id,
@@ -594,8 +619,7 @@ class SepayService:
                 "sepay_id": sepay_id,
             }
 
-        # 9. Lấy thông tin đơn hàng
-        order = db.get(Order, code_entry.order_id)
+        # 9. Đã xác định được đơn hàng
         if not order:
             err_msg = f"Đơn hàng ID={code_entry.order_id} liên kết với mã '{matched_code}' không tồn tại."
             inbound_rec = SepayInboundTransaction(
@@ -859,7 +883,7 @@ class SepayService:
         # 12. Khớp chính xác 100% số tiền -> XÁC NHẬN THANH TOÁN THÀNH CÔNG
         order.payment_status = "PAID"
         order.order_status = "CONFIRMED"
-        order.fulfillment_status = "UNFULFILLED"
+        order.fulfillment_status = "ALLOCATED"
         order.payment_method = "SEPAY"
 
         # Cập nhật PaymentTransaction
@@ -934,3 +958,231 @@ class SepayService:
             "amount": transfer_amount,
             "sepay_id": sepay_id,
         }
+
+    @classmethod
+    def reconcile_order_payment(cls, db: Session, order: Order) -> dict[str, Any]:
+        """
+        Đối soát thanh toán SePay chủ động theo thời gian thực (Active Reconciliation):
+        Được gọi tự động mỗi khi Frontend hoặc Admin kiểm tra trạng thái đơn hàng.
+        1. Nếu đơn đã PAID hoặc CANCELLED: Trả về trạng thái hiện tại.
+        2. Quét bảng sepay_inbound_transactions để tìm bất kỳ giao dịch tiền vào nào thỏa mãn:
+           - order_id == order.id
+           - Hoặc nội dung/code chứa payment_code hoặc order_code
+           - transfer_amount >= order.total_amount
+           Nếu tìm thấy: Tự động đối soát, chuyển trạng thái Order sang PAID và fulfillment_status = ALLOCATED.
+        3. Nếu chưa có trong DB và SePay API Token được cấu hình:
+           - Gọi SePay API lấy các giao dịch mới nhất để đối soát trực tiếp.
+        """
+        if order.payment_status == "PAID":
+            return {"status": "PAID", "reconciled": False}
+        if order.order_status == "CANCELLED":
+            return {"status": "CANCELLED", "reconciled": False}
+
+        expected_amount = int(order.total_amount)
+
+        # Thu thập tất cả các mã định danh có thể có của đơn hàng này
+        candidate_codes: set[str] = set()
+        if order.order_code:
+            candidate_codes.add(order.order_code.strip().upper())
+
+        code_obj = db.scalar(
+            select(SepayPaymentCode).where(SepayPaymentCode.order_id == order.id)
+        )
+        if code_obj and code_obj.payment_code:
+            candidate_codes.add(code_obj.payment_code.strip().upper())
+
+        # Lấy thêm các mã thanh toán cũ từ PaymentTransaction (nếu có)
+        txns = db.scalars(
+            select(PaymentTransaction).where(
+                PaymentTransaction.order_id == order.id,
+                PaymentTransaction.provider == "SEPAY",
+            )
+        ).all()
+        for t in txns:
+            if t.provider_response_raw:
+                try:
+                    meta = json.loads(t.provider_response_raw)
+                    if isinstance(meta, dict) and meta.get("payment_code"):
+                        candidate_codes.add(str(meta["payment_code"]).strip().upper())
+                except Exception:
+                    pass
+
+        # 1. Quét giao dịch trong SepayInboundTransaction (kể cả các giao dịch từng bị gắn cờ chưa khớp)
+        inbound_records = db.scalars(
+            select(SepayInboundTransaction).where(
+                SepayInboundTransaction.transfer_type == "in",
+                SepayInboundTransaction.status != "PROCESSED",
+            ).order_by(SepayInboundTransaction.id.desc()).limit(100)
+        ).all()
+
+        matched_inbound = None
+        for inb in inbound_records:
+            if inb.transfer_amount < expected_amount:
+                continue
+
+            inb_text = f"{inb.code or ''} {inb.content or ''} {inb.description or ''}".upper()
+            if inb.order_id == order.id:
+                matched_inbound = inb
+                break
+
+            for c in candidate_codes:
+                if c and c in inb_text:
+                    matched_inbound = inb
+                    break
+            if matched_inbound:
+                break
+
+        if matched_inbound:
+            logger.info(
+                f"[SEPAY ACTIVE RECONCILE] Khớp thành công đơn {order.order_code} với giao dịch SePay #{matched_inbound.sepay_id} ({matched_inbound.transfer_amount:,} đ)"
+            )
+            matched_inbound.status = "PROCESSED"
+            matched_inbound.order_id = order.id
+            matched_inbound.error_message = None
+
+            order.payment_status = "PAID"
+            order.order_status = "CONFIRMED"
+            order.fulfillment_status = "ALLOCATED"
+            order.payment_method = "SEPAY"
+
+            # Cập nhật hoặc tạo PaymentTransaction
+            trans = db.scalar(
+                select(PaymentTransaction).where(
+                    PaymentTransaction.order_id == order.id,
+                    PaymentTransaction.provider == "SEPAY",
+                )
+            )
+            if not trans:
+                trans = PaymentTransaction(
+                    order_id=order.id,
+                    transaction_code=f"TXN-SEPAY-{order.order_code}-{int(datetime.now().timestamp()) % 100000}",
+                    provider="SEPAY",
+                    amount=Decimal(str(matched_inbound.transfer_amount)),
+                    currency="VND",
+                    status="SUCCESS",
+                    provider_trans_id=str(matched_inbound.sepay_id),
+                )
+                db.add(trans)
+            else:
+                trans.status = "SUCCESS"
+                trans.provider_trans_id = str(matched_inbound.sepay_id)
+                trans.amount = Decimal(str(matched_inbound.transfer_amount))
+
+            db.commit()
+
+            dispatch_alert(
+                title="ĐỐI SOÁT SEPAY THÀNH CÔNG (ACTIVE RECONCILE)",
+                message=(
+                    f"Đơn hàng: <b>{order.order_code}</b>\n"
+                    f"Số tiền: <b>{matched_inbound.transfer_amount:,} đ</b>\n"
+                    f"Mã SePay: <b>#{matched_inbound.sepay_id}</b>\n"
+                    f"Cơ chế: <b>Tự động khớp lệnh khi tra cứu trạng thái</b>"
+                ),
+                severity="INFO",
+                alert_type="SEPAY_ACTIVE_RECONCILE",
+            )
+            return {"status": "PAID", "reconciled": True, "source": "LOCAL_INBOUND_DB"}
+
+        # 2. Nếu chưa thấy trong DB, và có cấu hình SePay API Key -> Thử gọi SePay API lấy biến động mới
+        api_token = settings.effective_sepay_api_token
+        if api_token:
+            try:
+                import httpx
+                headers = {"Authorization": f"Apikey {api_token}"}
+                params = {"limit": 20}
+                if settings.sepay_account_number:
+                    params["account_number"] = settings.sepay_account_number
+
+                with httpx.Client(timeout=3.0) as client:
+                    resp = client.get(
+                        "https://my.sepay.vn/userapi/transactions/list",
+                        headers=headers,
+                        params=params,
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        tx_list = data.get("transactions") or []
+                        for item in tx_list:
+                            amount_in = int(float(item.get("amount_in") or 0))
+                            if amount_in < expected_amount:
+                                continue
+
+                            tx_content = f"{item.get('transaction_content') or ''} {item.get('code') or ''}".upper()
+                            is_match = False
+                            for c in candidate_codes:
+                                if c and c in tx_content:
+                                    is_match = True
+                                    break
+
+                            if is_match:
+                                sepay_id = int(item.get("id"))
+                                # Kiểm tra xem đã xử lý chưa
+                                existing = db.scalar(
+                                    select(SepayInboundTransaction).where(
+                                        SepayInboundTransaction.sepay_id == sepay_id
+                                    )
+                                )
+                                if existing and existing.status == "PROCESSED":
+                                    continue
+
+                                # Xử lý giao dịch này
+                                logger.info(
+                                    f"[SEPAY API ACTIVE RECONCILE] Tìm thấy giao dịch SePay #{sepay_id} ({amount_in:,} đ) từ API khớp đơn {order.order_code}!"
+                                )
+                                if not existing:
+                                    existing = SepayInboundTransaction(
+                                        sepay_id=sepay_id,
+                                        gateway=item.get("bank_brand_name") or "MBBank",
+                                        account_number=str(item.get("account_number") or settings.sepay_account_number),
+                                        transfer_type="in",
+                                        transfer_amount=amount_in,
+                                        accumulated=int(float(item.get("accumulated") or 0)) if item.get("accumulated") else None,
+                                        code=item.get("code") or None,
+                                        content=item.get("transaction_content") or "",
+                                        reference_code=item.get("reference_number") or "",
+                                        description=item.get("transaction_content") or "",
+                                        status="PROCESSED",
+                                        order_id=order.id,
+                                        error_message=None,
+                                        raw_payload=json.dumps(item, ensure_ascii=False),
+                                    )
+                                    db.add(existing)
+                                else:
+                                    existing.status = "PROCESSED"
+                                    existing.order_id = order.id
+
+                                order.payment_status = "PAID"
+                                order.order_status = "CONFIRMED"
+                                order.fulfillment_status = "ALLOCATED"
+                                order.payment_method = "SEPAY"
+
+                                # Cập nhật PaymentTransaction
+                                trans = db.scalar(
+                                    select(PaymentTransaction).where(
+                                        PaymentTransaction.order_id == order.id,
+                                        PaymentTransaction.provider == "SEPAY",
+                                    )
+                                )
+                                if not trans:
+                                    trans = PaymentTransaction(
+                                        order_id=order.id,
+                                        transaction_code=f"TXN-SEPAY-{order.order_code}-{int(datetime.now().timestamp()) % 100000}",
+                                        provider="SEPAY",
+                                        amount=Decimal(str(amount_in)),
+                                        currency="VND",
+                                        status="SUCCESS",
+                                        provider_trans_id=str(sepay_id),
+                                    )
+                                    db.add(trans)
+                                else:
+                                    trans.status = "SUCCESS"
+                                    trans.provider_trans_id = str(sepay_id)
+                                    trans.amount = Decimal(str(amount_in))
+
+                                db.commit()
+                                return {"status": "PAID", "reconciled": True, "source": "SEPAY_API"}
+            except Exception as api_err:
+                logger.warning(f"[SEPAY API CHECK] Ngoại lệ khi truy vấn SePay API: {api_err}")
+
+        return {"status": order.payment_status, "reconciled": False}
+

@@ -308,6 +308,7 @@ export function ProductsPage() {
                           <img
                             src={prod.image_url}
                             alt={prod.canonical_name}
+                            onError={(e) => { (e.target as HTMLElement).style.display = 'none' }}
                             style={{ width: '38px', height: '38px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #e2e8f0', flexShrink: 0 }}
                           />
                         ) : (
@@ -552,6 +553,7 @@ export function ProductsPage() {
               <img
                 src={selectedProduct.image_url}
                 alt={selectedProduct.canonical_name}
+                onError={(e) => { (e.target as HTMLElement).style.display = 'none' }}
                 style={{ width: '100%', height: '200px', objectFit: 'cover', borderRadius: '12px', border: '1px solid #e2e8f0' }}
               />
             )}

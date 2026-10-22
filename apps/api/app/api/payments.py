@@ -789,6 +789,13 @@ def get_order_payment_status(
         except Exception:
             pass
 
+    if order.payment_method == "SEPAY" and order.payment_status == "PENDING":
+        try:
+            SepayService.reconcile_order_payment(db, order)
+            db.refresh(order)
+        except Exception as e:
+            logger.warning(f"[SEPAY STATUS RECONCILE] Lỗi khi đối soát đơn {clean_code}: {e}")
+
     return PaymentIntentService.get_order_payment_summary(
         db=db,
         order_code=clean_code,

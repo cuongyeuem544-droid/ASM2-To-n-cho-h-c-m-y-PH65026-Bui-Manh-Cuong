@@ -60,6 +60,8 @@ export default function SepayVietQrModal({
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const [qrImgError, setQrImgError] = useState(false);
+  const [qrReloadKey, setQrReloadKey] = useState(0);
 
   const bankName = propBankName || "Ngân hàng TMCP Quân Đội (MBBank)";
   const accountNumber = propAccountNumber || "";
@@ -302,13 +304,36 @@ export default function SepayVietQrModal({
             /* QR Box */
             <div className="text-center bg-slate-50 p-4 rounded-2xl border border-slate-200/80 relative">
               <div className="relative inline-block bg-white p-2.5 rounded-2xl shadow-md border border-slate-100 overflow-hidden">
-                <img
-                  src={vietQrUrl}
-                  alt="VietQR MBBank SePay"
-                  className={`w-52 h-52 sm:w-56 sm:h-56 object-contain mx-auto rounded-xl transition-all ${
-                    isExpired ? "opacity-20 blur-xs grayscale" : ""
-                  }`}
-                />
+                {qrImgError ? (
+                  <div className="w-52 h-52 sm:w-56 sm:h-56 flex flex-col items-center justify-center p-3 text-center bg-slate-100 rounded-xl text-slate-700">
+                    <AlertTriangle className="w-7 h-7 text-amber-500 mb-2" />
+                    <span className="text-xs font-bold text-slate-800">Không tải được ảnh VietQR</span>
+                    <span className="text-[10px] text-slate-500 mt-1 max-w-[170px] leading-relaxed">
+                      Bạn có thể chuyển khoản bằng thông tin số tài khoản bên dưới
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQrImgError(false);
+                        setQrReloadKey((k) => k + 1);
+                      }}
+                      className="mt-2.5 px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] flex items-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      <span>Thử tải lại ảnh QR</span>
+                    </button>
+                  </div>
+                ) : (
+                  <img
+                    key={qrReloadKey}
+                    src={vietQrUrl}
+                    alt="VietQR MBBank SePay"
+                    onError={() => setQrImgError(true)}
+                    className={`w-52 h-52 sm:w-56 sm:h-56 object-contain mx-auto rounded-xl transition-all ${
+                      isExpired ? "opacity-20 blur-xs grayscale" : ""
+                    }`}
+                  />
+                )}
 
                 {/* Expired Overlay */}
                 {isExpired && (
